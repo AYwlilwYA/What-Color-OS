@@ -30,11 +30,13 @@ internal fun sendSharingBroadcast(ctx: Context, intent: Intent) {
 /**
  * 点选桥：随 root 球存活拉起，500ms 轮询 pick.report；
  * 状态翻转起五目标扫描，tap 翻转起冻结，框表/EXIT 经 pick.cmd 回写球端。
+ * 空闲不常驻：轮询期间周期探活（RootBallLauncher.probeBall），球不活即整桥停掉。
  */
 object PickBridge {
 
     private const val TAG = "PickBridge"
     private const val POLL_MS = 500L
+    private const val PROBE_MS = 5000L
     private const val SCAN_WINDOW_MS = 1200L
     private const val FREEZE_WAIT_MS = 3000L
     private const val THROTTLE_MS = 5000L
@@ -66,10 +68,17 @@ object PickBridge {
 
     private val throttleAt = HashMap<String, Long>()
 
+    private var lastProbeAt = 0L
+
     private val pollTask = object : Runnable {
         override fun run() {
             if (!running) return
             poll()
+            val now = SystemClock.uptimeMillis()
+            if (now - lastProbeAt >= PROBE_MS) {
+                lastProbeAt = now
+                RootBallLauncher.probeBall()
+            }
             main.postDelayed(this, POLL_MS)
         }
     }
@@ -78,7 +87,7 @@ object PickBridge {
     fun ensureRunning() {
         main.post {
             if (running) return@post
-            val ctx = resolveContext()
+            val ctx = resolveAppContext()
             if (ctx == null) {
                 throttledLog("no-ctx", "start skipped: no application context")
                 return@post
@@ -133,13 +142,14 @@ object PickBridge {
             freezeWaitUntil = 0L
             registerResultReceiver(ctx)
             running = true
+            lastProbeAt = SystemClock.uptimeMillis()
             main.post(pollTask)
             Lg.i(TAG, "bridge started dir=${boxDir.absolutePath}")
         }
     }
 
     /** 球停时收桥（幂等）；顺手撤申报（state=off）。 */
-    fun shutdown() {
+    fun shutdown(reason: String = "stop") {
         main.post {
             if (!running) return@post
             running = false
@@ -147,7 +157,7 @@ object PickBridge {
             unregisterResultReceiver()
             runCatching { writeDeclare("off", null) }
                 .onFailure { Lg.w(TAG, "declare off write fail", it) }
-            Lg.i(TAG, "bridge stopped")
+            Lg.i(TAG, "bridge stopped reason=$reason")
         }
     }
 
@@ -258,7 +268,7 @@ object PickBridge {
             return
         }
         var sent = 0
-        for ((pkg, _) in GlobalGlassBall.TARGETS) {
+        for ((pkg, _) in BallProtocol.TARGETS) {
             try {
                 sendSharingBroadcast(ctx, Intent(ACTION_SCAN_REQUEST).setPackage(pkg).putExtra("pkg", pkg))
                 sent++
@@ -461,7 +471,7 @@ object PickBridge {
             override fun onReceive(context: Context, intent: Intent) {
                 try {
                     val sender = if (Build.VERSION.SDK_INT >= 34) getSentFromPackage() else null
-                    if (sender == null || sender !in GlobalGlassBall.TARGET_PKG_SET) {
+                    if (sender == null || sender !in BallProtocol.TARGET_PKG_SET) {
                         throttledLog("reject", "reject result action=${intent.action} sender=$sender")
                         return
                     }
@@ -503,19 +513,6 @@ object PickBridge {
 
     // ---------- 工具 ----------
 
-    private fun resolveContext(): Context? {
-        appContext?.let { return it }
-        return try {
-            val app = Class.forName("android.app.ActivityThread")
-                .getMethod("currentApplication")
-                .invoke(null) as? Context
-            app?.applicationContext
-        } catch (t: Throwable) {
-            Lg.w(TAG, "resolve context fail", t)
-            null
-        }
-    }
-
     private fun throttledLog(key: String, msg: String) {
         val now = SystemClock.uptimeMillis()
         val last = throttleAt[key] ?: 0L
@@ -523,4 +520,14 @@ object PickBridge {
         throttleAt[key] = now
         Lg.i(TAG, "$msg (key=$key)")
     }
+}
+
+/** 应用上下文（ActivityThread 反射兜底），点选链与球控制端共用一份；失败由调用方记日志。 */
+internal fun resolveAppContext(): Context? = try {
+    val app = Class.forName("android.app.ActivityThread")
+        .getMethod("currentApplication")
+        .invoke(null) as? Context
+    app?.applicationContext
+} catch (_: Throwable) {
+    null
 }

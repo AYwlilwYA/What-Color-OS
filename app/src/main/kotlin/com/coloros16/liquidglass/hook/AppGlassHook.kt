@@ -11,6 +11,7 @@ import com.coloros16.liquidglass.config.Prefs
 import com.coloros16.liquidglass.entry.XposedEntry
 import com.coloros16.liquidglass.glass.GlassRegistry
 import com.coloros16.liquidglass.log.Lg
+import com.coloros16.liquidglass.sf.SfGlassChannel
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedInterface.ExceptionMode
 import java.lang.reflect.Method
@@ -423,6 +424,12 @@ object AppGlassHook {
     private fun syncButtonGlass(view: View) {
         val state = buttonGlassStates[view] ?: return
         if (state.compileFailed) return
+        // 渲染模式=SF：五钮玻璃四腿全关——已挂的换回宿主原 effect，不再施加
+        if (SfGlassChannel.renderMode(api) == Prefs.RENDER_MODE_SF) {
+            if (state.applied) restoreButtonGlass(view, state)
+            logOnce("sf-gate:button-sync", "sf mode: button glass off (mode=sf entry=syncButtonGlass)")
+            return
+        }
         if (probeEnabled()) {
             if (state.applied) restoreButtonGlass(view, state)
             return
@@ -562,6 +569,15 @@ object AppGlassHook {
                     null
                 }
                 lastHostEffect[view] = orig
+                // 渲染模式=SF：A 族四腿全关——不登记/不挂玻璃/不换探针，放行宿主原调用；
+                // 已挂的由 preDraw 同步门（syncButtonGlass / syncPageGlass）还原
+                if (SfGlassChannel.renderMode(api) == Prefs.RENDER_MODE_SF) {
+                    logOnce(
+                        "sf-gate:a-family",
+                        "sf mode: A-family four-leg off (mode=sf entry=setBackgroundRenderEffect)",
+                    )
+                    return chain.proceed()
+                }
                 if (glassEnabled()) {
                     registerElement(view, view.javaClass.name, "A")
                     val state = buttonGlassStates[view]
@@ -618,6 +634,15 @@ object AppGlassHook {
     /** B 族拦截体：登记元素并确保边缘装饰层挂载（装饰随 App 玻璃开关启停，preDraw 同步）。 */
     private fun bFamilyIntercept(chain: XposedInterface.Chain): Any? {
         try {
+            // 渲染模式=SF：B 族四腿全关——不登记/不挂装饰层，放行宿主原调用；
+            // 已挂装饰由 preDraw 同步门（syncBDecor）摘除
+            if (SfGlassChannel.renderMode(api) == Prefs.RENDER_MODE_SF) {
+                logOnce(
+                    "sf-gate:b-family",
+                    "sf mode: B-family four-leg off (mode=sf entry=View.setBackground)",
+                )
+                return chain.proceed()
+            }
             val view = chain.getThisObject() as? View
             // 背景变更 = 点选引擎扫描触发信号（引擎自查总闸与扫描节流）
             if (view != null) PageGlassEngine.onHostBackgroundSet(view)
@@ -667,6 +692,18 @@ object AppGlassHook {
     /** preDraw 同步装饰层：开关开 → 补挂 overlay 并跟随尺寸；开关关 → 摘除。 */
     private fun syncBDecor(view: View) {
         val state = bDecorStates[view] ?: return
+        // 渲染模式=SF：B 族装饰层四腿全关——已挂的摘除 overlay，不再补挂
+        if (SfGlassChannel.renderMode(api) == Prefs.RENDER_MODE_SF) {
+            if (state.overlayAdded) {
+                try {
+                    view.overlay.remove(state.drawable)
+                } catch (_: Throwable) {
+                }
+                state.overlayAdded = false
+            }
+            logOnce("sf-gate:decor-sync", "sf mode: B decor off (mode=sf entry=syncBDecor)")
+            return
+        }
         if (!glassEnabled() && !PageGlassEngine.pageGlassEnabled()) {
             if (state.overlayAdded) {
                 try {

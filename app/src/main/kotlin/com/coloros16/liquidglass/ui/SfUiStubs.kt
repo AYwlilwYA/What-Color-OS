@@ -127,16 +127,18 @@ object SfGlassTest {
         val l = (dm.widthPixels - w) / 2f
         val t = dm.heightPixels * 0.35f
         val corner = minOf(w, h) / 4f
+        // origin 在主线程取好，后台线程只做直调
+        val decor = host.window.decorView
+        val loc = intArrayOf(0, 0)
+        decor.getLocationOnScreen(loc)
+        val originX = loc[0].toFloat()
+        val originY = loc[1].toFloat()
         SfGlassChannel.postIo {
-            val msg = if (!SfGlassChannel.probeConsumerSync()) {
-                "未检测到 SF 消费端（lgdeclare 未运行）——未安装模块或不支持"
+            val r = SfGlassChannel.sendFrameSync(decor, l, t, w, h, corner, originX, originY)
+            val msg = if (r.ok) {
+                "测试框已直调下发（${w.toInt()}x${h.toInt()} 居中），观察该区域是否出现玻璃效果；无玻璃=模块/引擎侧未就绪"
             } else {
-                val r = SfGlassChannel.sendDeclareSync("on", l, t, w, h, corner, note="test-frame")
-                if (r.ok) {
-                    "测试框已下发（${w.toInt()}x${h.toInt()} 居中），观察该区域是否出现玻璃效果"
-                } else {
-                    "下发失败：${r.err}"
-                }
+                "下发失败：${r.err}"
             }
             Lg.i(TAG, "test frame: $msg")
             main.post {

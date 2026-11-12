@@ -38,7 +38,7 @@ object Prefs {
     const val DEFAULT_GLASS_ENABLE = true
 
     // ---------- 渲染模式（应用级 / 系统级） ----------
-    /** 渲染模式键：`"app"`=应用级（四腿）/ `"sf"`=系统级（SF 通道），默认 `"app"`。 */
+    /** 渲染模式键：`"app"`=应用级（四腿）/ `"sf"`=系统级（SF 独占：四腿全关，失败=无玻璃不回退），默认 `"app"`。 */
     const val KEY_RENDER_MODE = "render_mode"
     /** 渲染模式取值：应用级（四腿）。 */
     const val RENDER_MODE_APP = "app"
@@ -496,6 +496,24 @@ object Prefs {
     const val KEY_NOTIFICATION_POPUP_GLASS = "notification_popup_glass_enable"
     /** 通知长按菜单玻璃默认值（false = 不干预，保持系统原样） */
     const val DEFAULT_NOTIFICATION_POPUP_GLASS = false
+
+    // ---------- 通知删除粒子消散 ----------
+    /** 删除通知时粒子飘散总开关：滑动删除与一键清除时把通知卡化为 GPU 粒子飘散。
+     *  默认 **false**；关 = 系统原样删除。仅 SystemUI 进程、Android 13+ 生效。
+     *  改动即时生效（hook 端 TTL 500ms 重读，与 [KEY_MASTER] 合判）。 */
+    const val KEY_NOTIFICATION_DISSOLVE_ENABLE = "notification_dissolve_enabled"
+    /** 粒子飘散开关默认值（false = 默认关闭） */
+    const val DEFAULT_NOTIFICATION_DISSOLVE_ENABLE = false
+
+    /** 粒子飘散速度百分比（100 = 1.00×，越高越快），clamp [NOTIFICATION_DISSOLVE_SPEED_MIN]~
+     *  [NOTIFICATION_DISSOLVE_SPEED_MAX]，存量越界值读取时夹紧。改动即时生效（TTL 500ms 重读）。 */
+    const val KEY_NOTIFICATION_DISSOLVE_SPEED = "notification_dissolve_speed_percent"
+    /** 粒子飘散速度默认值（100 = 1.00×） */
+    const val DEFAULT_NOTIFICATION_DISSOLVE_SPEED = 100
+    /** 粒子飘散速度下限（35 = 0.35×，设置页滑杆 offset） */
+    const val NOTIFICATION_DISSOLVE_SPEED_MIN = 35
+    /** 粒子飘散速度上限（300 = 3×，设置页滑杆 max = 上限 − 下限） */
+    const val NOTIFICATION_DISSOLVE_SPEED_MAX = 300
 
     // ---------- 第三方 App 玻璃化（相册/计算器/智能侧边栏） ----------
     /** 相册玻璃化：拦截 App 内的视图背景模糊（RenderEffect / 窗口模糊 drawable）改画液态玻璃。

@@ -1,6 +1,7 @@
 package com.coloros16.liquidglass.sf
 
 import android.os.SystemClock
+import android.view.View
 import com.coloros16.liquidglass.config.Prefs
 import com.coloros16.liquidglass.log.Lg
 import io.github.libxposed.api.XposedInterface
@@ -8,20 +9,17 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * SF 玻璃通道客户端：渲染模式读取、消费端探测、declare.json 几何下发（spec/150）。
- * 回退语义：模式非 sf / 探测不过当帧回现役四腿；下发失败下帧起回四腿（负缓存 + 节流日志）。
+ * SF 玻璃通道客户端：渲染模式读取、几何直调下发（[SfBlurCall] 进程内直调模糊通道）。
+ * 互斥语义：模式 sf = SF 独占——绘制点认领后本帧交 SF、四腿全关；认领/下发失败 =
+ * 无模块玻璃（系统原厂绘制）+ 节流日志，绝不回退四腿。模式 app = 现役四腿，本通道零参与。
  */
 object SfGlassChannel {
 
     private const val TAG = "SfGlassChannel"
-    private const val BOX_PATH = "/data/local/tmp/lgbox_sf/declare.json"
     private const val MODE_TTL_MS = 500L
-    private const val PROBE_OK_TTL_MS = 1000L
-    private const val PROBE_FAIL_TTL_MS = 3000L
     private const val OFFER_MIN_INTERVAL_MS = 250L
     private const val SESSION_IDLE_OFF_MS = 5000L
     private const val WATCHDOG_TICK_MS = 2000L
@@ -32,22 +30,23 @@ object SfGlassChannel {
         val summary: String get() = out.trim().take(400).ifBlank { "(无输出)" }
     }
 
-    private class Geom(val id: Int, val l: Float, val t: Float, val w: Float, val h: Float, val corner: Float)
+    private class Geom(
+        val id: Int,
+        val l: Float,
+        val t: Float,
+        val w: Float,
+        val h: Float,
+        val corner: Float,
+        val host: View?,
+        val originX: Float,
+        val originY: Float,
+    )
 
     @Volatile
     private var modeCache: String = Prefs.DEFAULT_RENDER_MODE
 
     @Volatile
     private var modeCacheAtMs = 0L
-
-    @Volatile
-    private var consumerAlive = false
-
-    @Volatile
-    private var probeAtMs = 0L
-
-    @Volatile
-    private var probeRunning = false
 
     @Volatile
     private var lastOfferKey = ""
@@ -63,7 +62,12 @@ object SfGlassChannel {
 
     private val pendingOffer = AtomicReference<Geom?>(null)
     private val offerScheduled = AtomicBoolean(false)
-    private val seqBase = AtomicLong(0L)
+
+    @Volatile
+    private var apiRef: XposedInterface? = null
+
+    @Volatile
+    private var lastHostSc: Any? = null
 
     private val io = Executors.newSingleThreadExecutor { r ->
         Thread(r, "sf-glass-io").apply { isDaemon = true }
@@ -88,6 +92,7 @@ object SfGlassChannel {
      */
     fun renderMode(api: XposedInterface?): String {
         if (api == null) return Prefs.DEFAULT_RENDER_MODE
+        apiRef = api
         val now = SystemClock.uptimeMillis()
         if (now - modeCacheAtMs < MODE_TTL_MS) return modeCache
         modeCacheAtMs = now
@@ -123,11 +128,11 @@ object SfGlassChannel {
             // 复检：off 在途期间若有新认领则撤回本次 off（新认领的 on 由其 flush 发出）
             if (sessionOn) return@execute
             lastOfferKey = ""
-            val r = writeDeclare("off", 0f, 0f, 0f, 0f, 0f, "session-off")
-            if (r.ok) {
+            val err = retract()
+            if (err == null) {
                 Lg.i(TAG, "lg-sf-session-off reason=$reason")
             } else {
-                throttled("lg-sf-session-off-fail", "撤申报失败 reason=$reason: ${r.err}")
+                throttled("lg-sf-session-off-fail", "撤层失败 reason=$reason: $err")
             }
         }
     }
@@ -140,16 +145,16 @@ object SfGlassChannel {
             if (now - lastClaimAtMs < SESSION_IDLE_OFF_MS) return
             sessionOn = false
             pendingOffer.set(null)
-            // 并入 io 单线程执行，防与下发并发写同一 declare 临时文件
+            // 并入 io 单线程执行，防与下发并发操作同一宿主 SC
             io.execute {
                 // 复检：排队期间有新认领则撤回本次 idle-off
                 if (sessionOn) return@execute
                 lastOfferKey = ""
-                val r = writeDeclare("off", 0f, 0f, 0f, 0f, 0f, "idle-off")
+                val err = retract()
                 Lg.i(
                     TAG,
-                    "lg-sf-idle-off 无认领满 ${SESSION_IDLE_OFF_MS}ms 自动撤申报" +
-                        (if (r.ok) "" else "（失败:${r.err}）"),
+                    "lg-sf-idle-off 无认领满 ${SESSION_IDLE_OFF_MS}ms 自动撤层" +
+                        (if (err == null) "" else "（失败:$err）"),
                 )
             }
         } catch (t: Throwable) {
@@ -159,57 +164,57 @@ object SfGlassChannel {
 
     // ---------- 绘制点认领 ----------
 
-    /** 把任务投进通道 io 单线程：declare.json 的读写（探测/下发/撤层/测试框）全走这里串行化。 */
+    /** 把任务投进通道 io 单线程：直调下发/撤层/测试框全走这里串行化。 */
     internal fun postIo(task: () -> Unit) {
         io.execute { task() }
     }
 
     /**
-     * 绘制点认领：消费端在 → 下发本元素几何并返回 true（绘制点跳过四腿、交 SF 渲染）；
-     * 探测不过 → 返回 false（现役四腿原样），守卫各配节流日志。
+     * 绘制点认领：sf 档无条件认领——本帧交 SF、四腿不画，恒返回 true（消费端在不在不影响本决策；
+     * 下发失败由通道节流日志记录，元素保持系统原厂绘制）。
      * 调用前须已判 [renderMode] == [Prefs.RENDER_MODE_SF]（app 档零开销零变化）。
      */
-    fun claimForDraw(id: Int, left: Float, top: Float, width: Float, height: Float, corner: Float): Boolean {
-        if (!consumerUp()) {
-            throttled("lg-sf-down", "消费端未在，回退现役四腿 id=$id")
-            return false
-        }
+    fun claimForDraw(
+        id: Int,
+        left: Float,
+        top: Float,
+        width: Float,
+        height: Float,
+        corner: Float,
+        host: View? = null,
+    ): Boolean {
         lastClaimAtMs = SystemClock.uptimeMillis()
         sessionOn = true
-        offer(id, left, top, width, height, corner)
+        var originX = 0f
+        var originY = 0f
+        if (host != null) {
+            try {
+                val loc = intArrayOf(0, 0)
+                host.rootView.getLocationOnScreen(loc)
+                originX = loc[0].toFloat()
+                originY = loc[1].toFloat()
+            } catch (t: Throwable) {
+                throttled("lg-sf-origin", "window origin fail: ${t.javaClass.simpleName}: ${t.message}")
+            }
+        }
+        offer(id, left, top, width, height, corner, host, originX, originY)
         return true
     }
 
-    // ---------- 消费端探测（试调用语义：热路径只读缓存，miss 先四腿 + 异步填缓存） ----------
+    // ---------- 直调下发（全局 250ms 节流 + 最新几何单槽） ----------
 
-    fun consumerUp(): Boolean {
-        val now = SystemClock.uptimeMillis()
-        if (probeAtMs != 0L) {
-            val ttl = if (consumerAlive) PROBE_OK_TTL_MS else PROBE_FAIL_TTL_MS
-            if (now - probeAtMs < ttl) return consumerAlive
-        }
-        if (probeRunning) return consumerAlive
-        probeRunning = true
-        io.execute {
-            val up = probeConsumerSync()
-            consumerAlive = up
-            probeAtMs = SystemClock.uptimeMillis()
-            probeRunning = false
-            throttled("lg-sf-probe", "alive=$up")
-        }
-        return false
-    }
-
-    /** 同步探测消费端（lgdeclare poll 进程在场）；阻塞，只许后台线程调。 */
-    fun probeConsumerSync(): Boolean {
-        val r = runSu("pidof lgdeclare")
-        return r.ok && r.out.any { it.isDigit() }
-    }
-
-    // ---------- declare.json 下发（全局 250ms 节流 + 最新几何单槽） ----------
-
-    private fun offer(id: Int, left: Float, top: Float, width: Float, height: Float, corner: Float) {
-        pendingOffer.set(Geom(id, left, top, width, height, corner))
+    private fun offer(
+        id: Int,
+        left: Float,
+        top: Float,
+        width: Float,
+        height: Float,
+        corner: Float,
+        host: View?,
+        originX: Float,
+        originY: Float,
+    ) {
+        pendingOffer.set(Geom(id, left, top, width, height, corner, host, originX, originY))
         if (offerScheduled.compareAndSet(false, true)) {
             io.execute { flushOffers() }
         }
@@ -230,17 +235,15 @@ object SfGlassChannel {
                     }
                 }
                 lastOfferAttemptAtMs = SystemClock.uptimeMillis()
-                val r = writeDeclare("on", g.l, g.t, g.w, g.h, g.corner, "element id=${g.id}")
-                if (r.ok) {
+                val err = applyGeom(g)
+                if (err == null) {
                     lastOfferKey = key
                     throttled(
-                        "lg-sf-declare",
+                        "lg-sf-blur",
                         "已下发 id=${g.id} geom=(${g.l.toInt()},${g.t.toInt()},${g.w.toInt()}x${g.h.toInt()}) corner=${g.corner.toInt()}",
                     )
                 } else {
-                    consumerAlive = false
-                    probeAtMs = 0L
-                    throttled("lg-sf-declare-fail", "下发失败 id=${g.id}: ${r.err}（下帧起回现役四腿）")
+                    throttled("lg-sf-blur-fail", "下发失败 id=${g.id}: $err（无模块玻璃，保持系统原厂绘制）")
                 }
             }
         } finally {
@@ -252,56 +255,75 @@ object SfGlassChannel {
     }
 
     private fun keyOf(g: Geom): String =
-        "${g.id}:${g.l.toInt()},${g.t.toInt()},${g.w.toInt()},${g.h.toInt()},${g.corner.toInt()}"
+        "${g.id}:${g.l.toInt()},${g.t.toInt()},${g.w.toInt()},${g.h.toInt()},${g.corner.toInt()}" +
+            ":${g.originX.toInt()},${g.originY.toInt()}"
 
-    /** 同步下发一帧 declare.json（阻塞，只许后台线程调）；seq 取时间戳保跨进程单调。 */
-    internal fun sendDeclareSync(
-        state: String,
+    /** 同步直调一帧模糊区域（阻塞，只许后台线程调）；origin 须在主线程取好传入。 */
+    internal fun sendFrameSync(
+        host: View,
         left: Float,
         top: Float,
         width: Float,
         height: Float,
         corner: Float,
-        note: String = "",
-    ): SuResult = writeDeclare(state, left, top, width, height, corner, note)
-
-    private fun writeDeclare(
-        state: String,
-        left: Float,
-        top: Float,
-        width: Float,
-        height: Float,
-        corner: Float,
-        note: String = "",
+        originX: Float,
+        originY: Float,
     ): SuResult {
-        val seq = seqBase.updateAndGet { prev -> maxOf(prev + 1, System.currentTimeMillis()) }
-        val json = buildString {
-            append("{\"seq\":").append(seq)
-            append(",\"state\":\"").append(state).append('"')
-            if (state == "on") {
-                append(",\"x\":").append(left.toInt())
-                    .append(",\"y\":").append(top.toInt())
-                    .append(",\"w\":").append(width.toInt())
-                    .append(",\"h\":").append(height.toInt())
-                    .append(",\"corner\":").append(corner.toInt())
-                    .append(",\"shape\":0")
-                    .append(",\"params\":{}")
+        val err = applyRegions(host, left, top, width, height, corner, originX, originY)
+        return if (err == null) SuResult(true, "ok", null) else SuResult(false, "", err)
+    }
+
+    /** 直调下发几何到宿主窗口 SC；返回 null=成功，否则失败原因。 */
+    private fun applyGeom(g: Geom): String? {
+        val host = g.host ?: return "host view 不可用"
+        return applyRegions(host, g.l, g.t, g.w, g.h, g.corner, g.originX, g.originY)
+    }
+
+    private fun applyRegions(
+        host: View,
+        left: Float,
+        top: Float,
+        width: Float,
+        height: Float,
+        corner: Float,
+        originX: Float,
+        originY: Float,
+    ): String? {
+        val sc = SfBlurCall.hostScOf(host) ?: return "host SurfaceControl 解析失败"
+        if (sc !== lastHostSc) {
+            // 换窗：先把旧窗口的模糊清掉，防残留
+            lastHostSc?.let { old ->
+                val clear = SfBlurCall.applyRegions(old, emptyArray(), 0)
+                if (clear != null) throttled("lg-sf-clear-old", "旧窗口清除失败: $clear")
             }
-            append('}')
+            lastHostSc = sc
         }
-        // 脚本经 stdin 喂 sh（引号由管道承载，不经任何命令行展开）；JSON 只含数字与双引号，单引号包裹安全
-        val script = """
-            mkdir -p /data/local/tmp/lgbox_sf
-            printf '%s' '$json' > $BOX_PATH.tmp
-            mv $BOX_PATH.tmp $BOX_PATH
-        """.trimIndent()
-        val r = runSu(script)
-        if (r.ok) {
-            Lg.i(TAG, "lg-sf-declare state=$state seq=$seq${if (note.isNotEmpty()) " $note" else ""}")
-        } else {
-            Lg.w(TAG, "lg-sf-declare fail state=$state seq=$seq: ${r.err}")
+        val r = blurRadiusPx()
+        val region = SfBlurCall.regionOf(
+            r.toFloat(), 1f,
+            left - originX, top - originY, left - originX + width, top - originY + height,
+            corner,
+        )
+        return SfBlurCall.applyRegions(sc, arrayOf(region), r)
+    }
+
+    /** 撤层：清区域 + 窗口半径归零；无宿主 SC 时视为无事可做。 */
+    private fun retract(): String? {
+        val sc = lastHostSc ?: return null
+        val err = SfBlurCall.applyRegions(sc, emptyArray(), 0)
+        if (err == null) lastHostSc = null
+        return err
+    }
+
+    private fun blurRadiusPx(): Int {
+        val api = apiRef ?: return 13
+        return try {
+            Prefs.read(api)
+                .getFloat(Prefs.KEY_BLUR_RADIUS, Prefs.DEFAULT_BLUR_RADIUS).toInt()
+                .coerceAtLeast(1)
+        } catch (_: Throwable) {
+            13
         }
-        return r
     }
 
     // ---------- su 执行底座 ----------

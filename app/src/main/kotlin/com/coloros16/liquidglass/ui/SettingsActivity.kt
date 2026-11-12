@@ -20,7 +20,6 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
-import android.provider.Settings
 import android.util.AttributeSet
 import android.view.View
 import android.view.ViewOutlineProvider
@@ -46,7 +45,6 @@ import androidx.core.view.WindowInsetsCompat
 import com.coloros16.liquidglass.App
 import com.coloros16.liquidglass.R
 import com.coloros16.liquidglass.config.Prefs
-import com.coloros16.liquidglass.debug.GlobalGlassBall
 import com.coloros16.liquidglass.debug.RootBallLauncher
 import com.coloros16.liquidglass.glass.GlassRegistry
 import com.coloros16.liquidglass.liquidglass.LiquidGlassShader
@@ -1441,38 +1439,10 @@ class SettingsActivity : AppCompatActivity() {
         bindGlassSwitch(view, R.id.switchPopupMenuGlass, Prefs.KEY_POPUP_MENU_GLASS_ENABLE, Prefs.DEFAULT_POPUP_MENU_GLASS_ENABLE)
     }
 
-    /** 悬浮球权限行状态刷新（授权返回后 onResume 再刷一次）。 */
-    private fun refreshGlassBallPermissionRow(view: View) {
-        val status = view.findViewById<TextView>(R.id.textGlassBallPermissionStatus) ?: return
-        status.text = if (Settings.canDrawOverlays(this)) {
-            getString(R.string.settings_glass_ball_permission_granted)
-        } else {
-            getString(R.string.settings_glass_ball_permission_missing)
-        }
-    }
-
-    private fun bindGlassBallPermissionRow(view: View) {
-        refreshGlassBallPermissionRow(view)
-        view.findViewById<View>(R.id.rowGlassBallPermission).setOnClickListener {
-            if (!Settings.canDrawOverlays(this)) {
-                try {
-                    startActivity(
-                        Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
-                    )
-                } catch (t: Throwable) {
-                    Lg.w(TAG, "open overlay settings failed", t)
-                }
-            }
-        }
-    }
-
     override fun onResume() {
         super.onResume()
-        // 无权限时服务已自停：授权返回 / 页面回前台都要有人重拉，否则球永远起不来
-        GlobalGlassBall.startFrom(this)
         if (currentCategory == "log") {
             contentFrame.getChildAt(0)?.let { view ->
-                refreshGlassBallPermissionRow(view)
                 refreshRootBallStatus(view)
             }
         }
@@ -1671,6 +1641,19 @@ class SettingsActivity : AppCompatActivity() {
 
     /** 倾斜与透视二级页：开关 + 倾斜强度 + 透视扭曲程度。改动需重启桌面进程生效。 */
     private fun bindTilt(view: View) {
+        bindGlassSwitch(view, R.id.switchNotificationDissolve, Prefs.KEY_NOTIFICATION_DISSOLVE_ENABLE, Prefs.DEFAULT_NOTIFICATION_DISSOLVE_ENABLE)
+        bindIntSeekBarStep(
+            seek = view.findViewById(R.id.seekNotificationDissolveSpeed),
+            valueText = view.findViewById(R.id.notificationDissolveSpeedValue),
+            key = Prefs.KEY_NOTIFICATION_DISSOLVE_SPEED, default = Prefs.DEFAULT_NOTIFICATION_DISSOLVE_SPEED,
+            max = Prefs.NOTIFICATION_DISSOLVE_SPEED_MAX-Prefs.NOTIFICATION_DISSOLVE_SPEED_MIN, step = 1,
+            offset = Prefs.NOTIFICATION_DISSOLVE_SPEED_MIN,
+            format = { v -> getString(R.string.settings_notification_dissolve_speed_value, v/100f) },
+        )
+        if (Build.VERSION.SDK_INT < 33) {
+            view.findViewById<Switch>(R.id.switchNotificationDissolve).isEnabled = false
+            view.findViewById<SeekBar>(R.id.seekNotificationDissolveSpeed).isEnabled = false
+        }
         val switch = view.findViewById<Switch>(R.id.switchAnimTilt)
         val listener = CompoundButton.OnCheckedChangeListener { _, checked ->
             writePrefBoolean(Prefs.KEY_ANIM_TILT_ENABLED, checked)
@@ -1734,8 +1717,7 @@ class SettingsActivity : AppCompatActivity() {
         }
         switchEngineFullLog.setOnCheckedChangeListener(engineFullLogListener)
         refreshBooleanSwitch(switchEngineFullLog, engineFullLogListener, Prefs.KEY_ENGINE_FULL_LOG, Prefs.DEFAULT_ENGINE_FULL_LOG)
-        // 悬浮球小节：权限行 + 点选元素玻璃总开关
-        bindGlassBallPermissionRow(view)
+        // 点选元素玻璃总闸
         bindGlassSwitch(view, R.id.switchElementGlass, Prefs.KEY_ELEMENT_GLASS_ENABLE, Prefs.DEFAULT_ELEMENT_GLASS_ENABLE)
         // 裁切旁路三开关（默认关；写 remote Prefs + 回显，hook 端 500ms TTL 重读）
         bindGlassSwitch(view, R.id.switchClipBypassMask, Prefs.KEY_CLIP_BYPASS_MASK, Prefs.DEFAULT_CLIP_BYPASS)

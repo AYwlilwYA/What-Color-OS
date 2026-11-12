@@ -29,6 +29,7 @@ import com.coloros16.liquidglass.liquidglass.LiquidGlassShader
 import com.coloros16.liquidglass.liquidglass.LowResTier
 import com.coloros16.liquidglass.liquidglass.ShaderInstancePool
 import com.coloros16.liquidglass.log.Lg
+import com.coloros16.liquidglass.sf.SfGlassChannel
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedInterface.ExceptionMode
 import java.lang.ref.WeakReference
@@ -2727,6 +2728,13 @@ object LauncherHook {
      *  返回 true = 已画玻璃（拦截侧跳过原平色）；false = 任一门控/快照失败，回退原平色（零黑屏）。
      *  每帧全量重绑 uniform（单个小按钮，成本可忽略）。 */
     private fun drawPressGlassOnCanvas(canvas: Canvas, btn: View, handlerRadius: Float, slot: PressGlassSlot): Boolean {
+        // 渲染模式=SF：按压钮玻璃四腿全关（桌面无 SF 认领点 = 无模块玻璃）
+        if (SfGlassChannel.renderMode(api) == Prefs.RENDER_MODE_SF) {
+            logOncePerSecond("sf-gate:press") {
+                Lg.i(TAG, "launcher sf gate: mode=sf entry=drawPressGlassOnCanvas four-leg off")
+            }
+            return false
+        }
         if (isPowerSaveGlassOff()) return false
         if (!slot.enabled()) return false
         if (!Prefs.glassEnabled(api)) return false
@@ -2917,6 +2925,13 @@ object LauncherHook {
     /** 在底衬 dispatchDraw 的 canvas 上画全屏液态玻璃（坐标系 = View 局部，全屏无圆角）。
      *  返回 true = 已画玻璃（拦截侧再置空两层字段 proceed 只画子 View）；false = 回退原绘制。 */
     private fun drawPopupGlassOnCanvas(canvas: Canvas, popup: View): Boolean {
+        // 渲染模式=SF：长按菜单底衬玻璃四腿全关（桌面无 SF 认领点 = 无模块玻璃）
+        if (SfGlassChannel.renderMode(api) == Prefs.RENDER_MODE_SF) {
+            logOncePerSecond("sf-gate:popup") {
+                Lg.i(TAG, "launcher sf gate: mode=sf entry=drawPopupGlassOnCanvas four-leg off")
+            }
+            return false
+        }
         if (isPowerSaveGlassOff()) return false
         if (!popupMenuGlassEnabled()) return false
         if (!Prefs.glassEnabled(api)) return false
@@ -3036,6 +3051,21 @@ object LauncherHook {
                 Lg.w(TAG, "glass switch off: restore launcher shader failed", t)
             }
             logRenderMode(id, "BLUR", "glass switch off")
+            return false
+        }
+        // 渲染模式=SF：四腿全关——桌面无 SF 认领点（= 无模块玻璃），还原模块 shader 后交系统原绘制
+        if (SfGlassChannel.renderMode(api) == Prefs.RENDER_MODE_SF) {
+            try {
+                val p = getBlurShaderPaintOf(drawable)
+                val cur = p?.shader
+                if (cur is RuntimeShader && shaderOwnerSet.contains(cur)) {
+                    p.shader = null
+                    p.colorFilter = null
+                }
+            } catch (t: Throwable) {
+                Lg.w(TAG, "sf mode: restore launcher shader failed", t)
+            }
+            logRenderMode(id, "BLUR", "sf mode: four-leg off")
             return false
         }
         val paint = try {

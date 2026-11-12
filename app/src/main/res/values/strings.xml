@@ -310,9 +310,6 @@
     <string name="settings_clip_bypass_shape_desc">跳过圆角形状对玻璃的裁剪，用于排查圆角被切、高光缺失问题；平时保持关闭。</string>
     <string name="settings_clip_bypass_canvas">旁路画布裁切</string>
     <string name="settings_clip_bypass_canvas_desc">跳过宿主画布的局部裁剪区域，用于排查玻璃被宿主窗口切掉的问题；平时保持关闭。</string>
-    <string name="settings_glass_ball_permission">悬浮球权限</string>
-    <string name="settings_glass_ball_permission_granted">已授权。打开「点选元素玻璃」开关后，悬浮球会出现在屏幕最上层。</string>
-    <string name="settings_glass_ball_permission_missing">未授权。点击这里去系统设置开启，悬浮球需要显示在其他应用上层。</string>
     <string name="settings_gallery_shader_probe">相册采样范围探针（实验）</string>
     <string name="settings_gallery_shader_probe_desc">临时替换相册背景模糊做诊断：元素边缘出现红色环＝模糊取到了元素外面的背景（可以做真折射），绿色环＝只取到元素内的内容。开启后相册背景会变清晰并带一圈色环，关掉即恢复原模糊。</string>
     <string name="settings_clear_all_btn_glass">最近任务清除按钮</string>
@@ -423,4 +420,8 @@
     <string name="update_dialog_open_failed">无法打开链接，请手动访问 GitHub Releases 页下载</string>
     <string name="update_dialog_notes">更新简介：\n%1$s</string>
 
+    <string name="settings_notification_dissolve">删除通知时粒子飘散</string>
+    <string name="settings_notification_dissolve_desc">默认关闭。滑动删除与清空通知时，将卡片化为细颗粒飘散；不影响解锁或面板收起。需要 Android 13+ 硬件加速，省电模式和关闭系统动画时自动跳过。</string>
+    <string name="settings_notification_dissolve_speed">飘散速度</string>
+    <string name="settings_notification_dissolve_speed_value">%1$.2f×（越高越快）</string>
 </resources>

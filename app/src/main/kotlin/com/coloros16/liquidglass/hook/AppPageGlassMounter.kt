@@ -21,6 +21,7 @@ import com.coloros16.liquidglass.config.Prefs
 import com.coloros16.liquidglass.entry.XposedEntry
 import com.coloros16.liquidglass.hook.spec.EngineLog
 import com.coloros16.liquidglass.log.Lg
+import com.coloros16.liquidglass.sf.SfGlassChannel
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedInterface.ExceptionMode
 import java.lang.ref.WeakReference
@@ -517,6 +518,12 @@ object PageGlassEngine {
                 "guard:compile-stopped:${view.javaClass.name}",
                 "preDraw skip: compile failed view=${view.javaClass.name}",
             )
+            return
+        }
+        // 渲染模式=SF：整页玻璃四腿全关——已挂的还原，不再施加/热更
+        if (SfGlassChannel.renderMode(api) == Prefs.RENDER_MODE_SF) {
+            if (state.applied) restorePageGlass(view, state)
+            logOnce("sf-gate:page", "sf mode: page glass off (mode=sf entry=syncPageGlass)")
             return
         }
         val entry = GlassElementRegistry.matchAnchor(view)

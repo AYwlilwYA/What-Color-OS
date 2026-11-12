@@ -2610,6 +2610,7 @@ object BlurDrawHook {
     private val lastLoggedCornerRadius = ConcurrentHashMap<Int, Float>()
 
     fun install(api: XposedInterface, classLoader: ClassLoader) {
+        ParticleDissolveHook.install(api, classLoader)
         this.api = api
         hostClassLoader = classLoader
         // 引擎全量日志门控读取器（500ms TTL 热切换）
@@ -9136,6 +9137,23 @@ object BlurDrawHook {
             logThrottled("seedling-nomap", Log.WARN, 500L) { "seedling-card: ABORT no region map id=$id" }
             return
         }
+        val cornerRadius = GlassRegistry.glassCornerBaseFor(id, w.toFloat(), h.toFloat())
+            ?: entry.cornerRadius.takeIf { it > 0f }
+            ?: (Math.min(w, h).toFloat() * seedlingCardCornerRatio)
+        // 渲染模式=SF：四腿全关——有 region 即认领交 SF（认领恒 true）+ 节流日志 + 停画；
+        // 无 region 已在上方早退（= 无模块玻璃 + 节流日志）。SF 自采样不依赖模块抓屏源，
+        // 故认领先于渲染源解析，渲染源 miss 不再挡认领
+        if (SfGlassChannel.renderMode(api) == Prefs.RENDER_MODE_SF) {
+            SfGlassChannel.claimForDraw(
+                id,
+                screenRegion.left, screenRegion.top,
+                screenRegion.width(), screenRegion.height(),
+                cornerRadius,
+                host = host,
+            )
+            logThrottled("seedling-sf-skip", Log.INFO) { "seedling-card: sf mode hand over id=$id" }
+            return
+        }
         val renderSource = resolveRenderSource(id, screenRegion) ?: run {
             // key 带 id：不同元素各自节流窗，防高频元素（more-btn）吞掉滑条自己的 ABORT 记录
             logThrottled("seedling-nosrc-$id", Log.WARN, 500L) {
@@ -9146,21 +9164,6 @@ object BlurDrawHook {
         val srcRect = renderSource.srcRect
         val source = renderSource.source
         val viewport = RectF(0f, 0f, w.toFloat(), h.toFloat())
-        val cornerRadius = GlassRegistry.glassCornerBaseFor(id, w.toFloat(), h.toFloat())
-            ?: entry.cornerRadius.takeIf { it > 0f }
-            ?: (Math.min(w, h).toFloat() * seedlingCardCornerRatio)
-        // 渲染模式=SF：卡片交 SF 下发链，模块本帧停画（消费端不在自动回现役四腿）
-        if (SfGlassChannel.renderMode(api) == Prefs.RENDER_MODE_SF &&
-            SfGlassChannel.claimForDraw(
-                id,
-                screenRegion.left, screenRegion.top,
-                screenRegion.width(), screenRegion.height(),
-                cornerRadius,
-            )
-        ) {
-            logThrottled("seedling-sf-skip", Log.INFO) { "seedling-card: hand over to SF id=$id" }
-            return
-        }
         var params = buildParams(w.toFloat(), h.toFloat(), cornerRadius, entry.cornerIsConic, entry.cornerWeight, elementId = id)
         // 音量元素（hostViewName="volume-*"：音量条/···按钮）弱化折射与色散：小面积元素强折射会把
         // 快照内容放大成扭曲倒影（验收反馈的黑渐变/棕色带/红色倒影），预设未接管该键时才衰减
@@ -12294,27 +12297,33 @@ object BlurDrawHook {
             return false
         }
 
-        // 渲染模式=SF：本元素交 SF 下发链（屏幕坐标 region；无映射不认领回现役四腿），切走前还原模块 shader
+        // 渲染模式=SF：四腿全关——有 region 认领交 SF（认领恒 true），无 region/尺寸 0 =
+        // 无模块玻璃 + 节流日志；两条路都在四腿链之前 return，物理上不给四腿机会
         if (SfGlassChannel.renderMode(api) == Prefs.RENDER_MODE_SF) {
             val sfEntry = lookupScreenRegion(id, bounds)
-            if (sfEntry != null) {
-                val sfRegion = sfEntry.region
-                if (sfRegion.width() > 0f && sfRegion.height() > 0f) {
-                    val sfShort = minOf(sfRegion.width(), sfRegion.height()) / 2f
-                    val sfCorner = sfEntry.cornerRadius.coerceIn(0f, sfShort)
-                    val claimed = SfGlassChannel.claimForDraw(
-                        id,
-                        sfRegion.left, sfRegion.top,
-                        sfRegion.width(), sfRegion.height(),
-                        sfCorner,
-                    )
-                    if (claimed) {
-                        restoreSystemShaderIfReplaced(drawable)
-                        logRenderMode(id, "SF", "sf channel claim, hand over", drawable, bounds)
-                        return false
-                    }
-                }
+            val sfRegion = sfEntry?.region
+            if (sfEntry != null && sfRegion != null && sfRegion.width() > 0f && sfRegion.height() > 0f) {
+                val sfShort = minOf(sfRegion.width(), sfRegion.height()) / 2f
+                val sfCorner = sfEntry.cornerRadius.coerceIn(0f, sfShort)
+                SfGlassChannel.claimForDraw(
+                    id,
+                    sfRegion.left, sfRegion.top,
+                    sfRegion.width(), sfRegion.height(),
+                    sfCorner,
+                    host = (drawable as? android.graphics.drawable.Drawable)?.callback as? android.view.View,
+                )
+                restoreSystemShaderIfReplaced(drawable)
+                logRenderMode(id, "SF", "sf channel claim, hand over", drawable, bounds)
+                return false
             }
+            restoreSystemShaderIfReplaced(drawable)
+            logRenderMode(
+                id, "BLUR",
+                if (sfEntry == null) "sf mode: no region, no glass"
+                else "sf mode: empty region, no glass",
+                drawable, bounds,
+            )
+            return false
         }
 
         // [R1 修复] paint.shader 已是本模块缓存的液态玻璃实例 → 不再整体短路：

@@ -50,6 +50,7 @@
     <!-- 功能页 -->
     <string name="settings_func_search_hint">搜索功能（中文名）</string>
     <string name="settings_func_group">功能分类</string>
+    <string name="settings_func_search_results">搜索结果</string>
     <string name="settings_func_hint">输入中文名即可快速找到功能。</string>
     <string name="settings_func_glass">玻璃</string>
     <string name="settings_func_glass_desc">绘制总控 · 预设 · 配置管理 · 组件分配 · 玻璃化对象</string>
@@ -63,6 +64,7 @@
     <string name="settings_func_seedling_desc">场景显示规则</string>
     <string name="settings_func_aod">息屏与锁屏</string>
     <string name="settings_func_aod_desc">alive 息屏</string>
+    <string name="settings_func_search_results">搜索结果</string>
     <string name="settings_in_development">开发中</string>
 
     <!-- 玻璃页 -->

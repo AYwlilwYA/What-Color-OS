@@ -2,14 +2,20 @@ package com.coloros16.liquidglass.entry
 
 import android.os.Build
 import com.coloros16.liquidglass.config.Prefs
+import com.coloros16.liquidglass.hook.AodHandoffHook
 import com.coloros16.liquidglass.hook.AppGlassHook
 import com.coloros16.liquidglass.hook.BlurDrawHook
-import com.coloros16.liquidglass.hook.HostVersion
+import com.coloros16.liquidglass.hook.DemoGlassHook
 import com.coloros16.liquidglass.hook.LauncherAnimHook
 import com.coloros16.liquidglass.hook.LauncherHook
+import com.coloros16.liquidglass.hook.LgNativeProbe
 import com.coloros16.liquidglass.hook.LauncherTiltHook
 import com.coloros16.liquidglass.hook.LockScreenClockHook
 import com.coloros16.liquidglass.hook.SceneFilter
+import com.coloros16.liquidglass.hook.StatusBarHook
+import com.coloros16.liquidglass.hook.SystemUiLifecycle
+import com.coloros16.liquidglass.hook.TiltPath
+import com.coloros16.liquidglass.hook.VersionPool
 import com.coloros16.liquidglass.log.Lg
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.HotReloadedParam
@@ -68,13 +74,23 @@ class XposedEntry : XposedModule() {
         if (param.packageName != PACKAGE_SYSTEMUI && param.packageName != PACKAGE_LAUNCHER &&
             param.packageName != PACKAGE_GALLERY && param.packageName != PACKAGE_CALCULATOR &&
             param.packageName != PACKAGE_SMART_SIDEBAR && param.packageName != PACKAGE_ASSISTANT_SCREEN &&
-            param.packageName != PACKAGE_QUICK_SEARCH_BOX
+            param.packageName != PACKAGE_QUICK_SEARCH_BOX && param.packageName != PACKAGE_DEMO
         ) return
         val classLoader = param.getDefaultClassLoader() ?: return
         // [doc/spec/110] 存宿主 classLoader：同 ClassLoader 复用重载时 onHotReloaded 直接取用；
         // 新 ClassLoader 场景下新类静态为空，由 resolveClassLoader 的兜底链接管。
         cacheClassLoader(param.packageName, classLoader)
-        doInstall(param.packageName, classLoader)
+        if (param.packageName == PACKAGE_SYSTEMUI) {
+            // 等应用初始化完成再装 hook；装载点挂失败时不锁死、不往未知时序里硬装
+            val mounted = SystemUiLifecycle.install(this, classLoader) {
+                doInstall(PACKAGE_SYSTEMUI, classLoader)
+            }
+            if (!mounted) {
+                Lg.e(TAG, "SystemUI lifecycle mount failed, hooks not installed this load")
+            }
+        } else {
+            doInstall(param.packageName, classLoader)
+        }
     }
 
     /**
@@ -114,7 +130,7 @@ class XposedEntry : XposedModule() {
         }
         if (pkg != PACKAGE_SYSTEMUI && pkg != PACKAGE_LAUNCHER &&
             pkg != PACKAGE_GALLERY && pkg != PACKAGE_CALCULATOR && pkg != PACKAGE_SMART_SIDEBAR &&
-            pkg != PACKAGE_ASSISTANT_SCREEN && pkg != PACKAGE_QUICK_SEARCH_BOX
+            pkg != PACKAGE_ASSISTANT_SCREEN && pkg != PACKAGE_QUICK_SEARCH_BOX && pkg != PACKAGE_DEMO
         ) {
             // 非目标进程：按框架语义卸掉旧 hook（这些进程本就不该有模块 hook）
             param.oldHookHandles.forEach { h ->
@@ -165,9 +181,11 @@ class XposedEntry : XposedModule() {
             // 系统模糊管线完全原样；玻璃完全靠 SystemUI 端每元素背景源。
             // [spec/116 P0] 只读 versionCode 打日志铺观测，不做门控（SystemUI 适配是后续阶段）。
             PACKAGE_SYSTEMUI -> {
-                val hostVer = HostVersion.hostVersionCode(PACKAGE_SYSTEMUI)
+                val hostVer = VersionPool.readVersion(PACKAGE_SYSTEMUI)
                 Lg.i(TAG, "host version: pkg=$PACKAGE_SYSTEMUI versionCode=$hostVer (SystemUI no gating in P0)")
                 installHooks(classLoader)
+                // 架构探测已在 install 内完成，查询时补丁随 lg-vermatch 一并带出
+                VersionPool.query(PACKAGE_SYSTEMUI, hostVer)
             }
             // [spec/10] Launcher：桌面文件夹背景液态玻璃化（闭合文件夹图标 + 打开文件夹卡片）。
             // [spec/64] Launcher：桌面动画参数调节（弹簧刚度/阻尼 + 图标透明度时长，默认全关）。
@@ -175,15 +193,16 @@ class XposedEntry : XposedModule() {
             // [spec/116 P0/P2] 版本门控：<17.3.12（或读取失败 -1）三 hook 全装、tilt 走 16.x 现状路径；
             // >=17.3.12 禁用 anim hook，tilt 改走原生 zuyqa 参数注入路径。
             PACKAGE_LAUNCHER -> {
-                val hostVer = HostVersion.hostVersionCode(PACKAGE_LAUNCHER)
-                if (hostVer >= VERSION_LAUNCHER_17_3_12) {
+                val hostVer = VersionPool.readVersion(PACKAGE_LAUNCHER)
+                val profile = VersionPool.query(PACKAGE_LAUNCHER, hostVer).profile
+                if (profile.tiltPath == TiltPath.NATIVE_ZUYQA) {
                     Lg.i(TAG, "host version: pkg=$PACKAGE_LAUNCHER versionCode=$hostVer, branch=17.3.12+: skip LauncherAnimHook (17.x fields obfuscated), tilt=native zuyqa path")
-                    LauncherHook.install(this, classLoader)
+                    if (profile.launcherMainHook) LauncherHook.install(this, classLoader)
                     LauncherTiltHook.installNativeZuyqa(this, classLoader)
                 } else {
                     Lg.i(TAG, "host version: pkg=$PACKAGE_LAUNCHER versionCode=$hostVer, branch=<17.3.12 (or unknown -1): install all 3 hooks")
-                    LauncherHook.install(this, classLoader)
-                    LauncherAnimHook.install(this, classLoader)
+                    if (profile.launcherMainHook) LauncherHook.install(this, classLoader)
+                    if (profile.launcherAnimHook) LauncherAnimHook.install(this, classLoader)
                     LauncherTiltHook.install(this, classLoader)
                 }
             }
@@ -191,8 +210,37 @@ class XposedEntry : XposedModule() {
             // 渲染腿尚未接通（进程内无抓屏权限拿不到背景源），背景仍由系统模糊渲染，见 AppGlassHook 头注。
             PACKAGE_GALLERY, PACKAGE_CALCULATOR, PACKAGE_SMART_SIDEBAR, PACKAGE_ASSISTANT_SCREEN,
             PACKAGE_QUICK_SEARCH_BOX -> {
+                VersionPool.query(packageName, VersionPool.readVersion(packageName))
                 AppGlassHook.install(this, classLoader, packageName)
             }
+            // 验通道用 demo：模块代码直调 SF 模糊接口（非注入进程自调不走）
+            PACKAGE_DEMO -> {
+                Lg.i(TAG, "demo probe host pid=${android.os.Process.myPid()}")
+                DemoGlassHook.install(this)
+            }
+            else -> {}
+        }
+        // 冷启动注入在重负载设备上易撞 AMS 超时，探针顺带挂进常驻进程便于热重载验证
+        try {
+            if (packageName == PACKAGE_SYSTEMUI) {
+                DemoGlassHook.installIntoViewDraw(this)
+            } else {
+                DemoGlassHook.install(this)
+            }
+        } catch (t: Throwable) {
+            Lg.e(TAG, "probe install FAILED in $packageName: ${t.javaClass.simpleName}: ${t.message}")
+        }
+        try {
+            val lib = java.io.File("/data/data/$packageName/code_cache/liblgprobe11.so")
+            if (lib.exists()) {
+                System.load(lib.absolutePath)
+                Lg.e("lg-native-probe", "window blur probe in $packageName lib=${lib.length()}")
+                Lg.e("lg-native-probe", "result=" + LgNativeProbe.blurFirstWindow(0))
+            } else {
+                Lg.e("lg-native-probe", "lib missing: $lib")
+            }
+        } catch (t: Throwable) {
+            Lg.e("lg-native-probe", "blur probe FAILED in $packageName: ${t.javaClass.simpleName}: ${t.message}")
         }
     }
 
@@ -205,6 +253,10 @@ class XposedEntry : XposedModule() {
         // 时钟数字 View（数字仍是系统原样），接管本身没发生 → 保持停用，设置页入口已移除。
         // LockScreenClockHook.install(this, classLoader)
         SceneFilter.install(this, classLoader)
+        // 状态栏：显隐 / 边距 / 排序 / 三合一（内部按功能逐项门控）
+        StatusBarHook.install(this, classLoader)
+        // alive 息屏衔接进度泵（空壳计数器，验证链）
+        AodHandoffHook.install(this, classLoader)
         // [spec/82] ⛔ 曾有 display-root 通道探针挂在这里，**已删除** —— 见 DisplayRootChannel 头部说明：
         // 它在屏幕暗/AOD 时会连续 120 秒每 5 秒抓一次整屏，与 UI 合成抢 SF，
         // 造成「进桌面卡顿」「SystemUI 重启后异常」。通道本身已验证通过，不再需要常驻探针。
@@ -233,12 +285,24 @@ class XposedEntry : XposedModule() {
         } catch (t: Throwable) {
         }
         return try {
-            val hostCls = when (pkg) {
-                PACKAGE_SYSTEMUI -> "com.android.systemui.SystemUIApplication"
-                PACKAGE_LAUNCHER -> "com.android.launcher3.LauncherApplication"
-                else -> null
+            val tcl = Thread.currentThread().contextClassLoader
+            val candidates = when (pkg) {
+                // 新名在前旧名在后（与 SystemUiLifecycle.resolveOnCreate 同序）
+                PACKAGE_SYSTEMUI -> arrayOf(
+                    "com.android.systemui.application.impl.SystemUIApplicationImpl",
+                    "com.android.systemui.SystemUIApplication",
+                )
+                PACKAGE_LAUNCHER -> arrayOf("com.android.launcher3.LauncherApplication")
+                else -> emptyArray<String>()
             }
-            hostCls?.let { Class.forName(it, false, Thread.currentThread().contextClassLoader) }?.classLoader
+            candidates.firstNotNullOfOrNull { name ->
+                try {
+                    Class.forName(name, false, tcl)?.classLoader
+                } catch (t: Throwable) {
+                    Lg.w(TAG, "classLoader candidate miss: $name")
+                    null
+                }
+            }
         } catch (t: Throwable) {
             null
         }
@@ -267,12 +331,12 @@ class XposedEntry : XposedModule() {
         const val PACKAGE_ASSISTANT_SCREEN = "com.coloros.assistantscreen"
         /** 全局搜索进程：COUI 长按菜单/弹窗窗口模糊组件登记（AppGlassHook B 族）。 */
         const val PACKAGE_QUICK_SEARCH_BOX = "com.heytap.quicksearchbox"
+
+        const val PACKAGE_DEMO = "com.coloros16.liquidglass.demo"
         /** [doc/spec/110] 宿主 classLoader 缓存（onPackageLoaded 存 / onHotReloaded 读）。 */
         private val cachedLoaders = java.util.concurrent.ConcurrentHashMap<String, ClassLoader>()
         /** [doc/spec/110] 模块版本标记（热重载完成日志用，便于 daemon 侧对账 loaded version）。 */
         private const val MODULE_VERSION = "spec-113"
-        /** [spec/116 P0] 桌面 17.3.12 versionCode：达到该版本后禁用 LauncherAnimHook（弹簧字段全灭）。 */
-        private const val VERSION_LAUNCHER_17_3_12 = 170030012L
         private const val TAG = "LiquidGlass"
     }
 }

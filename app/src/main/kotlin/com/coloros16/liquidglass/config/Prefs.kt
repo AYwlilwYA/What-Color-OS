@@ -112,6 +112,12 @@ object Prefs {
      *  调整后 ≤1s 生效（readMaterialParams TTL 缓存）。 */
     const val KEY_INNER_GLOW = "inner_glow"
     const val DEFAULT_INNER_GLOW = 0f
+    /** 外描边强度（0~1，默认 0=关）：贴边向内的半透明黑乘性压暗（立体描边），只压 rgb 不动 alpha。 */
+    const val KEY_EDGE_STROKE = "edge_stroke"
+    const val DEFAULT_EDGE_STROKE = 0f
+    /** 外描边宽度 px（默认 1.2）：自可见边界向内渐隐的距离。 */
+    const val KEY_EDGE_STROKE_WIDTH = "edge_stroke_width"
+    const val DEFAULT_EDGE_STROKE_WIDTH = 1.2f
     const val KEY_VIBRANCY = "vibrancy"
     const val KEY_LIGHT_ANGLE = "light_angle"
     const val KEY_PARALLAX_X = "parallax_x"
@@ -127,13 +133,13 @@ object Prefs {
     /** 三开关统一默认值（false = 维持现状裁切行为）。 */
     const val DEFAULT_CLIP_BYPASS = false
 
-    // 新管线（2026-08-12 Kyant 分层：清晰内部透镜 + 内侧折射环带 + vibrancy + 高光）默认值
+    // 新管线（分层：清晰内部透镜 + 内侧折射环带 + vibrancy + 高光）默认值
     /** 内部可选轻模糊半径 px（0=清晰透镜；>0 仅作用内部，不糊折射环带）。
      *  [2026-09-16] 0f → 8f：原 0 使每块玻璃成完全清晰透镜（用户反馈「横幅太透、看得见背后文字」）。 */
     const val DEFAULT_BLUR_RADIUS = 13f
-    /** 鲜艳度/饱和度倍数（Kyant vibrancy=1.5；1=不变） */
+    /** 鲜艳度/饱和度倍数（参考值 1.5；1=不变） */
     const val DEFAULT_VIBRANCY = 1.54f
-    /** 高光方向衰减指数（Kyant ControlCenter=2；越大越聚光） */
+    /** 高光方向衰减指数（参考值 2；越大越聚光） */
     const val DEFAULT_HIGHLIGHT_FALLOFF = 4f
     // [2026-09-17 死键清理遗留] DEFAULT_REFRACTION_HEIGHT（48f 绝对 px）已随旧键语义一并删除，
     // 见 doc/spec/95 —— 新语义是短边比例（DEFAULT_REFRACTION_HEIGHT_RATIO），两者不可混用。
@@ -159,11 +165,11 @@ object Prefs {
     const val REFRACTION_HEIGHT_PX_MAX = 400f
     // 2026-08-15 材质参数默认值（= LiquidGlassShader.Params 默认，readMaterialParams 兜底同源；
     // 设置界面 bindFloatSeekBar 回显用）
-    /** 深度默认（法线径向分量，Kyant depthEffect=true → 1） */
+    /** 深度默认（法线径向分量，深度效果开 → 1） */
     const val DEFAULT_DEPTH = 0.72f
     /** 色散默认（0 = 关闭；0.05~0.3 彩虹边） */
     const val DEFAULT_DISPERSION = 0.3f
-    /** 高光强度默认（加性≈Kyant 白色 0.5 Plus 混合） */
+    /** 高光强度默认（加性≈白色 0.5 Plus 混合） */
     const val DEFAULT_HIGHLIGHT = 0.56f
     /** 高光带宽度默认 px */
     const val DEFAULT_HIGHLIGHT_WIDTH = 8f
@@ -484,6 +490,18 @@ object Prefs {
     /** 进度条亮白填充默认值（false = 保持系统原样进度色） */
     const val DEFAULT_VOLUME_PANEL_CLEAN = false
 
+    /** 控制中心进度条白色填充：控制中心亮度/音量滑杆的进度条改亮白磨砂填充（带顶边高光）。默认 false。
+     *  改动即时生效（TTL 500ms 重读）。 */
+    const val KEY_CONTROL_PROGRESS_FILL = "control_center_progress_fill_enable"
+    /** 控制中心进度条白色填充默认值（false = 保持系统原样进度色） */
+    const val DEFAULT_CONTROL_PROGRESS_FILL = false
+
+    /** 隐藏二级玻璃：控制中心 2×1 横向大磁贴里、单独包住图标的小圆底不绘制（大磁贴玻璃与图标状态色保留）。
+     *  默认 **false**（系统原生小圆底）；开 = 隐藏小圆底。改动即时生效（TTL 500ms 重读）。 */
+    const val KEY_QS_HIDE_SECONDARY_GLASS = "qs_hide_secondary_glass"
+    /** 隐藏二级玻璃默认值（false = 保留系统原生小圆底） */
+    const val DEFAULT_QS_HIDE_SECONDARY_GLASS = false
+
     /** 音量面板去白底：展开面板大背景（后面那层模糊）改纯模糊（去白/去调色），模糊保留。
      *  默认 **false**；关 = 系统原样（下一次展开自动恢复）。改动即时生效（TTL 500ms 重读）。 */
     const val KEY_VOLUME_PANEL_BACKDROP = "volume_panel_backdrop_enable"
@@ -514,6 +532,49 @@ object Prefs {
     const val NOTIFICATION_DISSOLVE_SPEED_MIN = 35
     /** 粒子飘散速度上限（300 = 3×，设置页滑杆 max = 上限 − 下限） */
     const val NOTIFICATION_DISSOLVE_SPEED_MAX = 300
+
+    // ---------- 息屏（AOD） ----------
+    /** 息屏到锁屏连贯过渡开关：true = 息屏与锁屏之间连续衔接，减少黑屏跳变。默认 false（不干预）。 */
+    const val KEY_ALIVE_AOD_HANDOFF = "alive_aod_handoff"
+    /** 息屏到锁屏连贯过渡默认值（false = 保持系统原样） */
+    const val DEFAULT_ALIVE_AOD_HANDOFF = false
+
+    /** 息屏样式开关：true = 接管息屏界面的时钟与动效样式。默认 false（系统原样）。 */
+    const val KEY_ALIVE_AOD_STYLE = "alive_aod_style"
+    /** 息屏样式默认值（false = 保持系统原样） */
+    const val DEFAULT_ALIVE_AOD_STYLE = false
+
+    /** 息屏玻璃开关：true = 息屏元素套液态玻璃质感。默认 false（系统原样）。 */
+    const val KEY_ALIVE_AOD_GLASS = "alive_aod_glass"
+    /** 息屏玻璃默认值（false = 保持系统原样） */
+    const val DEFAULT_ALIVE_AOD_GLASS = false
+
+    /** 当前息屏样式 id（AodStyleCatalog 稳定 id）；按 [KEY_ALIVE_AOD_STYLE] 门控生效。 */
+    const val KEY_ALIVE_AOD_STYLE_ID = "alive_aod_style_id"
+    /** 息屏样式 id 默认值（启航）。 */
+    const val DEFAULT_ALIVE_AOD_STYLE_ID = "aod.sail"
+
+    /** 最近使用样式 id 列表（逗号分隔，模块本地 UI 态，不进框架侧）。 */
+    const val KEY_ALIVE_AOD_RECENT = "alive_aod_recent_ids"
+    /** 最近使用初始列表（星月 / 启航 / 全景息屏）。 */
+    const val DEFAULT_ALIVE_AOD_RECENT = "aod.starmoon,aod.sail,aod.fullscreen"
+
+    /** 接管壁纸开关：true = 息屏/锁屏使用模块接管的壁纸。默认 false（系统原样）。 */
+    const val KEY_ALIVE_AOD_WALLPAPER = "alive_aod_wallpaper"
+    const val DEFAULT_ALIVE_AOD_WALLPAPER = false
+
+    /** 熄屏显示开关：true = 熄屏后显示息屏界面。默认 false（系统原样）。 */
+    const val KEY_ALIVE_AOD_SCREEN = "alive_aod_screen"
+    const val DEFAULT_ALIVE_AOD_SCREEN = false
+
+    /** 锁屏显示开关：true = 锁屏界面显示模块接管内容。默认 false（系统原样）。 */
+    const val KEY_ALIVE_AOD_LOCK_SHOW = "alive_aod_lock_show"
+    const val DEFAULT_ALIVE_AOD_LOCK_SHOW = false
+
+    /** 已保存配置列表（JSON，模块本地 UI 态，不进框架侧）。 */
+    const val KEY_ALIVE_AOD_CONFIGS = "alive_aod_configs"
+    /** 当前选中的配置 id（模块本地 UI 态，不进框架侧）。 */
+    const val KEY_ALIVE_AOD_CONFIG_ID = "alive_aod_config_id"
 
     // ---------- 第三方 App 玻璃化（相册/计算器/智能侧边栏） ----------
     /** 相册玻璃化：拦截 App 内的视图背景模糊（RenderEffect / 窗口模糊 drawable）改画液态玻璃。
@@ -1317,4 +1378,82 @@ object Prefs {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     fun write(context: Context): SharedPreferences.Editor = read(context).edit()
+
+    // ---------- 状态栏（doc/spec/163） ----------
+    /** 状态栏功能线总开关。默认 **false**；关 = 不装任何状态栏 hook 行为（仅保留门禁探测日志）。 */
+    const val KEY_STATUSBAR_ENABLE = "statusbar_enabled"
+    const val DEFAULT_STATUSBAR_ENABLE = false
+    /** 状态栏简化预设：一键套用下方隐藏组（本身不新增写路径）。 */
+    const val KEY_STATUSBAR_SIMPLIFY = "statusbar_simplify_enable"
+    const val DEFAULT_STATUSBAR_SIMPLIFY = false
+    /** 隐藏通知图标（整块通知图标区）。 */
+    const val KEY_STATUSBAR_HIDE_NOTIFICATION_ICONS = "statusbar_hide_notification_icons"
+    const val DEFAULT_STATUSBAR_HIDE_NOTIFICATION_ICONS = false
+    /** 隐藏网络类型图标（4G/5G 文字）。 */
+    const val KEY_STATUSBAR_HIDE_NETWORK_TYPE = "statusbar_hide_network_type"
+    const val DEFAULT_STATUSBAR_HIDE_NETWORK_TYPE = false
+    /** 网络类型显示在信号图标右侧（默认与信号重叠）。 */
+    const val KEY_STATUSBAR_TYPE_RIGHT_OF_SIGNAL = "statusbar_type_right_of_signal"
+    const val DEFAULT_STATUSBAR_TYPE_RIGHT_OF_SIGNAL = false
+    /** 隐藏漫游图标。 */
+    const val KEY_STATUSBAR_HIDE_ROAMING = "statusbar_hide_roaming"
+    const val DEFAULT_STATUSBAR_HIDE_ROAMING = false
+    /** 隐藏移动数据活动箭头。 */
+    const val KEY_STATUSBAR_HIDE_DATA_ACTIVITY = "statusbar_hide_data_activity"
+    const val DEFAULT_STATUSBAR_HIDE_DATA_ACTIVITY = false
+    /** 隐藏 Wi-Fi 活动箭头。 */
+    const val KEY_STATUSBAR_HIDE_WIFI_ACTIVITY = "statusbar_hide_wifi_activity"
+    const val DEFAULT_STATUSBAR_HIDE_WIFI_ACTIVITY = false
+    /** 隐藏 Wi-Fi 技术标识（6/7 等角标）。 */
+    const val KEY_STATUSBAR_HIDE_WIFI_TECH = "statusbar_hide_wifi_tech"
+    const val DEFAULT_STATUSBAR_HIDE_WIFI_TECH = false
+    /** 移动数据关闭时隐藏移动网络图标。 */
+    const val KEY_STATUSBAR_HIDE_MOBILE_WHEN_DATA_OFF = "statusbar_hide_mobile_when_data_off"
+    const val DEFAULT_STATUSBAR_HIDE_MOBILE_WHEN_DATA_OFF = false
+    /** Wi-Fi 连接时隐藏移动网络图标。 */
+    const val KEY_STATUSBAR_HIDE_MOBILE_WHEN_WIFI = "statusbar_hide_mobile_when_wifi"
+    const val DEFAULT_STATUSBAR_HIDE_MOBILE_WHEN_WIFI = false
+    /** 保持 SIM2 的 5G 标识不被系统隐藏。 */
+    const val KEY_STATUSBAR_KEEP_SIM2_5G = "statusbar_keep_sim2_5g"
+    const val DEFAULT_STATUSBAR_KEEP_SIM2_5G = false
+    /** 双卡信号合并（主副卡叠在同一图标位）。 */
+    const val KEY_STATUSBAR_DUAL_SIM_MERGE = "statusbar_dual_sim_merge"
+    const val DEFAULT_STATUSBAR_DUAL_SIM_MERGE = false
+    /** 双排信号间距（相对图标高度比例，默认 0.08 = 8%）。 */
+    const val KEY_STATUSBAR_DUAL_ROW_GAP = "statusbar_dual_row_gap"
+    const val DEFAULT_STATUSBAR_DUAL_ROW_GAP = 8
+    const val STATUSBAR_DUAL_ROW_GAP_MIN = 0
+    const val STATUSBAR_DUAL_ROW_GAP_MAX = 40
+    /** 副卡显示比例（百分比，默认 25）。 */
+    const val KEY_STATUSBAR_SECONDARY_SCALE = "statusbar_secondary_scale"
+    const val DEFAULT_STATUSBAR_SECONDARY_SCALE = 25
+    const val STATUSBAR_SECONDARY_SCALE_MIN = 10
+    const val STATUSBAR_SECONDARY_SCALE_MAX = 100
+    /** 图标顺序（逗号分隔的槽名，空 = 系统顺序）。 */
+    const val KEY_STATUSBAR_ICON_ORDER = "statusbar_icon_order"
+    const val DEFAULT_STATUSBAR_ICON_ORDER = ""
+    /** 左右边距（dp，-1 = 系统默认）。 */
+    const val KEY_STATUSBAR_MARGIN_LEFT = "statusbar_margin_left"
+    const val DEFAULT_STATUSBAR_MARGIN_LEFT = -1
+    const val KEY_STATUSBAR_MARGIN_RIGHT = "statusbar_margin_right"
+    const val DEFAULT_STATUSBAR_MARGIN_RIGHT = -1
+    const val STATUSBAR_MARGIN_MIN = -1
+    const val STATUSBAR_MARGIN_MAX = 48
+    /** 时钟显示秒。 */
+    const val KEY_STATUSBAR_CLOCK_SECONDS = "statusbar_clock_show_seconds"
+    const val DEFAULT_STATUSBAR_CLOCK_SECONDS = false
+    /** 时钟显示日期。 */
+    const val KEY_STATUSBAR_CLOCK_DATE = "statusbar_clock_show_date"
+    const val DEFAULT_STATUSBAR_CLOCK_DATE = false
+    /** 时钟靠边方向：0 = 系统默认，1 = 靠左，2 = 靠右。 */
+    const val KEY_STATUSBAR_CLOCK_GRAVITY = "statusbar_clock_gravity"
+    const val DEFAULT_STATUSBAR_CLOCK_GRAVITY = 0
+    /** 通知图标移到右侧。 */
+    const val KEY_STATUSBAR_NOTIFICATION_ICONS_RIGHT = "statusbar_notification_icons_right"
+    const val DEFAULT_STATUSBAR_NOTIFICATION_ICONS_RIGHT = false
+    /** iPhone Duo 三合一（电量 + Wi-Fi + 移动网络合成一个圆形图标）。 */
+    const val KEY_STATUSBAR_DUO = "statusbar_duo_enable"
+    const val DEFAULT_STATUSBAR_DUO = false
+    /** 只读回传：hook 侧实测的 statusIcons 当前 slot 顺序（逗号小写，与 KEY_STATUSBAR_ICON_ORDER 同格式）。 */
+    const val KEY_STATUSBAR_ICON_ORDER_CURRENT = "statusbar_icon_order_current"
 }

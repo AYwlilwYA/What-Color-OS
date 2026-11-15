@@ -6,11 +6,168 @@
     <!-- 导航（[spec/88] 扩大返回键热区的无障碍描述） -->
     <string name="settings_back">返回</string>
 
+    <!-- 三栏壳：底栏 / 顶栏 / 占位 -->
+    <string name="settings_tab_home">主页</string>
+    <string name="settings_tab_func">功能</string>
+    <string name="settings_tab_settings">设置</string>
+    <string name="settings_shell_subtitle">ColorOS 美化模块</string>
+    <string name="settings_restart_scope">重启作用域</string>
+    <string name="settings_restart_scope_running">正在重启系统界面…</string>
+    <string name="settings_restart_scope_done">已重启系统界面</string>
+    <string name="settings_restart_scope_failed">重启失败：%1$s（需要 root）</string>
+    <string name="settings_shell_home_placeholder">主页内容建设中</string>
+    <string name="settings_shell_settings_placeholder">设置内容建设中</string>
+    <string name="settings_shell_pending_placeholder">内容建设中</string>
+
+    <!-- 主页 -->
+    <string name="settings_home_master_on">已启用</string>
+    <string name="settings_home_master_off">未启用</string>
+    <string name="settings_home_root_title">Root 权限</string>
+    <string name="settings_home_root_unavailable">未获取 root 时，调试功能与重启作用域暂不可用。</string>
+    <string name="settings_home_root_granted">已获取</string>
+    <string name="settings_home_root_missing">未获取</string>
+    <string name="settings_home_quick_jump">快捷跳转</string>
+    <string name="settings_home_sponsor">赞助</string>
+    <string name="settings_home_sponsor_desc">请作者喝杯咖啡</string>
+    <string name="settings_home_author">作者</string>
+    <string name="settings_home_group">群组</string>
+    <string name="settings_home_group_desc">交流与反馈</string>
+    <string name="settings_home_sponsors">已赞助人员</string>
+    <string name="settings_home_group_qq">QQ 群 1102985644</string>
+    <string name="settings_home_group_tg">Telegram 频道</string>
+    <string name="settings_home_group_qq_copied">已复制群号 1102985644，打开 QQ 搜索添加</string>
+    <string name="settings_home_root_checking">检测中</string>
+    <string name="settings_home_sponsors_hint">感谢支持（名单随版本更新）。</string>
+    <string name="settings_sponsor_page_title">赞助支持</string>
+    <string name="settings_sponsor_page_desc">如果这个模块对你有帮助，欢迎扫码请作者喝杯咖啡</string>
+    <string name="settings_home_sysinfo">系统信息</string>
+    <string name="settings_home_version">当前版本</string>
+    <string name="settings_home_version_pool">适配版本池</string>
+    <string name="settings_home_version_pool_desc">当前适配的系统版本</string>
+    <string name="settings_home_version_pool_value">C16 · C17</string>
+    <string name="settings_open_failed">打开失败，已复制链接</string>
+
+    <!-- 功能页 -->
+    <string name="settings_func_search_hint">搜索功能（中文名）</string>
+    <string name="settings_func_group">功能分类</string>
+    <string name="settings_func_hint">输入中文名即可快速找到功能。</string>
+    <string name="settings_func_glass">玻璃</string>
+    <string name="settings_func_glass_desc">绘制总控 · 预设 · 配置管理 · 组件分配 · 玻璃化对象</string>
+    <string name="settings_func_corner">圆角</string>
+    <string name="settings_func_corner_desc">按类名设置组件圆角</string>
+    <string name="settings_func_panel">面板效果</string>
+    <string name="settings_func_panel_desc">通知 · 控制中心 · 音量面板</string>
+    <string name="settings_func_launcher">桌面 Launcher</string>
+    <string name="settings_func_launcher_desc">打开 / 关闭 / 打断动画 · 弹性参数 · 动态倾斜</string>
+    <string name="settings_func_seedling">流体云</string>
+    <string name="settings_func_seedling_desc">场景显示规则</string>
+    <string name="settings_func_aod">息屏与锁屏</string>
+    <string name="settings_func_aod_desc">alive 息屏</string>
+    <string name="settings_in_development">开发中</string>
+
+    <!-- 玻璃页 -->
+    <string name="settings_glass_group_control">绘制总控</string>
+    <string name="settings_glass_group_preset">预设</string>
+    <string name="settings_glass_group_config">配置管理</string>
+    <string name="settings_info_label">说明</string>
+    <string name="info_quick_jump">常用功能的直达入口，点一下直接打开对应设置页。</string>
+    <string name="info_glass_control">模块总开关和渲染方式。应用级只作用于已支持的应用；系统级接管系统界面的模糊渲染，覆盖更广、更耗电。</string>
+    <string name="info_glass_preset">预设是整套画质方案，管采样率、分辨率和性能档位。点「一键」立即套用，画面优先或省电优先一键切换。</string>
+    <string name="info_glass_config">配置是一套玻璃效果参数。可以建多套，再配合「组件分配」让不同界面元素用不同的玻璃效果。</string>
+    <string name="info_glass_assign">把界面上的某个组件、某个按钮分配给某套配置。按名称搜索、勾选后批量指派；已经被占用的会置灰。</string>
+    <string name="settings_glass_group_assign">组件分配</string>
+    <string name="settings_glass_group_objects">玻璃化对象</string>
+    <string name="settings_glass_group_fluid">流体云</string>
+    <string name="settings_glass_group_readability">可读性</string>
+    <string name="settings_glass_group_sampling">背景与采样</string>
+    <string name="settings_glass_test_entry">点击打开系统级别玻璃效果测试</string>
+    <string name="settings_glass_preset_hint">套用预设会自动调整画质与性能（画面优先 / 省电优先）。</string>
+    <string name="settings_add_config">＋ 新增配置</string>
+    <string name="settings_preset_appearance">iOS-外观</string>
+    <string name="settings_preset_appearance_desc">套用高画质参数与高采样率</string>
+    <string name="settings_preset_battery">iOS-省电</string>
+    <string name="settings_preset_battery_desc">套用低画质参数，降低性能占用</string>
+    <string name="settings_preset_apply">一键</string>
+    <string name="settings_preset_appearance_applied">已套用高画质预设</string>
+    <string name="settings_preset_battery_applied">已套用省电预设</string>
+    <string name="settings_preset_custom">自定义预设…</string>
+    <string name="settings_preset_custom_desc">保存当前参数组合为新预设</string>
+    <string name="settings_glass_config_default">配置%1$d</string>
+    <string name="settings_glass_config_desc">点击进入参数调节与实时预览</string>
+    <string name="settings_glass_config_value">参数</string>
+    <string name="settings_glass_config_default_desc">未分配配置的组件使用的参数</string>
+    <string name="settings_class_assign_glass">玻璃组件分配</string>
+    <string name="settings_class_assign_glass_desc">按名称搜索组件 · 筛选 · 批量分配至配置</string>
+    <string name="settings_glass_more_apps">新应用接入后会显示在这里</string>
+    <string name="settings_fluid_card_glass">展开流体云卡片玻璃化</string>
+    <string name="settings_fluid_card_glass_desc">展开状态的卡片交给模块渲染（默认关）</string>
+    <string name="settings_fluid_capsule_glass">折叠流体云玻璃化</string>
+    <string name="settings_fluid_capsule_glass_desc">折叠状态的小胶囊也玻璃化（默认开）</string>
+    <string name="settings_fluid_no_original_color">禁止流体云带原本颜色</string>
+    <string name="settings_fluid_no_original_color_desc">去掉原本的背景色，只保留玻璃效果（默认开）</string>
+    <string name="settings_glass_sampling_entry">抓屏与采样</string>
+    <string name="settings_glass_sampling_entry_desc">抓屏模式 · 速率 · 缩放 · 重试</string>
+    <string name="settings_glass_sampling_hint">抓屏越频繁、采样率越高，画面越跟手，耗电与发热也越高。</string>
+
+    <!-- 玻璃化对象 -->
+    <string name="settings_obj_system">系统界面</string>
+    <string name="settings_obj_system_desc">通知中心 / 控制中心 / 音量条玻璃开关</string>
+    <string name="settings_obj_system_hint">通知中心与控制中心跟随「液态玻璃渲染」总开关；音量条可单独开关。</string>
+    <string name="settings_obj_desktop">桌面</string>
+    <string name="settings_obj_desktop_desc">Dock / 卡片小组件 / 搜索界面 / 长按菜单 / 最近任务</string>
+    <string name="settings_obj_desktop_hint">改动无需重启桌面，返回桌面后即生效。</string>
+    <string name="settings_obj_desktop_edit">编辑界面</string>
+    <string name="settings_obj_desktop_edit_desc">整理 / 完成按钮 · 编辑工具条按钮</string>
+    <string name="settings_obj_desktop_edit_hint">双指捏合进入编辑模式后可见效果。</string>
+
+    <!-- 圆角页 -->
+    <string name="settings_corner_group_config">圆角配置管理</string>
+    <string name="settings_corner_group_assign">圆角类名分配</string>
+    <string name="settings_corner_config_default">圆角配置1</string>
+    <string name="settings_corner_config_desc">圆角大小 · 圆角自适应 · 跟随父容器</string>
+    <string name="settings_corner_class_assign">圆角类名分配</string>
+    <string name="settings_corner_class_assign_desc">按类名分配圆角配置，与玻璃互不干扰</string>
+    <string name="settings_corner_hint">改动自动保存，重启系统界面后全部生效。</string>
+    <string name="settings_corner_preview">圆角预览</string>
+    <string name="settings_corner_preview_hint">拖动下方滑杆调整圆角</string>
+    <string name="settings_corner_radius">圆角大小</string>
+    <string name="settings_corner_radius_value">%1$d px</string>
+    <string name="settings_corner_adaptive">圆角自适应</string>
+    <string name="settings_corner_adaptive_desc">按元素尺寸自动收缩圆角，避免小元件被裁成圆团。</string>
+    <string name="settings_corner_follow_parent">跟随父容器</string>
+    <string name="settings_corner_follow_parent_desc">圆角跟随父容器形状，嵌在圆角容器里不会露出直角。</string>
+    <string name="settings_corner_add_config_toast">多套圆角配置将在后续版本提供</string>
+
+    <!-- 类名分配 -->
+    <string name="ca_search_hint">搜索：中文名 / 英文名</string>
+    <string name="ca_chip_on">已开启</string>
+    <string name="ca_chip_off">未开启</string>
+    <string name="ca_chip_all">全部分类</string>
+    <string name="ca_batch_count_zero">已选 0 项</string>
+    <string name="ca_batch_count">已选 %1$d 项</string>
+    <string name="ca_batch_placeholder">批量分配至配置 ▼</string>
+    <string name="ca_batch_placeholder_corner">批量分配至圆角配置 ▼</string>
+    <string name="ca_option_default">默认</string>
+    <string name="ca_option_corner_default">默认圆角</string>
+    <string name="ca_state_on">已开启</string>
+    <string name="ca_state_off">未开启</string>
+    <string name="ca_image_desc">示意图</string>
+    <string name="ca_empty">没有匹配的组件</string>
+    <string name="ca_enable_title">是否立即分配配置？</string>
+    <string name="ca_enable_no_config">请先在玻璃页新建配置</string>
+    <string name="ca_scene_launcher">桌面</string>
+    <string name="ca_scene_systemui">系统界面</string>
+    <string name="ca_scene_gallery">相册</string>
+    <string name="ca_scene_calculator">计算器</string>
+    <string name="ca_scene_assistant">速览</string>
+    <string name="ca_scene_sidebar">智能侧边栏</string>
+    <string name="ca_scene_other">其他</string>
+
     <!-- 总开关 -->
     <string name="settings_master">启用模块（默认关闭）</string>
     <string name="settings_master_desc">模块总开关，默认关闭。开启后重启系统界面即可生效。</string>
     <string name="settings_glass_enable">液态玻璃渲染</string>
-    <string name="settings_glass_enable_desc">关闭后改用系统模糊，约半秒生效；倾斜、横幅飞入等效果不受影响。</string>
+    <string name="settings_glass_enable_desc">关闭后改用系统模糊，不保证任何应用都能立刻生效；倾斜、横幅飞入等效果不受影响。</string>
     <string name="settings_hint">模块默认关闭，开启后才会生效。部分改动需重启系统界面、桌面或锁屏后生效。</string>
 
     <!-- 渲染模式 / 系统模块 / dalog 测试 -->
@@ -21,7 +178,7 @@
     <string name="settings_sf_install_warning">系统模块具有不稳定性！请谨慎安装！安装前确保你手机有救砖方式/模块！</string>
     <string name="settings_sf_install_root">root直接安装</string>
     <string name="settings_sf_install_export">获取模块文件到下载目录手动安装</string>
-    <string name="settings_open_dalog">点击打开dalog</string>
+    <string name="settings_open_dalog">点击打开系统级别玻璃效果测试</string>
     <string name="settings_sf_test_box">如果下发没有出现玻璃效果，代表你没有安装模块/不支持！</string>
 
     <!-- 液态玻璃材质 -->
@@ -68,6 +225,12 @@
     <string name="settings_inner_glow">内侧光</string>
     <string name="settings_inner_glow_value">%1$d%%</string>
     <string name="settings_inner_glow_desc">玻璃边缘向中心散发的柔光。0 表示关闭。</string>
+    <string name="settings_edge_stroke">外描边</string>
+    <string name="settings_edge_stroke_value">%1$d%%</string>
+    <string name="settings_edge_stroke_desc">贴边向内压一圈半透明黑，玻璃更立体。0 表示关闭。</string>
+    <string name="settings_edge_stroke_width">外描边宽度（px）</string>
+    <string name="settings_edge_stroke_width_value">%1$.1f px</string>
+    <string name="settings_edge_stroke_width_desc">黑边从边缘向内渐隐的宽度。</string>
     <string name="settings_light_angle">光源方向</string>
     <string name="settings_light_angle_value">%1$d°</string>
     <string name="settings_light_angle_desc">高光光源方向角度。</string>
@@ -232,13 +395,13 @@
     <string name="settings_anim_intro">调整桌面过渡动画的回弹与速度。默认关闭，开启前与原版一致；修改后立即生效。</string>
     <string name="settings_anim_open_enabled">打开动画</string>
     <string name="settings_anim_open_enabled_desc">从桌面打开应用时的动画（默认关）</string>
-    <string name="settings_anim_open_params">打开动画参数 ›</string>
+    <string name="settings_anim_open_params">打开动画参数</string>
     <string name="settings_anim_close_enabled">关闭动画</string>
     <string name="settings_anim_close_enabled_desc">应用退出返回桌面时的动画（默认关）</string>
-    <string name="settings_anim_close_params">关闭动画参数 ›</string>
+    <string name="settings_anim_close_params">关闭动画参数</string>
     <string name="settings_anim_break_enabled">打断动画</string>
     <string name="settings_anim_break_enabled_desc">动画进行中被打断时的动画（默认关）</string>
-    <string name="settings_anim_break_params">打断动画参数 ›</string>
+    <string name="settings_anim_break_params">打断动画参数</string>
     <string name="settings_anim_restart_note">提示：参数改动即时生效，无需重启桌面。</string>
 
     <string name="settings_anim_enable_custom">启用自定义样式</string>
@@ -286,21 +449,29 @@
     <string name="settings_volume_seekbar_glass_desc">给调节音量时弹出的竖向音量条加液态玻璃背景。开启后立即生效，无需重启系统界面。</string>
     <string name="settings_volume_panel_clean">进度条亮白填充</string>
     <string name="settings_volume_panel_clean_desc">把音量滑杆的进度条改成亮白磨砂填充，顶边加一道高光，在玻璃背景上更清晰。开启后立即生效，无需重启系统界面。</string>
+    <string name="settings_control_progress_fill">控制中心进度条白色填充</string>
+    <string name="settings_control_progress_fill_desc">把控制中心亮度与音量滑杆的进度条改成亮白磨砂填充，顶边加一道高光，在玻璃背景上更清晰。开启后立即生效，无需重启系统界面。</string>
+    <string name="settings_qs_hide_secondary_glass">隐藏二级玻璃</string>
+    <string name="settings_qs_hide_secondary_glass_desc">控制中心里加宽的横向大磁贴，图标下面那层单独的小圆底不再绘制，只保留整块磁贴的玻璃和图标状态色。关闭后恢复系统原来的小圆底。改动立即生效。</string>
     <string name="settings_volume_panel_backdrop">替换音量调节背景模糊为黑色遮罩</string>
     <string name="settings_volume_panel_backdrop_desc">把展开音量面板背后那层模糊替换成一层轻微的黑色遮罩。关闭即恢复系统原样。开启后立即生效，无需重启系统界面。</string>
     <string name="settings_notification_popup_glass">通知长按菜单玻璃</string>
     <string name="settings_notification_popup_glass_desc">给长按通知后弹出的操作菜单卡加液态玻璃背景。开启后立即生效，无需重启系统界面。</string>
     <string name="loc_notification_popup_menu">长按通知弹出的操作菜单卡</string>
-    <string name="settings_gallery_glass">相册液态玻璃</string>
-    <string name="settings_gallery_glass_desc">把相册里的视图背景模糊接管成液态玻璃。该功能依赖相册自身的模糊实现，不同界面效果可能不一致。</string>
-    <string name="settings_calculator_glass">计算器液态玻璃</string>
-    <string name="settings_calculator_glass_desc">把计算器的对话框与弹出菜单背景模糊接管成液态玻璃。</string>
-    <string name="settings_smart_sidebar_glass">智能侧边栏液态玻璃</string>
-    <string name="settings_smart_sidebar_glass_desc">把智能侧边栏面板与卡片的背景模糊接管成液态玻璃。</string>
-    <string name="settings_assistant_screen_glass">速览（负一屏）玻璃</string>
-    <string name="settings_assistant_screen_glass_desc">给速览（负一屏）的卡片和控件加玻璃效果。</string>
-    <string name="settings_quick_search_glass">全局搜索弹窗玻璃</string>
-    <string name="settings_quick_search_glass_desc">给全局搜索 App 里长按列表项弹出的菜单和弹窗加玻璃效果（只作用于这类弹窗，不含搜索条本身）。</string>
+    <string name="settings_gallery_glass">相册</string>
+    <string name="settings_gallery_glass_desc">视图背景模糊接管成液态玻璃</string>
+    <string name="settings_calculator_glass">计算器</string>
+    <string name="settings_calculator_glass_desc">对话框与弹出菜单背景接管</string>
+    <string name="settings_smart_sidebar_glass">智能侧边栏</string>
+    <string name="settings_smart_sidebar_glass_desc">面板与卡片背景接管</string>
+    <string name="settings_assistant_screen_glass">速览（负一屏）</string>
+    <string name="settings_assistant_screen_glass_desc">卡片和控件加玻璃效果</string>
+    <string name="settings_quick_search_glass">全局搜索弹窗</string>
+    <string name="settings_quick_search_glass_desc">长按列表项的菜单与弹窗玻璃</string>
+    <string name="settings_glass_other_apps">其他三方</string>
+    <string name="settings_glass_soon">即将支持</string>
+    <string name="settings_obj_all_on">全开</string>
+    <string name="settings_obj_all_off">全关</string>
     <string name="settings_element_glass">点选元素玻璃</string>
     <string name="settings_element_glass_desc">在悬浮球里点选固化的控件变成液态玻璃（负一屏卡片、搜索页应用建议、相册按钮等），固化后立即生效。</string>
     <string name="settings_clip_bypass_section">裁切旁路</string>
@@ -320,6 +491,15 @@
     <string name="settings_edit_toolbtn_glass_desc">把双指捏合进入桌面编辑模式后底部一排圆形按钮（卡片、壁纸、布局、设置等）变成液态玻璃。开启后立即生效，无需重启桌面。</string>
     <string name="settings_popup_menu_glass">桌面长按菜单底衬</string>
     <string name="settings_popup_menu_glass_desc">把长按桌面图标、文件夹、卡片时弹出菜单的整屏毛玻璃背景变成液态玻璃（折射、色散、高光）。开启后立即生效，无需重启桌面。</string>
+
+    <!-- 息屏（AOD） -->
+    <string name="settings_section_alive_aod">息屏</string>
+    <string name="settings_alive_aod_handoff">息屏到锁屏连贯过渡</string>
+    <string name="settings_alive_aod_handoff_desc">息屏点亮进入锁屏时平滑衔接，不再黑屏跳变。</string>
+    <string name="settings_alive_aod_style">息屏样式</string>
+    <string name="settings_alive_aod_style_desc">自定义息屏界面的时钟、日期与动效样式。</string>
+    <string name="settings_alive_aod_glass">息屏玻璃效果</string>
+    <string name="settings_alive_aod_glass_desc">息屏上的元素用液态玻璃质感呈现（折射、色散、高光）。</string>
 
     <!-- 组件位置描述（类清单/管理对话框里「在哪里的」一句话） -->
     <string name="loc_blur_drawable">通知中心与控制中心的多类卡片共用背景</string>
@@ -382,22 +562,26 @@
     <string name="settings_notif_fly_scale_value">%1$d%%</string>
     <string name="settings_notif_fly_scale_desc">横幅弹出和收回时的缩放幅度。0 表示只倾斜不缩放。</string>
 
-    <!-- 玻璃效果预设（顶栏 + 预设管理） -->
+    <!-- 玻璃效果配置（顶栏 + 配置管理） -->
     <string name="glass_preset_config">配置</string>
     <string name="glass_preset_default">默认</string>
     <string name="glass_preset_add">+新增</string>
-    <string name="glass_preset_manage_title">玻璃预设管理</string>
-    <string name="glass_preset_add_row">+新增预设</string>
+    <string name="glass_preset_manage_title">玻璃配置管理</string>
+    <string name="glass_preset_add_row">+新增配置</string>
     <string name="glass_preset_none_applied">未应用</string>
-    <string name="glass_preset_empty">还没有预设，点下方「+新增预设」创建一个。</string>
-    <string name="glass_preset_class_empty">还没有探测到玻璃类，打开或下拉一次系统界面后重开本页。</string>
-    <string name="glass_preset_empty_params_hint">已绑定类但未调整任何参数——该预设将按默认值生效。</string>
-    <string name="glass_preset_class_hint">已被其他预设占用的类会置灰，需先在原预设取消勾选。</string>
-    <string name="glass_preset_delete">删除预设</string>
+    <string name="glass_preset_empty">还没有配置，点下方「+新增配置」创建一个。</string>
+    <string name="glass_preset_class_empty">还没有探测到可玻璃化的组件，打开或下拉一次系统界面后重开本页。</string>
+    <string name="glass_preset_empty_params_hint">已绑定类但未调整任何参数——该配置将按默认值生效。</string>
+    <string name="glass_preset_rename">重命名</string>
+    <string name="glass_preset_rename_title">重命名配置</string>
+    <string name="glass_preset_renamed">已重命名</string>
+    <string name="glass_preset_name_empty">名称不能为空</string>
+    <string name="glass_preset_class_hint">已被其他配置占用的类会置灰，需先在原配置取消勾选。</string>
+    <string name="glass_preset_delete">删除配置</string>
     <string name="glass_preset_close">关闭</string>
     <string name="glass_preset_created">已新建「%1$s」</string>
     <string name="glass_preset_deleted">已删除「%1$s」，它的类已回到默认效果</string>
-    <string name="glass_preset_name_fmt">预设%1$d</string>
+    <string name="glass_preset_name_fmt">配置%1$d</string>
 
     <!-- 圆角独立（按组件类单独设置圆角） -->
     <string name="cat_corner">圆角独立</string>
@@ -424,4 +608,203 @@
     <string name="settings_notification_dissolve_desc">默认关闭。滑动删除与清空通知时，将卡片化为细颗粒飘散；不影响解锁或面板收起。需要 Android 13+ 硬件加速，省电模式和关闭系统动画时自动跳过。</string>
     <string name="settings_notification_dissolve_speed">飘散速度</string>
     <string name="settings_notification_dissolve_speed_value">%1$.2f×（越高越快）</string>
+
+    <!-- 面板 / 桌面 / 流体云 / 息屏 页 -->
+    <string name="settings_panel_group_notification">通知</string>
+    <string name="settings_panel_group_cc">控制中心</string>
+    <string name="settings_panel_group_volume">音量面板</string>
+    <string name="settings_launcher_group_anim">桌面动画</string>
+    <string name="settings_launcher_group_tilt">动态倾斜</string>
+    <string name="settings_seedling_group">流体云</string>
+    <string name="settings_seedling_glass_row_title">玻璃化开关</string>
+    <string name="settings_seedling_glass_row_desc">展开卡片、折叠小胶囊、去原色 —— 在「玻璃」页设置</string>
+    <string name="settings_seedling_page_hint">流体云在锁屏、息屏、横屏、下拉等场景的显示规则，后续会在这里提供开关。</string>
+    <string name="settings_aod_page_hint">点三态条播放动画 · 长按拖动看中间帧</string>
+    <string name="settings_aod_scrub_hint">拖动逐帧 · 松开停在最近一端</string>
+    <string name="settings_aod_header">息屏样式</string>
+    <string name="settings_aod_cancel">取消</string>
+    <string name="settings_aod_apply">应用</string>
+    <string name="settings_aod_state_aod">息屏</string>
+    <string name="settings_aod_state_lock">锁屏</string>
+    <string name="settings_aod_state_home">桌面</string>
+    <string name="settings_aod_wallpaper">壁纸</string>
+    <string name="settings_aod_style">样式</string>
+    <string name="settings_aod_effects">效果与其他</string>
+    <string name="settings_aod_menu_group_takeover">接管</string>
+    <string name="settings_aod_takeover_wallpaper">接管壁纸</string>
+    <string name="settings_aod_takeover_wallpaper_desc">息屏与锁屏使用模块接管的壁纸。</string>
+    <string name="settings_aod_screen">熄屏</string>
+    <string name="settings_aod_screen_desc">熄屏后显示息屏界面。</string>
+    <string name="settings_aod_lock_show">锁屏显示</string>
+    <string name="settings_aod_lock_show_desc">锁屏界面显示模块接管内容。</string>
+    <string name="settings_aod_menu_group_manage">显示与配置</string>
+    <string name="settings_aod_display_row">显示设置</string>
+    <string name="settings_aod_display_row_desc">预览三态衔接，选择并应用样式</string>
+    <string name="settings_aod_configs_row">配置</string>
+    <string name="settings_aod_configs_row_desc">管理保存过的配置</string>
+    <string name="settings_aod_display_title">显示设置</string>
+    <string name="settings_aod_configs_title">配置</string>
+    <string name="settings_aod_configs_hint">配置会保存在本机；点一下即应用，也可以重命名或删除。</string>
+    <string name="settings_aod_configs_add">＋ 新建配置</string>
+    <string name="settings_aod_configs_empty">还没有配置。到显示设置点一条默认样式，就会新建一份配置。</string>
+    <string name="settings_aod_config_current">当前</string>
+    <string name="settings_aod_config_use">使用</string>
+    <string name="settings_aod_config_rename">重命名</string>
+    <string name="settings_aod_config_delete">删除</string>
+    <string name="settings_aod_config_rename_title">重命名配置</string>
+    <string name="settings_aod_config_delete_title">删除配置</string>
+    <string name="settings_aod_config_delete_message">删除「%1$s」？</string>
+    <string name="settings_aod_config_new_name">配置 %1$d</string>
+    <string name="settings_aod_config_based_on">基于 %1$s</string>
+    <string name="settings_aod_config_created">已新建配置</string>
+    <string name="settings_aod_config_deleted">已删除</string>
+    <string name="settings_aod_config_renamed">已重命名</string>
+    <string name="settings_aod_config_name_empty">名称不能为空</string>
+    <string name="settings_aod_recent">最近使用</string>
+    <string name="settings_aod_sheet_recent_empty">点下方默认样式，会新建一份配置放在这里</string>
+    <string name="settings_aod_builtin">自带样式</string>
+    <string name="settings_aod_import">＋ 导入样式</string>
+    <string name="settings_aod_sheet_kicker">样式</string>
+    <string name="settings_aod_sheet_title">息屏样式</string>
+    <string name="settings_aod_sheet_desc">点默认样式会新建一份配置 · 点一下即预览</string>
+    <string name="settings_aod_sheet_close">关闭</string>
+    <string name="settings_aod_applied">已应用</string>
+    <string name="settings_aod_restored">已恢复</string>
+    <string name="settings_aod_import_unavailable">导入样式即将开放</string>
+    <string name="settings_aod_wallpaper_unavailable">壁纸设置即将开放</string>
+    <string name="settings_aod_effects_title">效果与其他</string>
+    <string name="settings_aod_effects_desc">页面内效果与其余设置</string>
+    <string name="settings_aod_wallpaper_title">壁纸</string>
+    <string name="settings_aod_wallpaper_desc">该态显示图片 / 背景素材</string>
+    <string name="settings_aod_wallpaper_static">跟随系统壁纸</string>
+    <string name="settings_aod_wallpaper_live">深色纯黑</string>
+    <string name="settings_aod_wallpaper_import">导入图片</string>
+    <string name="settings_aod_wallpaper_takeover_on">已接管系统壁纸</string>
+    <string name="settings_aod_wallpaper_takeover_off">已恢复原样</string>
+    <string name="aod_style_fullscreen">全景息屏</string>
+    <string name="aod_style_sail">启航</string>
+    <string name="aod_style_starmoon">星月</string>
+    <string name="aod_style_handpaint">手绘</string>
+    <string name="aod_style_text">个性文字</string>
+    <string name="aod_style_portrait">人像绘影</string>
+
+    <!-- 设置栏 -->
+    <string name="settings_group_appearance">外观</string>
+    <string name="settings_group_config">配置</string>
+    <string name="settings_group_log_diag">日志与诊断</string>
+    <string name="settings_group_about">关于</string>
+    <string name="settings_theme_row">可选主题</string>
+    <string name="settings_theme_row_desc">界面配色</string>
+    <string name="settings_theme_follow">跟随系统</string>
+    <string name="settings_theme_light">浅色</string>
+    <string name="settings_theme_dark">深色</string>
+    <string name="settings_theme_dialog_title">可选主题</string>
+    <string name="settings_language_row">语言</string>
+    <string name="settings_language_row_desc">跟随系统应用语言</string>
+    <string name="settings_config_io_row">配置导入导出</string>
+    <string name="settings_config_io_row_desc">全局备份与恢复</string>
+    <string name="settings_logpage_row">日志页</string>
+    <string name="settings_logpage_row_desc">运行日志 · 引擎全量 · 日志采集</string>
+    <string name="settings_diagpage_row">诊断页</string>
+    <string name="settings_diagpage_row_desc">旁路裁切 · 点选元素玻璃 · 悬浮球启停</string>
+    <string name="settings_about_row">关于</string>
+    <string name="settings_about_row_desc">联系与反馈</string>
+    <string name="settings_logpage_group_runtime">运行日志</string>
+    <string name="settings_logpage_group_capture">日志采集</string>
+    <string name="settings_diag_group_bypass">旁路与探针</string>
+    <string name="settings_diag_group_ball">悬浮球</string>
+    <string name="settings_language_open_failed">无法打开系统语言设置</string>
+
+    <!-- 首启应用声明 -->
+    <string name="first_run_title">应用声明</string>
+    <string name="first_run_message">本模块完全免费。
+
+如果你是付费获取的，请立即联系作者并申请退款。
+
+模块按现状提供，不承诺适配所有设备与系统版本。使用前请自行确认风险，因使用本模块造成的任何问题由使用者自行承担。</string>
+    <string name="first_run_ok">我已知晓</string>
+
+    <!-- 主页预览卡文字 -->
+    <string name="settings_home_hero_meta">示例通知 · 现在</string>
+    <string name="settings_home_hero_title">液态玻璃渲染预览</string>
+    <string name="settings_home_hero_desc">折射 / 色散 / 高光随材质参数实时变化</string>
+    <string name="settings_chip_launch">启动</string>
+    <string name="settings_chip_stop">停止</string>
+    <string name="settings_row_state">状态</string>
+    <string name="settings_capture_start_desc">抓取当前 logcat 到文件</string>
+    <string name="settings_root_ball_start_desc">root 独立进程，盖在一切界面最上层</string>
+    <string name="settings_chip_capture_running">抓取中</string>
+    <string name="settings_chip_capture_idle">空闲</string>
+    <string name="settings_chip_capture_probing">检测中</string>
+    <string name="settings_chip_ball_running">运行中</string>
+    <string name="settings_chip_ball_idle">未运行</string>
+    <string name="settings_chip_ball_starting">启动中</string>
+    <string name="settings_chip_ball_error">异常</string>
+    <string name="platform_degrade_layer_unsupported">系统不支持这一层效果，已自动省略</string>
+    <string name="platform_degrade_version_mismatch">系统版本不匹配，该效果已停用</string>
+    <string name="platform_degrade_probe_failed">检测未通过，该效果已暂时停用</string>
+    <string name="platform_degrade_not_registered">该效果未在此设备启用</string>
+    <string name="platform_fuse_tripped">检测到异常，已自动恢复原厂效果</string>
+    <string name="platform_fuse_restored">已恢复原厂效果</string>
+    <!-- 状态栏定制 -->
+    <string name="cat_statusbar">状态栏</string>
+    <string name="cat_statusbar_desc">时钟 · 图标显隐 · 双卡 · 排序</string>
+    <string name="settings_func_statusbar">状态栏</string>
+    <string name="settings_func_statusbar_desc">时钟 · 图标显隐 · 双卡堆叠 · 图标排序</string>
+    <string name="sb_group_control">总控</string>
+    <string name="sb_group_icons">图标显隐</string>
+    <string name="sb_group_dual">双卡与边距</string>
+    <string name="sb_group_clock">时钟与排序</string>
+    <string name="sb_enable">状态栏定制总开关</string>
+    <string name="sb_enable_desc">需与应用总开关同时开启；关闭后状态栏恢复系统原样</string>
+    <string name="sb_simplify">一键简化</string>
+    <string name="sb_simplify_desc">点击套用：通知图标 / 网络类型 / 漫游 / 数据活动 / Wi-Fi 活动 / Wi-Fi 技术标识</string>
+    <string name="sb_simplify_applied">已套用简化预设</string>
+    <string name="sb_hide_notif_icons">隐藏通知图标</string>
+    <string name="sb_hide_network_type">隐藏网络类型图标</string>
+    <string name="sb_type_right_of_signal">网络类型显示在信号右侧</string>
+    <string name="sb_hide_roaming">隐藏漫游图标</string>
+    <string name="sb_hide_data_activity">隐藏移动数据上下行箭头</string>
+    <string name="sb_hide_wifi_activity">隐藏 Wi-Fi 上下行箭头</string>
+    <string name="sb_hide_wifi_tech">隐藏 Wi-Fi 技术标识</string>
+    <string name="sb_hide_mobile_data_off">移动数据关闭时隐藏移动信号</string>
+    <string name="sb_hide_mobile_wifi">Wi-Fi 连接时隐藏移动信号</string>
+    <string name="sb_keep_sim2_5g">副卡保持 5G 标识</string>
+    <string name="sb_dual_merge">双卡信号堆叠</string>
+    <string name="sb_dual_gap">双排间距</string>
+    <string name="sb_secondary_scale">副卡显示比例</string>
+    <string name="sb_margin_left">左边距</string>
+    <string name="sb_margin_right">右边距</string>
+    <string name="sb_clock_seconds">时钟显示秒</string>
+    <string name="sb_notif_right">通知图标移到右侧</string>
+    <string name="sb_duo">三合一图标</string>
+    <string name="sb_duo_desc">电量圆环 + Wi-Fi/信号 + 强度点，替代电池、移动、Wi-Fi 三个图标</string>
+    <string name="sb_order">图标排序</string>
+    <string name="sb_order_reset">恢复默认</string>
+    <string name="sb_order_hint">左右滑动浏览，长按图标拖动排序，松手自动吸附</string>
+    <string name="sb_slot_wifi">Wi-Fi</string>
+    <string name="sb_slot_mobile">移动网络</string>
+    <string name="sb_slot_alarm">闹钟</string>
+    <string name="sb_slot_accessibility">无障碍</string>
+    <string name="sb_slot_safe">安全</string>
+    <string name="sb_slot_mute">静音</string>
+    <string name="sb_slot_battery">电量</string>
+    <string name="sb_slot_block_banner">横幅</string>
+    <string name="sb_slot_satellite">卫星</string>
+    <string name="sb_slot_logging">日志</string>
+    <string name="sb_slot_data_saver">省流</string>
+    <string name="sb_slot_cast">投屏</string>
+    <string name="sb_slot_connected_display">显示</string>
+    <string name="sb_slot_vpn">VPN</string>
+    <string name="sb_slot_nfc">NFC</string>
+    <string name="sb_slot_high_performance">性能</string>
+    <string name="sb_slot_volume">音量</string>
+    <string name="sb_slot_bluetooth">蓝牙</string>
+    <string name="sb_slot_sos">SOS</string>
+    <string name="sb_slot_location">定位</string>
+    <string name="sb_slot_microphone">麦克风</string>
+    <string name="sb_slot_camera">相机</string>
+    <string name="sb_slot_zen">勿扰</string>
+    <string name="sb_slot_nosim_all">无卡</string>
+    <string name="sb_slot_secure_pay">支付</string>
 </resources>

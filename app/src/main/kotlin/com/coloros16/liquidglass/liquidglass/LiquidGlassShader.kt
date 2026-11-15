@@ -658,14 +658,9 @@ object LiquidGlassShader {
             // @LG-MB-END
             float sd = min(sdRaw, 0.0);   // 外部像素 clamp 到 0（circleMap 定义域 [0,1] 防 NaN）
             // 纯 SDF 梯度（高光专用；高光不混 depth 径向分量）
+            // 取本体矩形梯度而非融合场梯度：伴球会把边缘法线拽向桥，导致本体边（尤其靠按钮那一侧）
+            // 高光变暗/消失；本体梯度让四条边的高光始终贴在本体上、左右对称。
             float2 sdfGrad = gradSdRoundedRect(centeredCoord, halfSize, gradRadius);
-            if (mbOn > 0.5) {
-                // [doc/spec/100] 融合场梯度 = 各分量梯度的 h 凸组合（mbFuse 内已合成），全定义域连续
-                // → 高光 band 沿融合轮廓连续、**不在桥上断裂**；幅值≈0（两侧法线对消的中轴）时保留
-                // 本体方向，避免 normalize 小量产生任意方向。
-                float mbLen = length(mbGrad);
-                if (mbLen > 0.0001) { sdfGrad = mbGrad / mbLen; }
-            }
 
             float4 glass = float4(0.0);
 
@@ -829,7 +824,9 @@ object LiquidGlassShader {
             //    区域，完整可见、不超圆角；直边元素同样内侧亮边（不跨边界）。
             // band 按可见边界（本体与掩码取更紧者）定位：掩码角部比本体紧时带仍贴可见边缘，不被掩码外裁；
             // 两形一致处 max 恒等取本体，直边与同形元素零变化。
-            float dInVis = -max(sdRaw, sdMask);
+            // 本体取 sdBody（融合前的本体 SDF）而非 sdRaw：伴球/桥把形状往外抻时，高光带仍贴本体边，
+            // 不会跟着跑到扩张区被视口边缘切掉。
+            float dInVis = -max(sdBody, sdMask);
             float band = 1.0 - smoothstep(0.0, hw, abs(dInVis - bandCenter));
             // 窄反射带：细高斯肩替代宽钝棱边（polish=0 时 mix 恒取原 band）
             // 肩宽上限随 uHighlightWidth 等比解锁（默认值处与纯几何封顶恒等）

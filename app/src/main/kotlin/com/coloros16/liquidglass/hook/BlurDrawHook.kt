@@ -13549,7 +13549,11 @@ object BlurDrawHook {
                     "geo-diag: id=$id host=${entry.hostViewName} bounds=$bounds loc=${loc[0]},${loc[1]} " +
                         "hw=${hv?.width} hh=${hv?.height} clip=${entry.clipBounds} vp=${cg.viewport} " +
                         "off=(${cg.maskOffsetX},${cg.maskOffsetY}) mask=${cg.maskRect} maskR=${cg.maskCornerRadius} " +
-                        "mb=${entry.metaBall != null} hl=${cg.params.highlight} hlw=${cg.params.highlightWidth} " +
+                        "mb=${entry.metaBall != null} body=${cg.bodyRect} cr=${cg.cornerRadius} " +
+                        "mbBody=${entry.metaBall?.body?.let { "pos=(${it.posX},${it.posY}) half=(${it.halfW},${it.halfH}) bs=${it.blendShape}" }} " +
+                        "comp=${entry.metaBall?.companions?.joinToString("|") { "(${it.posX},${it.posY},${it.halfW},${it.halfH})" }} " +
+                        "hl=${cg.params.highlight} hlw=${cg.params.highlightWidth} floor=${cg.params.highlightFloor} " +
+                        "att=${cg.params.highlightInnerAtt} light=${cg.params.lightAngleDegrees} " +
                         "polish=${cg.params.surfacePolish}"
                 }
             }

@@ -749,7 +749,7 @@ class AodPreviewView @JvmOverloads constructor(
     private fun drawLockOverlay(canvas: Canvas, w: Float, h: Float, alpha: Float) {
         val layer = canvas.saveLayerAlpha(0f, 0f, w, h, (alpha.coerceIn(0f, 1f) * 255f).toInt())
 
-        val weatherY = h * 0.320f
+        val weatherY = h * 0.375f
         val glyphR = dp(9f)
         val glyphX = dp(24f) + glyphR
         fill.style = Paint.Style.FILL
@@ -787,9 +787,9 @@ class AodPreviewView @JvmOverloads constructor(
         canvas.drawText("北京市", w - dp(24f), weatherY + dp(5f), text)
         text.textAlign = Paint.Align.LEFT
 
-        drawNotificationCard(canvas, w, h * 0.362f, 0)
-        drawNotificationCard(canvas, w, h * 0.470f, 1)
-        drawMusicCard(canvas, w, h * 0.590f)
+        drawNotificationCard(canvas, w, h * 0.415f, 0)
+        drawNotificationCard(canvas, w, h * 0.523f, 1)
+        drawMusicCard(canvas, w, h * 0.635f)
 
         canvas.restoreToCount(layer)
     }

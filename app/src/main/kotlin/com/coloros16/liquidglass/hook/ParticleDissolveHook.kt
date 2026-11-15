@@ -98,6 +98,7 @@ object ParticleDissolveHook {
         private var readAt = -1L
         private var retryAt = 0L
         private var lastError = ""
+        private var clearAllFlag: Field? = null
         private val worker = ThreadPoolExecutor(0, 1, 15, TimeUnit.SECONDS,
             ArrayBlockingQueue<Runnable>(MAX_ACTIVE), { task ->
                 Thread(task, "LiquidGlass-particle-snapshot").apply { isDaemon = true }
@@ -107,15 +108,29 @@ object ParticleDissolveHook {
             if (installed) return
             val row = Class.forName(ROW, false, loader)
             val helper = Class.forName("com.android.systemui.SwipeHelper", false, loader)
+            clearAllFlag = runCatching {
+                Class.forName(
+                    "com.android.systemui.statusbar.notification.stack.NotificationStackScrollLayout",
+                    false, loader
+                ).getDeclaredField("mClearAllInProgress").apply { isAccessible = true }
+            }.getOrNull()
             // COS17 overrides both the gesture and menu paths in NotificationSwipeHelper.
             // Hook every concrete declaration; Capture.requested/consumed deduplicates wrappers.
+            // clear-all 的 COMMIT 收口在 Controller 的匿名 NotificationCallback 上
+            //（clearNotifications 不逐行走 performDismiss）；匿名类编号随构建漂移，
+            // 按「声明了 onChildDismissed/handleChildViewDismissed」扫描，不写死 $9/$10。
+            val controllerName =
+                "com.android.systemui.statusbar.notification.stack.NotificationStackScrollLayoutController"
+            val clearAllCallbacks = (1..15).mapNotNull { n ->
+                runCatching { Class.forName("$controllerName\$$n", false, loader) }.getOrNull()
+            }.filter { type ->
+                type.declaredMethods.any {
+                    it.name == "onChildDismissed" || it.name == "handleChildViewDismissed"
+                }
+            }
             val helpers = listOfNotNull(helper, runCatching {
                 Class.forName("com.android.systemui.statusbar.notification.stack.NotificationSwipeHelper", false, loader)
-            }.getOrNull(), runCatching {
-                // Confirmed stock COS17 callback. Its start/commit events cover clear-all too;
-                // clearNotifications() does not call row.performDismiss() for every row.
-                Class.forName("com.android.systemui.statusbar.notification.stack.NotificationStackScrollLayoutController\$10", false, loader)
-            }.getOrNull()).distinct()
+            }.getOrNull(), *clearAllCallbacks.toTypedArray()).distinct()
             var mounted = 0
             for (type in helpers) for (route in NotificationMotionContract.routes(type)) {
               try {
@@ -133,7 +148,7 @@ object ParticleDissolveHook {
             }
             // Callers compiled before installation can inline the small callback wrappers.
             for(type in helpers) for(method in type.declaredMethods) {
-                if(method.name in setOf("onTouchEvent","onInterceptTouchEvent","dismissChild","superDismissChild","dismiss","onDownUpdate"))
+                if(method.name in setOf("onTouchEvent","onInterceptTouchEvent","dismissChild","superDismissChild","dismiss","onDownUpdate","onChildDismissed","handleChildViewDismissed"))
                     runCatching { api.deoptimize(method) }
             }
             // Native row deletion is the commit point. An attempted swipe/menu open is not deletion.
@@ -142,7 +157,19 @@ object ParticleDissolveHook {
                 val view = chain.getThisObject() as? View
                 if (view != null) safe { if (allowed(api, view.context)) request(view) }
                 val result = chain.proceed()
-                if (view != null) safe { if (allowed(api, view.context)) dismiss(view) }
+                if (view != null) safe {
+                    if (allowed(api, view.context)) {
+                        val cap = captures[view]
+                        if (cap != null && !cap.committed && cap.hiddenAlpha == null) {
+                            cap.hiddenAlpha = view.alpha
+                            view.alpha = 0f
+                            logThrottled("particle-dismiss-instant", "清除按钮即时飘散，行已隐身 cap=${cap.bitmap != null}")
+                        } else if (cap == null) {
+                            logThrottled("particle-dismiss-nocap", "清除无可用快照，保留系统移除")
+                        }
+                        dismiss(view)
+                    }
+                }
                 result
             }
             Lg.e(TAG, "particle gesture routes=$mounted; native row commit installed")
@@ -233,12 +260,33 @@ object ParticleDissolveHook {
                     val old = captures[view]
                     if (old == null || old.cancelled || SystemClock.uptimeMillis()-old.createdAt>100L) prepare(view)
                 }
-                NotificationMotionContract.Event.REQUEST -> request(view)
+                NotificationMotionContract.Event.REQUEST -> {
+                    val cap = request(view)
+                    // clear-all：一律先隐身跳过系统右滑；有快照才开播粒子
+                    if (clearAllInProgress(view)) {
+                        if (cap != null && cap.hiddenAlpha == null) cap.hiddenAlpha = view.alpha
+                        view.alpha = 0f
+                        logThrottled("particle-clearall-instant", "clear-all 即时飘散，跳过系统右滑 cap=${cap != null}")
+                        if (cap != null) dismiss(view)
+                    }
+                }
                 NotificationMotionContract.Event.ACCEPT -> dismiss(view)
                 NotificationMotionContract.Event.CANCEL -> cancel(view)
                 NotificationMotionContract.Event.COMMIT -> if (captures[view]?.requested == true) dismiss(view)
                 NotificationMotionContract.Event.ABORT -> abort(view)
             }
+        }
+
+        private fun clearAllInProgress(view: View): Boolean {
+            val field = clearAllFlag ?: return false
+            var p = view.parent
+            while (p is View) {
+                if (field.declaringClass.isInstance(p)) {
+                    return runCatching { field.getBoolean(p) }.getOrDefault(false)
+                }
+                p = p.parent
+            }
+            return false
         }
 
         private inline fun safe(block: () -> Unit) {
@@ -413,7 +461,8 @@ object ParticleDissolveHook {
             }
             effects[view] = dust
             dust.start()
-            c.hiddenAlpha=view.alpha;view.alpha=0f
+            if (c.hiddenAlpha == null) c.hiddenAlpha = view.alpha
+            view.alpha = 0f
             report("handoff","已从滑动位置接管：x=${c.releaseX.toInt()}；原生删除回调继续运行")
             report("playing","GPU dust started")
         }

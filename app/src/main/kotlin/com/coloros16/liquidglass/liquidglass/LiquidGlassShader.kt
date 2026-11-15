@@ -15,14 +15,11 @@ import kotlin.math.sin
 /**
  * 液态玻璃 AGSL RuntimeShader 组装。
  *
- * M1 重构（2026-08-12）：Kyant 分层液态玻璃 —— **清晰内部透镜 + 内侧折射环带（可选色散）+ vibrancy
+ * M1 重构（2026-08-12）：分层液态玻璃 —— **清晰内部透镜 + 内侧折射环带（可选色散）+ vibrancy
  * 鲜艳度 + 定向边缘高光**。此前版本"全区域高斯模糊 +
  * 正向（向外）折射"实为普通毛玻璃（demo 截图实证：灰蒙暗色块、无透镜感、无边缘弯折），已废弃；
- * 模糊降级为内部可选轻效果（uBlurRadius 默认 0）。算法对齐 Kyant0/AndroidLiquidGlass
- * （KMP/Skiko → Android 原生 AGSL）：
- * - `backdrop/.../internal/Shaders.kt`：RoundedRectSDF（sdRoundedRect/gradSdRoundedRect）、
- *   RoundedRectRefraction（circleMap + 折射位移）、RoundedRectRefractionWithDispersion（7 通道光谱色散）、
- *   DefaultHighlightShader（定向高光）
+ * 模糊降级为内部可选轻效果（uBlurRadius 默认 0）。分层结构：RoundedRectSDF（sdRoundedRect/gradSdRoundedRect）、
+ * 圆角折射（circleMap + 折射位移）、7 通道光谱色散、定向高光
  *
  * uniform 接口按 doc/spec/04-技术方案.md 第 4 节；采样为 AGSL 的 `uSource.eval(coord)`（shader 类型采样，
  * 非 GLSL texture()）。AGSL 差异处理：float/int 严格（循环计数器须 cast 为 float 再参与向量运算）、
@@ -37,9 +34,9 @@ object LiquidGlassShader {
     /** AGSL 液态玻璃核心源码。 */
     val AGSL_SOURCE: String = """
         // ============================================================================
-        // 液态玻璃 AGSL 核心（2026-08-12 重构：Kyant 分层结构）
+        // 液态玻璃 AGSL 核心（分层结构）
         // - 结构：清晰内部透镜（早退等价）+ 内侧折射环带（+可选光谱色散）+ vibrancy + 定向边缘高光
-        // - 折射方向：采样点向元素【内侧】位移（= Kyant Lens.kt 对 refractionAmount 取负的语义；
+        // - 折射方向：采样点向元素【内侧】位移（= 对 refractionAmount 取负的语义；
         //   旧版向外位移导致边缘"漏背景"，非透镜弯折，已废弃）
         // - [2026-10-10 doc/spec/97] 折射方向场改走 gradRefract（最近边界特征法线 soft-min）：
         //   旧的 gradSdRoundedRect(mix)+球面径向在宽元素内部转成"从中心径向"（偏离局部法线 70~80°）
@@ -60,17 +57,19 @@ object LiquidGlassShader {
         uniform float uBlurRadius;       // 内部可选轻模糊半径 px（0=清晰透镜；>0 仅作用内部，不糊折射环带）
         uniform float uRefractionHeight; // 折射区高度 px（自边缘向内；= 元素短边 × refraction_height_ratio，默认 0.5=短边一半，见 doc/spec/95）
         uniform float uRefractionAmount; // 折射强度 px（边缘最大位移；正值，AGSL 侧向内侧采样）
-        uniform float uDepth;            // 深度：法线的径向分量强度（Kyant depthEffect，0 或 1）
+        uniform float uDepth;            // 深度：法线的径向分量强度（深度效果，0 或 1）
         uniform float uDispersion;       // 色散强度（光谱采样缩放；0=关闭，建议 0~0.3）
         uniform float uHighlight;        // 高光强度（加性，建议 0.3~0.6；定向亮边而非整体发白）
-        uniform float uHighlightWidth;   // 高光带宽度 px（边缘内外各此宽，模拟 Kyant 描边+模糊）
-        uniform float uHighlightFalloff; // 高光方向衰减指数（Kyant ControlCenter=2；越大越聚光）
+        uniform float uHighlightWidth;   // 高光带宽度 px（边缘内外各此宽，模拟描边+模糊）
+        uniform float uHighlightFalloff; // 高光方向衰减指数（参考值 2；越大越聚光）
         uniform float uHighlightFloor;   // [2026-09-16 弧线高光修复] 方向因子保底：圆角弧线法线扫过 90°
                                          // 必然与光源垂直（dot=0）→ 原实现该处高光归零。0=完全回退原行为
         uniform float uHighlightInnerAtt; // [2026-10-13] 内侧高光衰减 0~1：band 内半向玻璃深处再乘此衰减，
                                          // 0=无内侧衰减（现状）、1=内半几乎归零（只剩贴边一条线）
         uniform float uInnerGlow;        // 内侧光 0~1：边缘向中心的全向发光强度（区别于定向边缘高光）；0=关
-        uniform float uVibrancy;         // 鲜艳度/饱和度倍数（Kyant vibrancy=1.5；1=不变）
+        uniform float uEdgeStroke;       // 外描边强度 0~1：贴边向内的半透明黑压暗（立体描边），0=关（恒等）
+        uniform float uEdgeStrokeWidth;  // 外描边宽度 px（自可见边界向内渐隐）
+        uniform float uVibrancy;         // 鲜艳度/饱和度倍数（参考值 1.5；1=不变）
         uniform float uLightAngle;       // 光角度（弧度；Kotlin 侧由角度转弧度）
         uniform vec2  uParallax;         // 视差（面板几何中心偏移，可接传感器）
         uniform float uDebugCoord;       // 调试：1 = 输出 coord/uViewport 位置色（坐标可视化）
@@ -109,11 +108,14 @@ object LiquidGlassShader {
         // z=透视距离 px（Kotlin 侧常量），w=启用（1=开；0=默认 → tiltCoord 恒等返回 = 逐像素零变化）。
         uniform vec4  uTilt;
 
+        // ---------- 材质精修（QS/通知宿主专用） ----------
+        uniform float uSurfacePolish;   // 1=精修材质（窄反射带+高光预乘 alpha 收口+内压暗×0.65）；0=关（默认，与不启用时恒等）
+
         // ---------- 裁切旁路（调试开关：排查元素边缘被切来自哪一层裁剪） ----------
         uniform float uClipBypassMask;  // 1=跳过 glass *= smoothstep(0,-2,sdMask)（遮罩裁切）
         uniform float uClipBypassShape; // 1=跳过 glass *= shapeAlpha（形状裁切）
 
-        // ---------- SDF 圆角矩形（Kyant0 RoundedRectSDF 移植） ----------
+        // ---------- SDF 圆角矩形 ----------
         // 元素局部 coord → bitmap 像素坐标（uViewport=元素尺寸；不依赖 BitmapShader localMatrix，
         // AGSL shader.eval 忽略 localMatrix，直接以 coord 为像素索引，故采样坐标须手动折算）
         float2 srcCoord(float2 c, float4 rect) {
@@ -520,7 +522,7 @@ object LiquidGlassShader {
             return sum / total;
         }
 
-        // ---------- 光谱色散（Kyant0 RoundedRectRefractionWithDispersion 移植） ----------
+        // ---------- 光谱色散 ----------
         // 7 通道采样（红橙黄绿青蓝紫），权重使零偏移时还原原色（色散=0 → 输出 == 源色）
         float4 spectralDispersion(float2 refractedCoord, float2 dispersedCoord) {
             float4 color = float4(0.0);
@@ -580,10 +582,11 @@ object LiquidGlassShader {
             return float2(c.x + u, c.y + v);
         }
 
-        // ================= main 管线（Kyant 分层结构：清晰内部 + 折射环带 + vibrancy + 边缘高光） =================
+        // ================= main 管线（分层结构：清晰内部 + 折射环带 + vibrancy + 边缘高光） =================
         // iOS 26 观感 = 内部清晰透镜 + 边缘环带弯折 + 鲜亮色彩（vibrancy）+ 定向边缘亮线。
         // 注意：整体模糊 = 普通毛玻璃（2026-08-12 重构前的错误形态，已废弃）。
         half4 main(float2 coord) {
+            float polish = clamp(uSurfacePolish, 0.0, 1.0);
             // [调试] uDebugCoord>0.5 → 决定性实验：coord/500 取小数。
             // 像素坐标(0~1440) → fract(coord/500) 周期渐变（每 500px 红/绿各循环一次，
             // 1440 宽 → 红通道约 3 段 0~1 循环）；归一化 [0,1] → coord/500≈0 → 全黑。
@@ -591,7 +594,7 @@ object LiquidGlassShader {
                 return half4(fract(coord.x / 500.0), fract(coord.y / 500.0), 0.0, 1.0);
             }
 
-            // 1. SDF 几何（uParallax 作 Kyant 的 offset，移动玻璃几何中心；uMaskOffset 作 MetaBall 固有
+            // 1. SDF 几何（uParallax 作 offset，移动玻璃几何中心；uMaskOffset 作 MetaBall 固有
             //    扩张偏移——uViewport=真实尺寸时把几何中心平移到真实卡片区域，spec/18 任务 A）
             // [doc/spec/100] metaball 元素：视口保持**全尺寸**（±69px 桥区就是画布，不许再收成「真实
             // 卡片」），本体改用 uBodyRect（系统主球矩形）。非 metaball 元素 uMetaballEnable=0 →
@@ -653,8 +656,8 @@ object LiquidGlassShader {
                 mbOn = 1.0;
             }
             // @LG-MB-END
-            float sd = min(sdRaw, 0.0);   // Kyant：外部像素 clamp 到 0（circleMap 定义域 [0,1] 防 NaN）
-            // 纯 SDF 梯度（高光专用；Kyant 高光不混 depth 径向分量）
+            float sd = min(sdRaw, 0.0);   // 外部像素 clamp 到 0（circleMap 定义域 [0,1] 防 NaN）
+            // 纯 SDF 梯度（高光专用；高光不混 depth 径向分量）
             float2 sdfGrad = gradSdRoundedRect(centeredCoord, halfSize, gradRadius);
             if (mbOn > 0.5) {
                 // [doc/spec/100] 融合场梯度 = 各分量梯度的 h 凸组合（mbFuse 内已合成），全定义域连续
@@ -667,7 +670,7 @@ object LiquidGlassShader {
             float4 glass = float4(0.0);
 
             if (-sdRaw >= uRefractionHeight) {
-                // 2a. 内部：清晰透镜（Kyant 折射 shader 早退等价：content.eval(coord) 原样输出）。
+                // 2a. 内部：清晰透镜（折射早退等价：content.eval(coord) 原样输出）。
                 //     uBlurRadius>0 时走可选轻模糊（采样 1/4 降采样图，5x5 高斯）。
                 if (srcOutOfSource(srcCoord(coord - uMaskOffset, uSourceRect))) {
                     // 主采样坐标越出快照位图：不画玻璃透出底层，避免 CLAMP 钳到快照边缘行色
@@ -679,7 +682,7 @@ object LiquidGlassShader {
                     glass = float4(uSource.eval(srcCoord(coord - uMaskOffset, uSourceRect)));
                 }
             } else {
-                // 2b. 折射环带：边缘位移最大，向内趋 0（包络 circleMap 与 Kyant 语义不变）
+                // 2b. 折射环带：边缘位移最大，向内趋 0（包络 circleMap 语义不变）
                 float d = circleMap(1.0 - -sd / max(uRefractionHeight, 1.0)) * uRefractionAmount;
                 // [2026-10-10 spec/97] 方向场改走 gradRefract（返回值幅值 = 方向可信度），
                 // 替代旧的 `sdfGrad + uDepth×球面径向` —— 旧场在宽元素内部退化成「从中心径向」，
@@ -708,7 +711,7 @@ object LiquidGlassShader {
                 if (length(gradCombined) > 0.0001) {
                     n = gradCombined / length(gradCombined);
                 }
-                // 采样点向元素【内侧】位移（负方向）= Kyant Lens.kt refractionAmount 取负的语义 → 透镜弯折。
+                // 采样点向元素【内侧】位移（负方向）= refractionAmount 取负的语义 → 透镜弯折。
                 // 末尾再乘 |nBlend|（方向可信度）：内部多墙面法线相消处位移同步衰减 →
                 // medial axis 上的 180° 方向翻转被幅值归零掩盖，不产生撕裂线。
                 float2 refrVec = -d * n * length(nBlend);
@@ -733,7 +736,7 @@ object LiquidGlassShader {
                 if (uBlurRadius > 0.01) {
                     glass = gaussianBlur(refractedCoord, uBlurRadius);
                 } else if (uDispersion > 0.001) {
-                    // 光谱色散（仅环带；Kyant 同一强度公式：四角最强、轴上为 0）
+                    // 光谱色散（仅环带；同一强度公式：四角最强、轴上为 0）
                     float dispersionIntensity = uDispersion * ((centeredCoord.x * centeredCoord.y) / (halfSize.x * halfSize.y));
                     glass = spectralDispersion(refractedCoord, refrVec * dispersionIntensity);
                 } else {
@@ -758,9 +761,10 @@ object LiquidGlassShader {
             //     （遮罩→底层背景，玻璃区域与卡片间 scrim 黑 tint 展开态同为 `壁纸×(1-maskAlpha)` 统一）。
             //     uMaskAlpha=0 时 mix 系数 0 → 零开销跳过。历史：spec/48 曾整体移除（改为系统 scrim 黑 tint
             //     单一来源），快照叠黑方案验证无效后用户决定恢复 shader 内压暗（uMaskAlpha/uMaskColor 直接生效）。
-            glass.rgb = mix(glass.rgb, uMaskColor.rgb, uMaskAlpha * uMaskColor.a);
+            //     polish=1 时压暗强度 ×0.65（系数乘 mix(1.0,0.65,polish)；polish=0 乘 1.0 恒等）。
+            glass.rgb = mix(glass.rgb, uMaskColor.rgb, uMaskAlpha * uMaskColor.a * mix(1.0, 0.65, polish));
 
-            // 3. vibrancy：饱和度提升（Kyant colorControls saturation=1.5 的矩阵等价：mix(luma, rgb, s)）
+            // 3. vibrancy：饱和度提升（saturation=1.5 的矩阵等价：mix(luma, rgb, s)）
             float luma = dot(glass.rgb, float3(0.213, 0.715, 0.072));
             glass.rgb = mix(float3(luma), glass.rgb, uVibrancy);
 
@@ -827,6 +831,13 @@ object LiquidGlassShader {
             // 两形一致处 max 恒等取本体，直边与同形元素零变化。
             float dInVis = -max(sdRaw, sdMask);
             float band = 1.0 - smoothstep(0.0, hw, abs(dInVis - bandCenter));
+            // 窄反射带：细高斯肩替代宽钝棱边（polish=0 时 mix 恒取原 band）
+            // 肩宽上限随 uHighlightWidth 等比解锁（默认值处与纯几何封顶恒等）
+            float fineWidth = max(min(hw * 0.34, min(halfSize.x, halfSize.y) * 0.024 * max(hw * (1.0 / 12.0), 1.0)), 0.65);
+            float fineCenter = max(fineWidth * 0.65, 1.15);
+            float edgeDistance = (dInVis - fineCenter) / max(fineWidth, 0.65);
+            float fineBand = exp(-edgeDistance * edgeDistance * 1.8);
+            band = mix(band, fineBand, polish);
             // [2026-09-16 圆角弧线高光修复·方案 C] `sdfGrad` 是**边缘法线**：直边法线固定（与光源夹角恒定
             // → 高光恒定），而圆角弧线法线要**旋转 90°**，其中**必然经过与光源垂直的位置** → 原
             // `pow(abs(dot),fo)` 在该处精确归零，弧线约 60% 跨度高光消失（真机实证：192×192 圆磁贴整圈
@@ -837,7 +848,15 @@ object LiquidGlassShader {
             float floorK = clamp(uHighlightFloor, 0.0, 1.0);
             float dirDot = pow(abs(dot(sdfGrad, lightDir)), uHighlightFalloff);
             float hl = floorK + (1.0 - floorK) * dirDot;
-            glass.rgb += float3(hl * band * innerAtt * uHighlight);
+            float rim = hl * band * innerAtt * uHighlight;
+            // 高光收口：在剩余预乘 alpha 空间叠加，消圆角外硬亮边（polish=0 时 mix 恒取原 rim、不收口）
+            float3 polishedRim = max(float3(glass.a) - glass.rgb, 0.0) * clamp(rim * 0.72, 0.0, 1.0);
+            glass.rgb += mix(float3(rim), polishedRim, polish);
+            if (polish > 0.5) glass.rgb = min(glass.rgb, float3(glass.a));
+
+            // 外描边：贴边向内宽度渐隐的乘性压暗（0=逐帧恒等）；只压 rgb 不动 alpha，位于高光之后让暗线托亮边
+            float edgeT = 1.0 - smoothstep(0.0, max(uEdgeStrokeWidth, 0.01), dInVis);
+            glass.rgb *= 1.0 - uEdgeStroke * edgeT;
 
             // [临时诊断 高光] 逐像素可视化（需 uDebugHighlight>0.5）。
             // R = hl（方向因子）、G = band（带包络）、B = sdfGrad.x 映射到 [0,1]（梯度方向）。
@@ -893,18 +912,18 @@ object LiquidGlassShader {
          *  「元素短边 × 短边比例」算（Prefs.KEY_REFRACTION_HEIGHT_RATIO，默认 0.5 = 短边一半）；
          *  48f 仅作漏传兜底，不参与实际渲染。 */
         val refractionHeight: Float = 48f,
-        val refractionAmount: Float = 28f, // 折射强度 px（正值；AGSL 侧向内侧位移 = Kyant 负值约定）
-        val depth: Float = 1f,           // 深度：法线径向分量（Kyant depthEffect=true → 1）
+        val refractionAmount: Float = 28f, // 折射强度 px（正值；AGSL 侧向内侧位移 = 负值约定）
+        val depth: Float = 1f,           // 深度：法线径向分量（深度效果开 → 1）
         val dispersion: Float = 0f,      // 色散强度（默认关；0.05~0.3 彩虹边，过强显廉价）
-        val highlight: Float = 0.5f,     // 高光强度（加性≈Kyant 白色 0.5 Plus 混合）
+        val highlight: Float = 0.5f,     // 高光强度（加性≈白色 0.5 Plus 混合）
         val highlightWidth: Float = 12f, // 高光带宽度 px
-        val highlightFalloff: Float = 2f,// 高光方向衰减指数（Kyant ControlCenter=2）
+        val highlightFalloff: Float = 2f,// 高光方向衰减指数（参考值 2）
         /** [2026-09-16 弧线高光修复] 方向因子保底（AGSL uHighlightFloor）：0=原行为（弧线归零），
          *  0.4=弧线保留基础高光不再断开。见 shader 内步骤 4 说明。 */
         val highlightFloor: Float = 0.4f,
         /** [2026-10-13] 内侧高光衰减 0~1：band 内半向玻璃深处再衰减，0=现状、1=只剩贴边亮线。 */
         val highlightInnerAtt: Float = 0f,
-        val vibrancy: Float = 1.5f,      // 鲜艳度/饱和度倍数（Kyant vibrancy=1.5；1=不变）
+        val vibrancy: Float = 1.5f,      // 鲜艳度/饱和度倍数（参考值 1.5；1=不变）
         val lightAngleDegrees: Float = 45f,
         val parallaxX: Float = 0f,
         val parallaxY: Float = 0f,
@@ -914,6 +933,12 @@ object LiquidGlassShader {
         val clipBypassMask: Boolean = false,
         /** 形状裁切旁路（uClipBypassShape；true=跳过 glass *= shapeAlpha）。 */
         val clipBypassShape: Boolean = false,
+        /** 材质精修开关（uSurfacePolish；true=QS/通知宿主精修材质，false=与原式恒等）。放末尾带默认值，既有位置实参不受影响。 */
+        val surfacePolish: Boolean = false,
+        /** 外描边强度 0~1（uEdgeStroke；0=关恒等）。放末尾带默认值，既有位置实参不受影响。 */
+        val edgeStroke: Float = 0f,
+        /** 外描边宽度 px（uEdgeStrokeWidth；自可见边界向内渐隐）。 */
+        val edgeStrokeWidth: Float = 1.2f,
     )
 
     /**
@@ -1108,6 +1133,11 @@ object LiquidGlassShader {
         shader.setFloatUniform("uHighlightFloor", params.highlightFloor)
         shader.setFloatUniform("uHighlightInnerAtt", params.highlightInnerAtt)
         shader.setFloatUniform("uInnerGlow", params.innerGlow)
+        // 材质精修：无条件下发（同 uMetaball* 防残留契约）；false → 0 = 与不启用时恒等
+        shader.setFloatUniform("uSurfacePolish", if (params.surfacePolish) 1f else 0f)
+        // 外描边：无条件下发；0 = 与现状逐像素一致
+        shader.setFloatUniform("uEdgeStroke", params.edgeStroke)
+        shader.setFloatUniform("uEdgeStrokeWidth", params.edgeStrokeWidth)
         // 裁切旁路：无条件下发（同 uMetaball* 防残留契约）；0 = 与现状逐像素一致
         lastClipBypassMask = if (params.clipBypassMask) 1f else 0f
         lastClipBypassShape = if (params.clipBypassShape) 1f else 0f

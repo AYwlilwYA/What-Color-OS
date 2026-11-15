@@ -25,6 +25,9 @@ internal object SfBlurCall {
 
     private const val TAG = "SfBlurCall"
 
+    /** native 每条区域要求的 float 数（不足会 AIOOBE）。 */
+    private const val REGION_FLOATS = 32
+
     private class Ref(
         val transactionCtor: Constructor<*>,
         val setBlurRegions: Method,
@@ -62,9 +65,20 @@ internal object SfBlurCall {
         null
     }
 
-    /** 单条区域序列化（与 BackgroundBlurDrawable.BlurRegion.toFloatArray 同布局）。 */
+    /** 单条区域序列化（前 10 与 BackgroundBlurDrawable.BlurRegion.toFloatArray 同布局，其余补 0）。 */
     fun regionOf(radius: Float, alpha: Float, left: Float, top: Float, right: Float, bottom: Float, corner: Float): FloatArray =
-        floatArrayOf(radius, alpha, left, top, right, bottom, corner, corner, corner, corner)
+        FloatArray(REGION_FLOATS).also {
+            it[0] = radius
+            it[1] = alpha
+            it[2] = left
+            it[3] = top
+            it[4] = right
+            it[5] = bottom
+            it[6] = corner
+            it[7] = corner
+            it[8] = corner
+            it[9] = corner
+        }
 
     /** 取宿主窗口 SurfaceControl（View→ViewRootImpl→mSurfaceControl）；失败返回 null。 */
     fun hostScOf(view: View): Any? {
@@ -75,6 +89,38 @@ internal object SfBlurCall {
             r.surfaceControl.get(vr)
         } catch (t: Throwable) {
             throttledLog("host-sc", "${t.javaClass.simpleName}: ${t.message}")
+            null
+        }
+    }
+
+    /** host view 拿不到时的兜底：从 WindowManagerGlobal.mRoots 里找有效窗口 SC（优先 NotificationShade）。 */
+    fun fallbackSc(): Any? {
+        val r = ref ?: return null
+        return try {
+            val wmgCls = Class.forName("android.view.WindowManagerGlobal")
+            val inst = wmgCls.getMethod("getInstance").invoke(null)
+            val rootsF = wmgCls.getDeclaredField("mRoots")
+            rootsF.isAccessible = true
+            val roots = rootsF.get(inst) as? java.util.ArrayList<*> ?: return null
+            val scCls = Class.forName("android.view.SurfaceControl")
+            val isValid = scCls.getMethod("isValid")
+            val getName = scCls.methods.firstOrNull { it.name == "getName" && it.parameterCount == 0 }
+            val vriSC = r.surfaceControl
+            var firstValid: Any? = null
+            var shadeSc: Any? = null
+            for (root in roots) {
+                val sc = vriSC.get(root) ?: continue
+                if (isValid.invoke(sc) != true) continue
+                if (firstValid == null) firstValid = sc
+                val name = getName?.invoke(sc) as? String
+                if (name != null && name.contains("NotificationShade")) {
+                    shadeSc = sc
+                    break
+                }
+            }
+            shadeSc ?: firstValid
+        } catch (t: Throwable) {
+            throttledLog("fallback-sc", "${t.javaClass.simpleName}: ${t.message}")
             null
         }
     }

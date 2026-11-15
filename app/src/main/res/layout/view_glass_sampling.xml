@@ -1,0 +1,224 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            android:id="@+id/captureModeLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/settings_capture_mode"
+            android:textAppearance="?attr/textAppearanceTitleSmall" />
+
+        <Spinner
+            android:id="@+id/spinnerCaptureMode"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp" />
+
+        <TextView
+            android:id="@+id/captureModeDesc"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="@string/settings_capture_mode_desc"
+            android:textAppearance="?attr/textAppearanceBodySmall"
+            android:textColor="?android:attr/textColorSecondary" />
+
+        <!-- 即时抓屏速率（瞬态场景与即时模式共用，任何模式下都显示） -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="16dp">
+    <TextView
+            android:id="@+id/panelCaptureHzLabel"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:text="@string/settings_panel_capture_hz"
+            android:textAppearance="?attr/textAppearanceTitleSmall" />
+    <TextView
+            android:id="@+id/panelCaptureHzValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+</LinearLayout>
+
+        <SeekBar
+            android:id="@+id/seekPanelCaptureHz"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:max="90"
+            android:progress="30"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
+
+        
+
+        <TextView
+            android:id="@+id/panelCaptureHzDesc"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="@string/settings_panel_capture_hz_desc"
+            android:textAppearance="?attr/textAppearanceBodySmall"
+            android:textColor="?android:attr/textColorSecondary" />
+
+        <!-- 最大抓屏间隔（仅模式=变化抓屏时显示） -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="16dp">
+    <TextView
+            android:id="@+id/periodicCaptureIntervalLabel"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:text="@string/settings_periodic_capture_interval"
+            android:textAppearance="?attr/textAppearanceTitleSmall" />
+    <TextView
+            android:id="@+id/periodicCaptureIntervalValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+</LinearLayout>
+
+        <SeekBar
+            android:id="@+id/seekPeriodicCaptureInterval"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:max="4900"
+            android:progress="400"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
+
+        
+
+        <TextView
+            android:id="@+id/periodicCaptureIntervalDesc"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="@string/settings_periodic_capture_interval_desc"
+            android:textAppearance="?attr/textAppearanceBodySmall"
+            android:textColor="?android:attr/textColorSecondary" />
+
+        <TextView
+            android:id="@+id/captureScaleLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/settings_capture_scale"
+            android:textAppearance="?attr/textAppearanceTitleSmall" />
+
+        <Spinner
+            android:id="@+id/spinnerCaptureScale"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp" />
+
+        <TextView
+            android:id="@+id/captureScaleDesc"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="@string/settings_capture_scale_desc"
+            android:textAppearance="?attr/textAppearanceBodySmall"
+            android:textColor="?android:attr/textColorSecondary" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="@string/settings_section_capture_retry"
+            android:textAppearance="?attr/textAppearanceTitleMedium" />
+
+        <Switch
+            android:id="@+id/switchCaptureRetryEnabled"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/settings_capture_retry_enabled"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
+
+        <TextView
+            android:id="@+id/captureRetryEnabledDesc"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="@string/settings_capture_retry_enabled_desc"
+            android:textAppearance="?attr/textAppearanceBodySmall"
+            android:textColor="?android:attr/textColorSecondary" />
+
+        <Switch
+            android:id="@+id/switchRegionCaptureExperimental"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/settings_bg_region_capture_experimental"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
+
+        <TextView
+            android:id="@+id/regionCaptureExperimentalDesc"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="@string/settings_bg_region_capture_experimental_desc"
+            android:textAppearance="?attr/textAppearanceBodySmall"
+            android:textColor="?android:attr/textColorSecondary" />
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="16dp">
+    <TextView
+            android:id="@+id/wallpaperMaxDimLabel"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:text="@string/settings_bg_wallpaper_max_dim"
+            android:textAppearance="?attr/textAppearanceTitleSmall" />
+    <TextView
+            android:id="@+id/wallpaperMaxDimValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+</LinearLayout>
+
+        <SeekBar
+            android:id="@+id/seekWallpaperMaxDim"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:max="2048"
+            android:progress="1024"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
+
+        
+
+        <TextView
+            android:id="@+id/wallpaperMaxDimDesc"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="@string/settings_bg_wallpaper_max_dim_desc"
+            android:textAppearance="?attr/textAppearanceBodySmall"
+            android:textColor="?android:attr/textColorSecondary" />
+
+    </LinearLayout>
+</ScrollView>

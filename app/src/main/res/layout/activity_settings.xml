@@ -3,32 +3,31 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="@color/lg_bench_800"
     android:orientation="vertical">
 
-    <!-- [spec/88] toolbar 顶部 inset 占位条：把 toolbar 顶边顶到状态栏/挖孔下沿。
-         高度由 SettingsActivity.applyToolbarInset() 按【屏幕坐标实测几何】算出（0 = 无需补偿），
-         背景与 toolbar 同为 colorSurface，视觉上是一整块 ActionBar。 -->
     <View
         android:id="@+id/toolbarTopSpacer"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:background="?attr/colorSurface" />
+        android:background="@color/lg_bench_800" />
 
     <FrameLayout
+        android:id="@+id/toolbarRow"
         android:layout_width="match_parent"
         android:layout_height="?attr/actionBarSize"
-        android:background="?attr/colorSurface">
+        android:background="@color/lg_bench_800">
 
         <com.google.android.material.appbar.MaterialToolbar
             android:id="@+id/toolbar"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:background="?attr/colorSurface"
+            android:background="@color/lg_bench_800"
             app:title="@string/app_name"
-            app:titleTextAppearance="?attr/textAppearanceTitleMedium" />
+            app:titleTextAppearance="@style/ShellToolbarTitle"
+            app:subtitleTextAppearance="@style/ShellToolbarSubtitle"
+            app:titleTextColor="@color/lg_ink_100" />
 
-        <!-- [spec/88] 返回键扩大热区：盖住导航图标 + 其右侧空白（80dp × toolbar 全高），
-             点击直接走 navigateUp()，与导航图标同一套返回逻辑；无实底背景，不遮挡箭头。 -->
         <View
             android:id="@+id/backHitOverlay"
             android:layout_width="80dp"
@@ -36,13 +35,150 @@
             android:background="?attr/selectableItemBackgroundBorderless"
             android:clickable="true"
             android:contentDescription="@string/settings_back"
-            android:focusable="true" />
+            android:focusable="true"
+            android:visibility="gone" />
+
+        <ImageButton
+            android:id="@+id/restartScopeBtn"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_gravity="end|center_vertical"
+            android:layout_marginEnd="4dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/settings_restart_scope"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_refresh"
+            android:visibility="gone"
+            app:tint="@color/lg_ink_100" />
     </FrameLayout>
 
-    <!-- 一级列表页 / 二级设置页共用内容区（showCategories / openCategory 切换子视图） -->
     <FrameLayout
         android:id="@+id/settings_content"
         android:layout_width="match_parent"
-        android:layout_height="match_parent" />
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="@drawable/bg_screen" />
+
+    <LinearLayout
+        android:id="@+id/bottomNav"
+        android:layout_width="match_parent"
+        android:layout_height="60dp"
+        android:background="@drawable/bg_nav"
+        android:orientation="horizontal">
+
+        <LinearLayout
+            android:id="@+id/navTabHomeBox"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:background="?attr/selectableItemBackground"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center_horizontal"
+            android:orientation="vertical">
+
+            <View
+                android:id="@+id/navIndHome"
+                android:layout_width="26dp"
+                android:layout_height="3dp"
+                android:layout_marginTop="6dp"
+                android:background="@drawable/bg_tab_indicator"
+                android:visibility="invisible" />
+
+            <ImageView
+                android:id="@+id/navIconHome"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:layout_marginTop="4dp"
+                android:contentDescription="@null"
+                android:src="@drawable/ic_tab_home" />
+
+            <TextView
+                android:id="@+id/navTabHome"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:letterSpacing="0.08"
+                android:text="@string/settings_tab_home"
+                android:textColor="@color/lg_ink_400"
+                android:textSize="10.5sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/navTabFuncBox"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:background="?attr/selectableItemBackground"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center_horizontal"
+            android:orientation="vertical">
+
+            <View
+                android:id="@+id/navIndFunc"
+                android:layout_width="26dp"
+                android:layout_height="3dp"
+                android:layout_marginTop="6dp"
+                android:background="@drawable/bg_tab_indicator"
+                android:visibility="invisible" />
+
+            <ImageView
+                android:id="@+id/navIconFunc"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:layout_marginTop="4dp"
+                android:contentDescription="@null"
+                android:src="@drawable/ic_tab_func" />
+
+            <TextView
+                android:id="@+id/navTabFunc"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:letterSpacing="0.08"
+                android:text="@string/settings_tab_func"
+                android:textColor="@color/lg_ink_400"
+                android:textSize="10.5sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/navTabSettingsBox"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:background="?attr/selectableItemBackground"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center_horizontal"
+            android:orientation="vertical">
+
+            <View
+                android:id="@+id/navIndSettings"
+                android:layout_width="26dp"
+                android:layout_height="3dp"
+                android:layout_marginTop="6dp"
+                android:background="@drawable/bg_tab_indicator"
+                android:visibility="invisible" />
+
+            <ImageView
+                android:id="@+id/navIconSettings"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:layout_marginTop="4dp"
+                android:contentDescription="@null"
+                android:src="@drawable/ic_tab_settings" />
+
+            <TextView
+                android:id="@+id/navTabSettings"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:letterSpacing="0.08"
+                android:text="@string/settings_tab_settings"
+                android:textColor="@color/lg_ink_400"
+                android:textSize="10.5sp" />
+        </LinearLayout>
+    </LinearLayout>
 
 </LinearLayout>

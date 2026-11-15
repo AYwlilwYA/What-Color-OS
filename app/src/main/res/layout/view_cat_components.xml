@@ -15,7 +15,13 @@
             android:id="@+id/switchVolumeSeekBarGlass"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/settings_volume_seekbar_glass" />
+            android:text="@string/settings_volume_seekbar_glass"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
 
         <TextView
             android:layout_width="match_parent"
@@ -25,29 +31,19 @@
             android:textAppearance="?attr/textAppearanceBodySmall"
             android:textColor="?android:attr/textColorSecondary" />
 
-        <!-- 进度条亮白填充（默认关；TTL 500ms 重读 Prefs） -->
-        <Switch
-            android:id="@+id/switchVolumePanelClean"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="@string/settings_volume_panel_clean" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="2dp"
-            android:text="@string/settings_volume_panel_clean_desc"
-            android:textAppearance="?attr/textAppearanceBodySmall"
-            android:textColor="?android:attr/textColorSecondary" />
-
         <!-- 音量面板去白底（面板后方模糊层净化；默认关；TTL 500ms 重读 Prefs） -->
         <Switch
             android:id="@+id/switchVolumePanelBackdrop"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="@string/settings_volume_panel_backdrop" />
+            android:text="@string/settings_volume_panel_backdrop"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
 
         <TextView
             android:layout_width="match_parent"
@@ -63,7 +59,13 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="@string/settings_notification_popup_glass" />
+            android:text="@string/settings_notification_popup_glass"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
 
         <TextView
             android:layout_width="match_parent"
@@ -79,7 +81,13 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="@string/settings_gallery_glass" />
+            android:text="@string/settings_gallery_glass"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
 
         <TextView
             android:layout_width="match_parent"
@@ -95,7 +103,13 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="@string/settings_calculator_glass" />
+            android:text="@string/settings_calculator_glass"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
 
         <TextView
             android:layout_width="match_parent"
@@ -111,7 +125,13 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="@string/settings_smart_sidebar_glass" />
+            android:text="@string/settings_smart_sidebar_glass"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
 
         <TextView
             android:layout_width="match_parent"
@@ -127,7 +147,13 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="@string/settings_assistant_screen_glass" />
+            android:text="@string/settings_assistant_screen_glass"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
 
         <TextView
             android:layout_width="match_parent"
@@ -143,7 +169,13 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="@string/settings_quick_search_glass" />
+            android:text="@string/settings_quick_search_glass"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
 
         <TextView
             android:layout_width="match_parent"
@@ -159,7 +191,13 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="@string/settings_gallery_shader_probe" />
+            android:text="@string/settings_gallery_shader_probe"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
 
         <TextView
             android:layout_width="match_parent"
@@ -175,7 +213,13 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="@string/settings_clear_all_btn_glass" />
+            android:text="@string/settings_clear_all_btn_glass"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
 
         <TextView
             android:layout_width="match_parent"
@@ -191,7 +235,13 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="@string/settings_edit_toolbar_glass" />
+            android:text="@string/settings_edit_toolbar_glass"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
 
         <TextView
             android:layout_width="match_parent"
@@ -207,7 +257,13 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="@string/settings_edit_toolbtn_glass" />
+            android:text="@string/settings_edit_toolbtn_glass"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
 
         <TextView
             android:layout_width="match_parent"
@@ -223,13 +279,90 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="@string/settings_popup_menu_glass" />
+            android:text="@string/settings_popup_menu_glass"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="2dp"
             android:text="@string/settings_popup_menu_glass_desc"
+            android:textAppearance="?attr/textAppearanceBodySmall"
+            android:textColor="?android:attr/textColorSecondary" />
+
+        <!-- 息屏：连贯过渡 / 样式 / 玻璃三个开关 -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="@string/settings_section_alive_aod"
+            android:textAppearance="?attr/textAppearanceTitleMedium" />
+
+        <Switch
+            android:id="@+id/switchAliveAodHandoff"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/settings_alive_aod_handoff"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="@string/settings_alive_aod_handoff_desc"
+            android:textAppearance="?attr/textAppearanceBodySmall"
+            android:textColor="?android:attr/textColorSecondary" />
+
+        <Switch
+            android:id="@+id/switchAliveAodStyle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/settings_alive_aod_style"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="@string/settings_alive_aod_style_desc"
+            android:textAppearance="?attr/textAppearanceBodySmall"
+            android:textColor="?android:attr/textColorSecondary" />
+
+        <Switch
+            android:id="@+id/switchAliveAodGlass"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/settings_alive_aod_glass"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="@string/settings_alive_aod_glass_desc"
             android:textAppearance="?attr/textAppearanceBodySmall"
             android:textColor="?android:attr/textColorSecondary" />
 

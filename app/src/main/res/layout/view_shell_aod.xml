@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingHorizontal="16dp"
+        android:paddingBottom="24dp">
+
+        <LinearLayout style="@style/ShellGroupHead">
+            <TextView
+                style="@style/ShellGroupTitle"
+                android:text="@string/settings_aod_menu_group_takeover" />
+            <View style="@style/ShellGroupRule" />
+        </LinearLayout>
+
+        <com.google.android.material.card.MaterialCardView
+            style="@style/ShellPlate"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:cardCornerRadius="14dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingHorizontal="16dp"
+                android:paddingVertical="12dp">
+
+                <Switch
+                    android:id="@+id/aodSwitchWallpaper"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="0dp"
+                    android:text="@string/settings_aod_takeover_wallpaper"
+                    android:textColor="@color/lg_ink_100"
+                    android:textSize="15sp"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="@string/settings_aod_takeover_wallpaper_desc"
+                    android:textAppearance="?attr/textAppearanceBodySmall"
+                    android:textColor="?android:attr/textColorSecondary" />
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginVertical="12dp"
+                    android:background="?attr/colorOutlineVariant" />
+
+                <Switch
+                    android:id="@+id/aodSwitchScreen"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="0dp"
+                    android:text="@string/settings_aod_screen"
+                    android:textColor="@color/lg_ink_100"
+                    android:textSize="15sp"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="@string/settings_aod_screen_desc"
+                    android:textAppearance="?attr/textAppearanceBodySmall"
+                    android:textColor="?android:attr/textColorSecondary" />
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginVertical="12dp"
+                    android:background="?attr/colorOutlineVariant" />
+
+                <Switch
+                    android:id="@+id/aodSwitchLockShow"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="0dp"
+                    android:text="@string/settings_aod_lock_show"
+                    android:textColor="@color/lg_ink_100"
+                    android:textSize="15sp"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="@string/settings_aod_lock_show_desc"
+                    android:textAppearance="?attr/textAppearanceBodySmall"
+                    android:textColor="?android:attr/textColorSecondary" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <LinearLayout style="@style/ShellGroupHead">
+            <TextView
+                style="@style/ShellGroupTitle"
+                android:text="@string/settings_aod_menu_group_manage" />
+            <View style="@style/ShellGroupRule" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_plate"
+            android:divider="@drawable/bg_seam_line_inset"
+            android:dividerHeight="1dp"
+            android:orientation="vertical"
+            android:showDividers="middle">
+
+            <include
+                android:id="@+id/aodRowDisplay"
+                layout="@layout/item_row"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+
+            <include
+                android:id="@+id/aodRowConfigs"
+                layout="@layout/item_row"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+        </LinearLayout>
+
+        <TextView
+            style="@style/ShellHint"
+            android:text="@string/settings_aod_configs_hint" />
+    </LinearLayout>
+</ScrollView>

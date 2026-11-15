@@ -1,0 +1,188 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto" android:layout_width="match_parent" android:layout_height="match_parent" android:fillViewport="true">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="16dp">
+        <!-- ===== 绘制总控 ===== -->
+        <LinearLayout style="@style/ShellGroupHead">
+            <TextView style="@style/ShellGroupTitle" android:text="@string/settings_glass_group_control" />
+            <TextView android:id="@+id/infoGlassControl" style="@style/ShellGroupInfo" />
+            <View style="@style/ShellGroupRule" />
+        </LinearLayout>
+        <com.google.android.material.card.MaterialCardView style="@style/ShellPlate" android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="14dp">
+            <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:divider="@drawable/bg_seam_line_inset" android:dividerHeight="1dp" android:showDividers="middle">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
+                    <Switch android:id="@+id/glassSwitch" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_glass_enable" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                    />
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_glass_enable_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/settings_render_mode" android:textAppearance="?attr/textAppearanceTitleSmall" />
+                    <RadioGroup android:id="@+id/glassRenderModeGroup" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+                        <RadioButton android:id="@+id/glassRadioRenderApp" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_render_mode_app" />
+                        <RadioButton android:id="@+id/glassRadioRenderSf" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_render_mode_sf" />
+                    </RadioGroup>
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+                        <com.google.android.material.button.MaterialButton android:id="@+id/glassBtnGetModule" style="@style/ShellBtnOutlined" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/settings_sf_get_module" />
+                        <com.google.android.material.button.MaterialButton android:id="@+id/glassBtnDalog" style="@style/ShellBtnOutlined" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:text="@string/settings_glass_test_entry" />
+                    </LinearLayout>
+                </LinearLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+        <!-- ===== 预设 ===== -->
+        <LinearLayout style="@style/ShellGroupHead">
+            <TextView style="@style/ShellGroupTitle" android:text="@string/settings_glass_group_preset" />
+            <TextView android:id="@+id/infoGlassPreset" style="@style/ShellGroupInfo" />
+            <View style="@style/ShellGroupRule" />
+        </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:background="@drawable/bg_plate" android:divider="@drawable/bg_seam_line_inset" android:dividerHeight="1dp" android:orientation="vertical" android:showDividers="middle">
+            <include android:id="@+id/presetAppearanceRow" layout="@layout/item_row" android:layout_width="match_parent" android:layout_height="wrap_content" />
+            <include android:id="@+id/presetBatteryRow" layout="@layout/item_row" android:layout_width="match_parent" android:layout_height="wrap_content" />
+            <include android:id="@+id/presetCustomRow" layout="@layout/item_row" android:layout_width="match_parent" android:layout_height="wrap_content" />
+        </LinearLayout>
+        <TextView style="@style/ShellHint" android:text="@string/settings_glass_preset_hint" />
+        <!-- ===== 配置管理 ===== -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="20dp" android:layout_marginBottom="8dp" android:gravity="center_vertical" android:orientation="horizontal">
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:paddingStart="4dp" android:text="@string/settings_glass_group_config" style="@style/ShellGroupLabel" />
+            <TextView android:id="@+id/infoGlassConfig" style="@style/ShellGroupInfo" />
+            <com.google.android.material.button.MaterialButton android:id="@+id/glassAddConfig" style="@style/ShellBtnText" android:layout_width="wrap_content" android:layout_height="wrap_content" android:minWidth="0dp" android:text="@string/settings_add_config" android:textSize="13sp" />
+        </LinearLayout>
+        <LinearLayout android:id="@+id/glassConfigList" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" />
+        <!-- ===== 类名分配 ===== -->
+        <LinearLayout style="@style/ShellGroupHead">
+            <TextView style="@style/ShellGroupTitle" android:text="@string/settings_glass_group_assign" />
+            <TextView android:id="@+id/infoGlassAssign" style="@style/ShellGroupInfo" />
+            <View style="@style/ShellGroupRule" />
+        </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:background="@drawable/bg_plate" android:divider="@drawable/bg_seam_line_inset" android:dividerHeight="1dp" android:orientation="vertical" android:showDividers="middle">
+            <include android:id="@+id/glassClassAssignRow" layout="@layout/item_row" android:layout_width="match_parent" android:layout_height="wrap_content" />
+        </LinearLayout>
+        <!-- ===== 玻璃化对象 ===== -->
+        <LinearLayout style="@style/ShellGroupHead">
+            <TextView style="@style/ShellGroupTitle" android:text="@string/settings_glass_group_objects" />
+            <View style="@style/ShellGroupRule" />
+            <com.google.android.material.button.MaterialButton android:id="@+id/glassObjAllOn" style="@style/ShellBtnText" android:layout_width="wrap_content" android:layout_height="wrap_content" android:minWidth="0dp" android:text="@string/settings_obj_all_on" android:textSize="12sp" />
+            <com.google.android.material.button.MaterialButton android:id="@+id/glassObjAllOff" style="@style/ShellBtnText" android:layout_width="wrap_content" android:layout_height="wrap_content" android:minWidth="0dp" android:text="@string/settings_obj_all_off" android:textSize="12sp" />
+        </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:background="@drawable/bg_plate" android:divider="@drawable/bg_seam_line_inset" android:dividerHeight="1dp" android:orientation="vertical" android:showDividers="middle">
+            <include android:id="@+id/glassObjSystemRow" layout="@layout/item_row" android:layout_width="match_parent" android:layout_height="wrap_content" />
+            <include android:id="@+id/glassObjDesktopRow" layout="@layout/item_row" android:layout_width="match_parent" android:layout_height="wrap_content" />
+        </LinearLayout>
+        <com.google.android.material.card.MaterialCardView style="@style/ShellPlate" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" app:cardCornerRadius="14dp">
+            <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:divider="@drawable/bg_seam_line_inset" android:dividerHeight="1dp" android:showDividers="middle">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
+                    <Switch android:id="@+id/switchGalleryGlass" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_gallery_glass" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                    />
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_gallery_glass_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
+                    <Switch android:id="@+id/switchAssistantScreenGlass" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_assistant_screen_glass" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                    />
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_assistant_screen_glass_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
+                    <Switch android:id="@+id/switchQuickSearchGlass" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_quick_search_glass" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                    />
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_quick_search_glass_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
+                    <Switch android:id="@+id/switchCalculatorGlass" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_calculator_glass" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                    />
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_calculator_glass_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
+                    <Switch android:id="@+id/switchSmartSidebarGlass" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_smart_sidebar_glass" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                    />
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_smart_sidebar_glass_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
+                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
+                        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_glass_other_apps" android:textColor="@color/lg_ink_100" android:textSize="15sp" />
+                        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_glass_more_apps" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
+                    </LinearLayout>
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="8dp" android:background="@drawable/bg_chip_warn" android:paddingHorizontal="8dp" android:paddingVertical="3dp" android:text="@string/settings_glass_soon" android:textColor="@color/lg_ink_300" android:textSize="10.5sp" />
+                </LinearLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+        <!-- ===== 流体云 ===== -->
+        <LinearLayout style="@style/ShellGroupHead">
+            <TextView style="@style/ShellGroupTitle" android:text="@string/settings_glass_group_fluid" />
+            <View style="@style/ShellGroupRule" />
+        </LinearLayout>
+        <com.google.android.material.card.MaterialCardView style="@style/ShellPlate" android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="14dp">
+            <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:divider="@drawable/bg_seam_line_inset" android:dividerHeight="1dp" android:showDividers="middle">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
+                    <Switch android:id="@+id/switchSeedlingCardGlass" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_fluid_card_glass" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                    />
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_fluid_card_glass_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
+                    <Switch android:id="@+id/switchSeedlingCapsuleGlass" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_fluid_capsule_glass" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                    />
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_fluid_capsule_glass_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
+                    <Switch android:id="@+id/switchSeedlingForceTransparentBg" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_fluid_no_original_color" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                    />
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_fluid_no_original_color_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
+                </LinearLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+        <!-- ===== 可读性 ===== -->
+        <LinearLayout style="@style/ShellGroupHead">
+            <TextView style="@style/ShellGroupTitle" android:text="@string/settings_glass_group_readability" />
+            <View style="@style/ShellGroupRule" />
+        </LinearLayout>
+        <com.google.android.material.card.MaterialCardView style="@style/ShellPlate" android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="14dp">
+            <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:divider="@drawable/bg_seam_line_inset" android:dividerHeight="1dp" android:showDividers="middle">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
+                    <Switch android:id="@+id/switchMask" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_mask" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                    />
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
+                    <Switch android:id="@+id/switchTextForceWhite" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_text_force_white" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                    />
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
+                    <Switch android:id="@+id/switchTextContrast" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_text_contrast" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                    />
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
+                    <Switch android:id="@+id/switchHeadsUpTextFollow" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_heads_up_text_follow" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                    />
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal">
+    <TextView android:layout_width="0dp"
+            android:layout_weight="1" android:layout_height="wrap_content" android:text="@string/settings_mask_alpha" android:textAppearance="?attr/textAppearanceTitleSmall" />
+    <TextView android:id="@+id/maskAlphaValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+</LinearLayout>
+                    <SeekBar android:id="@+id/seekMaskAlpha" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:max="100" android:progress="35" android:progressDrawable="@drawable/lg_seek_track" android:splitTrack="false" android:thumb="@drawable/lg_seek_thumb" />
+                    
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/settings_mask_text_color" android:textAppearance="?attr/textAppearanceTitleSmall" />
+                    <Spinner android:id="@+id/spinnerMaskTextColor" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" />
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal">
+    <TextView android:layout_width="0dp"
+            android:layout_weight="1" android:layout_height="wrap_content" android:text="@string/settings_text_force_refresh_interval" android:textAppearance="?attr/textAppearanceTitleSmall" />
+    <TextView android:id="@+id/textForceRefreshValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+</LinearLayout>
+                    <SeekBar android:id="@+id/seekTextForceRefresh" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:max="5000" android:progress="500" android:progressDrawable="@drawable/lg_seek_track" android:splitTrack="false" android:thumb="@drawable/lg_seek_thumb" />
+                    
+                </LinearLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+        <!-- ===== 背景与采样 ===== -->
+        <LinearLayout style="@style/ShellGroupHead">
+            <TextView style="@style/ShellGroupTitle" android:text="@string/settings_glass_group_sampling" />
+            <View style="@style/ShellGroupRule" />
+        </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:background="@drawable/bg_plate" android:divider="@drawable/bg_seam_line_inset" android:dividerHeight="1dp" android:orientation="vertical" android:showDividers="middle">
+            <include android:id="@+id/glassSamplingRow" layout="@layout/item_row" android:layout_width="match_parent" android:layout_height="wrap_content" />
+        </LinearLayout>
+        <TextView style="@style/ShellHint" android:text="@string/settings_glass_sampling_hint" />
+    </LinearLayout>
+</ScrollView>

@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto" android:layout_width="match_parent" android:layout_height="match_parent" android:fillViewport="true">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="16dp" android:paddingBottom="24dp">
+        <LinearLayout style="@style/ShellGroupHead">
+            <TextView style="@style/ShellGroupTitle" android:text="@string/settings_diag_group_bypass" />
+            <View style="@style/ShellGroupRule" />
+        </LinearLayout>
+        <com.google.android.material.card.MaterialCardView style="@style/ShellPlate" android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="14dp">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="16dp">
+                <Switch android:id="@+id/switchClipBypassMask" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_clip_bypass_mask" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                    />
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_clip_bypass_mask_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
+                <View android:layout_width="match_parent" android:layout_height="1dp" android:layout_marginTop="16dp" android:layout_marginBottom="12dp" android:background="?attr/colorOutlineVariant" />
+                <Switch android:id="@+id/switchClipBypassShape" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_clip_bypass_shape" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                    />
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_clip_bypass_shape_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
+                <View android:layout_width="match_parent" android:layout_height="1dp" android:layout_marginTop="16dp" android:layout_marginBottom="12dp" android:background="?attr/colorOutlineVariant" />
+                <Switch android:id="@+id/switchClipBypassCanvas" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_clip_bypass_canvas" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                    />
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_clip_bypass_canvas_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
+                <View android:layout_width="match_parent" android:layout_height="1dp" android:layout_marginTop="16dp" android:layout_marginBottom="12dp" android:background="?attr/colorOutlineVariant" />
+                <Switch android:id="@+id/switchGalleryShaderProbe" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_gallery_shader_probe" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                    />
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_gallery_shader_probe_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+        <LinearLayout style="@style/ShellGroupHead">
+            <TextView style="@style/ShellGroupTitle" android:text="@string/settings_diag_group_ball" />
+            <View style="@style/ShellGroupRule" />
+        </LinearLayout>
+        <com.google.android.material.card.MaterialCardView style="@style/ShellPlate" android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="14dp">
+            <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:divider="@drawable/bg_seam_line_inset" android:dividerHeight="1dp" android:showDividers="middle">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
+                    <Switch android:id="@+id/switchElementGlass" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_element_glass" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                    />
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_element_glass_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
+                </LinearLayout>
+                <LinearLayout android:id="@+id/rootBallStartRow" android:layout_width="match_parent" android:layout_height="wrap_content" android:background="?attr/selectableItemBackground" android:gravity="center_vertical" android:orientation="horizontal" android:paddingHorizontal="15dp" android:paddingVertical="12dp">
+                <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:fontFamily="sans-serif-medium" android:text="@string/settings_root_ball_start" android:textColor="@color/lg_ink_100" android:textSize="15sp" />
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_root_ball_start_desc" android:textColor="@color/lg_ink_400" android:textSize="12sp" />
+                </LinearLayout>
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:background="@drawable/bg_chip" android:paddingHorizontal="9dp" android:paddingVertical="3dp" android:text="@string/settings_chip_launch" android:textColor="@color/lg_ink_300" android:textSize="10.5sp" />
+                </LinearLayout>
+                <LinearLayout android:id="@+id/rootBallStopRow" android:layout_width="match_parent" android:layout_height="wrap_content" android:background="?attr/selectableItemBackground" android:gravity="center_vertical" android:orientation="horizontal" android:paddingHorizontal="15dp" android:paddingVertical="12dp">
+                <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:fontFamily="sans-serif-medium" android:text="@string/settings_root_ball_stop" android:textColor="@color/lg_ink_100" android:textSize="15sp" />
+                </LinearLayout>
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:background="@drawable/bg_chip" android:paddingHorizontal="9dp" android:paddingVertical="3dp" android:text="@string/settings_chip_stop" android:textColor="@color/lg_ink_300" android:textSize="10.5sp" />
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:paddingHorizontal="15dp" android:paddingVertical="12dp">
+                <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:fontFamily="sans-serif-medium" android:text="@string/settings_row_state" android:textColor="@color/lg_ink_100" android:textSize="15sp" />
+                    <TextView android:id="@+id/rootBallStatusRow" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_root_ball_idle" android:textColor="@color/lg_ink_400" android:textSize="12sp" />
+                </LinearLayout>
+                <TextView android:id="@+id/rootBallStatusChip" android:layout_width="wrap_content" android:layout_height="wrap_content" android:background="@drawable/bg_chip" android:ellipsize="end" android:maxLines="1" android:maxWidth="120dp" android:paddingHorizontal="9dp" android:paddingVertical="3dp" android:text="@string/settings_chip_ball_idle" android:textColor="@color/lg_ink_300" android:textSize="10.5sp" />
+                </LinearLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+    </LinearLayout>
+</ScrollView>

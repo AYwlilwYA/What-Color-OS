@@ -145,6 +145,24 @@ object BlurCaptureHook {
         return if (cl != null) Class.forName(name, true, cl) else Class.forName(name)
     }
 
+    @Volatile
+    private var layerCaptureArgsName: String? = null
+    private var layerCaptureArgsMissLogged = false
+
+    /** LayerCaptureArgs 实际类名（抓屏类族同源解析；失败回退旧名并只告警一次）。 */
+    private fun layerCaptureArgsName(): String {
+        layerCaptureArgsName?.let { return it }
+        return try {
+            CaptureApi.load(CLASS_LAYER_CAPTURE_ARGS, hostClassLoader).name.also { layerCaptureArgsName = it }
+        } catch (t: Throwable) {
+            if (!layerCaptureArgsMissLogged) {
+                layerCaptureArgsMissLogged = true
+                Lg.w(TAG, "[capture-family-miss] 抓屏类族解析失败，LayerCaptureArgs 回退旧名", t)
+            }
+            CLASS_LAYER_CAPTURE_ARGS
+        }
+    }
+
     fun install(api: XposedInterface, classLoader: ClassLoader) {
         apiRef = api
         hostClassLoader = classLoader
@@ -927,7 +945,7 @@ object BlurCaptureHook {
             return null
         }
         val argsCls = obj?.javaClass ?: return null
-        if (argsCls.name != CLASS_LAYER_CAPTURE_ARGS) {
+        if (argsCls.name != layerCaptureArgsName()) {
             return null  // 非 LayerCaptureArgs，不处理
         }
         // [doc/spec/06] 排除自身层逻辑（applySelfExclude / oplus 整屏排除）已随方向废弃移除，

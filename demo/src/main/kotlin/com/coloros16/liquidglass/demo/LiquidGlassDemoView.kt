@@ -69,6 +69,9 @@ class LiquidGlassDemoView(context: Context) : View(context) {
     private val bgCanvas = Canvas()
     private val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG)
 
+    /** 背景位图不透明度：低于 255 时窗口背景模糊可透出。 */
+    var backdropAlpha: Int = 255
+
     // uSourceLowRes 低分辨率源图（1/4 降采样，消除全分辨率欠采样网格伪影）——随 bg 双缓冲，
     // lowResBitmaps[bgIndex] 与 bgBitmaps[bgIndex] 同帧成对交替，保证绘制与 shader BitmapShader 引用同一 buffer。
     private val lowResBitmaps = arrayOfNulls<Bitmap>(2)
@@ -370,7 +373,9 @@ class LiquidGlassDemoView(context: Context) : View(context) {
         //    buildBackground / ensureLowRes / drawBitmap / 各元素 shader BitmapShader 全部引用
         //    bgIndex 同一 buffer（bg + lowRes 成对），本帧内自洽。
         val bmp = buildBackground(t, width, height)
+        bgPaint.alpha = backdropAlpha
         canvas.drawBitmap(bmp, 0f, 0f, bgPaint)
+        bgPaint.alpha = 255
         val lowRes = ensureLowRes(bmp, bgIndex)
 
         // 2. 玻璃元素：统一「元素局部坐标」——每元素 translate 后以局部坐标 (0,0,w,h) 绘制，

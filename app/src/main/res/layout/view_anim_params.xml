@@ -16,7 +16,13 @@
             android:id="@+id/switchAnimEnabled"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/settings_anim_enable_custom" />
+            android:text="@string/settings_anim_enable_custom"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
 
         <TextView
             android:id="@+id/animEnabledDesc"
@@ -53,7 +59,7 @@
         <!-- [spec/64] 仅「打断动画」页可见：把「打开动画」参数整组复制过来 -->
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnSyncFromOpen"
-            style="?attr/materialButtonOutlinedStyle"
+            style="@style/ShellBtnOutlined"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
@@ -78,49 +84,55 @@
             android:text="@string/settings_anim_sec_x"
             android:textAppearance="?attr/textAppearanceTitleSmall" />
 
-        <TextView
-            android:layout_width="wrap_content"
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="6dp">
+    <TextView android:fontFamily="sans-serif-medium" android:textColor="@color/lg_ink_100" android:textSize="14sp"
+            android:layout_width="0dp"
+            android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:text="@string/settings_anim_damping"
-            android:textAppearance="?attr/textAppearanceBodySmall"
-            android:textColor="?android:attr/textColorSecondary" />
+            android:text="@string/settings_anim_damping" />
+    <TextView
+            android:id="@+id/animXDampingValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+</LinearLayout>
 
         <SeekBar
             android:id="@+id/seekAnimXDamping"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:max="290"
-            android:progress="130" />
+            android:progress="130"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
 
-        <TextView
-            android:id="@+id/animXDampingValue"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="?attr/textAppearanceBodySmall"
-            android:textColor="?android:attr/textColorSecondary" />
+        
 
-        <TextView
-            android:layout_width="wrap_content"
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="6dp">
+    <TextView android:fontFamily="sans-serif-medium" android:textColor="@color/lg_ink_100" android:textSize="14sp"
+            android:layout_width="0dp"
+            android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:text="@string/settings_anim_stiffness"
-            android:textAppearance="?attr/textAppearanceBodySmall"
-            android:textColor="?android:attr/textColorSecondary" />
+            android:text="@string/settings_anim_stiffness" />
+    <TextView
+            android:id="@+id/animXStiffnessValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+</LinearLayout>
 
         <SeekBar
             android:id="@+id/seekAnimXStiffness"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:max="2999"
-            android:progress="579" />
+            android:progress="579"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
 
-        <TextView
-            android:id="@+id/animXStiffnessValue"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="?attr/textAppearanceBodySmall"
-            android:textColor="?android:attr/textColorSecondary" />
+        
 
         <!-- 中心 Y 轴 -->
         <TextView
@@ -130,49 +142,55 @@
             android:text="@string/settings_anim_sec_y"
             android:textAppearance="?attr/textAppearanceTitleSmall" />
 
-        <TextView
-            android:layout_width="wrap_content"
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="6dp">
+    <TextView android:fontFamily="sans-serif-medium" android:textColor="@color/lg_ink_100" android:textSize="14sp"
+            android:layout_width="0dp"
+            android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:text="@string/settings_anim_damping"
-            android:textAppearance="?attr/textAppearanceBodySmall"
-            android:textColor="?android:attr/textColorSecondary" />
+            android:text="@string/settings_anim_damping" />
+    <TextView
+            android:id="@+id/animYDampingValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+</LinearLayout>
 
         <SeekBar
             android:id="@+id/seekAnimYDamping"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:max="290"
-            android:progress="130" />
+            android:progress="130"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
 
-        <TextView
-            android:id="@+id/animYDampingValue"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="?attr/textAppearanceBodySmall"
-            android:textColor="?android:attr/textColorSecondary" />
+        
 
-        <TextView
-            android:layout_width="wrap_content"
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="6dp">
+    <TextView android:fontFamily="sans-serif-medium" android:textColor="@color/lg_ink_100" android:textSize="14sp"
+            android:layout_width="0dp"
+            android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:text="@string/settings_anim_stiffness"
-            android:textAppearance="?attr/textAppearanceBodySmall"
-            android:textColor="?android:attr/textColorSecondary" />
+            android:text="@string/settings_anim_stiffness" />
+    <TextView
+            android:id="@+id/animYStiffnessValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+</LinearLayout>
 
         <SeekBar
             android:id="@+id/seekAnimYStiffness"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:max="2999"
-            android:progress="579" />
+            android:progress="579"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
 
-        <TextView
-            android:id="@+id/animYStiffnessValue"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="?attr/textAppearanceBodySmall"
-            android:textColor="?android:attr/textColorSecondary" />
+        
 
         <!-- 宽度缩放 -->
         <TextView
@@ -182,49 +200,55 @@
             android:text="@string/settings_anim_sec_width"
             android:textAppearance="?attr/textAppearanceTitleSmall" />
 
-        <TextView
-            android:layout_width="wrap_content"
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="6dp">
+    <TextView android:fontFamily="sans-serif-medium" android:textColor="@color/lg_ink_100" android:textSize="14sp"
+            android:layout_width="0dp"
+            android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:text="@string/settings_anim_damping"
-            android:textAppearance="?attr/textAppearanceBodySmall"
-            android:textColor="?android:attr/textColorSecondary" />
+            android:text="@string/settings_anim_damping" />
+    <TextView
+            android:id="@+id/animWidthDampingValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+</LinearLayout>
 
         <SeekBar
             android:id="@+id/seekAnimWidthDamping"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:max="290"
-            android:progress="130" />
+            android:progress="130"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
 
-        <TextView
-            android:id="@+id/animWidthDampingValue"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="?attr/textAppearanceBodySmall"
-            android:textColor="?android:attr/textColorSecondary" />
+        
 
-        <TextView
-            android:layout_width="wrap_content"
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="6dp">
+    <TextView android:fontFamily="sans-serif-medium" android:textColor="@color/lg_ink_100" android:textSize="14sp"
+            android:layout_width="0dp"
+            android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:text="@string/settings_anim_stiffness"
-            android:textAppearance="?attr/textAppearanceBodySmall"
-            android:textColor="?android:attr/textColorSecondary" />
+            android:text="@string/settings_anim_stiffness" />
+    <TextView
+            android:id="@+id/animWidthStiffnessValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+</LinearLayout>
 
         <SeekBar
             android:id="@+id/seekAnimWidthStiffness"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:max="2999"
-            android:progress="579" />
+            android:progress="579"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
 
-        <TextView
-            android:id="@+id/animWidthStiffnessValue"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="?attr/textAppearanceBodySmall"
-            android:textColor="?android:attr/textColorSecondary" />
+        
 
         <!-- 宽高比例 -->
         <TextView
@@ -234,57 +258,69 @@
             android:text="@string/settings_anim_sec_height"
             android:textAppearance="?attr/textAppearanceTitleSmall" />
 
-        <TextView
-            android:layout_width="wrap_content"
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="6dp">
+    <TextView android:fontFamily="sans-serif-medium" android:textColor="@color/lg_ink_100" android:textSize="14sp"
+            android:layout_width="0dp"
+            android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:text="@string/settings_anim_damping"
-            android:textAppearance="?attr/textAppearanceBodySmall"
-            android:textColor="?android:attr/textColorSecondary" />
+            android:text="@string/settings_anim_damping" />
+    <TextView
+            android:id="@+id/animHeightDampingValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+</LinearLayout>
 
         <SeekBar
             android:id="@+id/seekAnimHeightDamping"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:max="290"
-            android:progress="130" />
+            android:progress="130"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
 
-        <TextView
-            android:id="@+id/animHeightDampingValue"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="?attr/textAppearanceBodySmall"
-            android:textColor="?android:attr/textColorSecondary" />
+        
 
-        <TextView
-            android:layout_width="wrap_content"
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="6dp">
+    <TextView android:fontFamily="sans-serif-medium" android:textColor="@color/lg_ink_100" android:textSize="14sp"
+            android:layout_width="0dp"
+            android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:text="@string/settings_anim_stiffness"
-            android:textAppearance="?attr/textAppearanceBodySmall"
-            android:textColor="?android:attr/textColorSecondary" />
+            android:text="@string/settings_anim_stiffness" />
+    <TextView
+            android:id="@+id/animHeightStiffnessValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+</LinearLayout>
 
         <SeekBar
             android:id="@+id/seekAnimHeightStiffness"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:max="2999"
-            android:progress="579" />
+            android:progress="579"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
 
-        <TextView
-            android:id="@+id/animHeightStiffnessValue"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="?attr/textAppearanceBodySmall"
-            android:textColor="?android:attr/textColorSecondary" />
+        
 
         <!-- 图标透明度 -->
-        <TextView
-            android:layout_width="wrap_content"
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="16dp">
+    <TextView
+            android:layout_width="0dp"
+            android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
             android:text="@string/settings_anim_sec_fade"
             android:textAppearance="?attr/textAppearanceTitleSmall" />
+    <TextView
+            android:id="@+id/animFadeDurationValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+</LinearLayout>
 
         <SeekBar
             android:id="@+id/seekAnimFadeDuration"
@@ -292,14 +328,13 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
             android:max="145"
-            android:progress="29" />
+            android:progress="29"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
 
-        <TextView
-            android:id="@+id/animFadeDurationValue"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="?attr/textAppearanceBodySmall"
-            android:textColor="?android:attr/textColorSecondary" />
+        
 
         <TextView
             android:layout_width="match_parent"

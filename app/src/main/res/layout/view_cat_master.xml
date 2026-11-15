@@ -14,7 +14,13 @@
             android:id="@+id/switchMaster"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/settings_master" />
+            android:text="@string/settings_master"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
 
         <TextView
             android:layout_width="match_parent"
@@ -29,7 +35,13 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="@string/settings_glass_enable" />
+            android:text="@string/settings_glass_enable"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
 
         <TextView
             android:layout_width="match_parent"
@@ -68,7 +80,7 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnGetSystemModule"
-            style="?attr/materialButtonOutlinedStyle"
+            style="@style/ShellBtnOutlined"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
@@ -76,7 +88,7 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnOpenDalog"
-            style="?attr/materialButtonOutlinedStyle"
+            style="@style/ShellBtnOutlined"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"

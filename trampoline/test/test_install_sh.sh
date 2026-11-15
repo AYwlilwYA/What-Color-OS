@@ -45,6 +45,7 @@ seed_src() {
     echo "id=lg_sf_channel" > "$WORK/src/module.prop"
     echo TRAMP > "$WORK/src/system/system_ext/lib64/oplusex/libdisplayppex.so"
     echo REAL > "$WORK/src/system/system_ext/lib64/oplusex/libdisplayppex.real.so"
+    echo WCALL > "$WORK/src/system/system_ext/lib64/liboplus_display_watchcall.so"
     echo "#!/system/bin/sh" > "$WORK/src/service.sh"
     echo FEATURE > "$WORK/feature.so"
 }
@@ -84,6 +85,13 @@ cp "$SCRIPT" "$WORK/src/install.sh"
 rm -f "$WORK/src/system/system_ext/lib64/oplusex/libdisplayppex.so"
 out=$(run_install)
 [ "$out" = "SRC_BAD" ] && ok "install-src-bad-tree" || ng "install-src-bad-tree" "$out"
+
+# I3c SRC 缺 watchcall 改件 → SRC_BAD
+seed_src
+cp "$SCRIPT" "$WORK/src/install.sh"
+rm -f "$WORK/src/system/system_ext/lib64/liboplus_display_watchcall.so"
+out=$(run_install)
+[ "$out" = "SRC_BAD" ] && ok "install-src-bad-wcall" || ng "install-src-bad-wcall" "$out"
 
 # I4 自拷贝守卫：完整模块树本身位于 MODDIR 内执行 → SELF_COPY
 seed_src

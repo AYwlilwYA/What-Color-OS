@@ -3,10 +3,10 @@ package com.coloros16.liquidglass.hook
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Outline
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.PixelFormat
-import android.graphics.PorterDuff
-import android.graphics.PorterDuffColorFilter
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.RuntimeShader
@@ -23,6 +23,7 @@ import android.util.Log
 import android.util.LruCache
 import android.view.SurfaceControl
 import android.view.View
+import android.view.ViewGroup
 import android.view.ViewParent
 import android.view.WindowManager
 import android.widget.TextView
@@ -30,6 +31,7 @@ import com.coloros16.liquidglass.config.ConfigStore
 import com.coloros16.liquidglass.config.Prefs
 import com.coloros16.liquidglass.debug.DebugElement
 import com.coloros16.liquidglass.debug.DebugOverlay
+import com.coloros16.liquidglass.engine.SafetyFuse
 import com.coloros16.liquidglass.glass.GlassRegistry
 import com.coloros16.liquidglass.hook.capture.CaptureEngine
 import com.coloros16.liquidglass.hook.capture.CapturePolicy
@@ -102,8 +104,17 @@ object BlurDrawHook {
 
     private const val TAG = "LiquidGlass"
 
+    /** 玻璃渲染熔断域标识（SafetyFuse 计数域）。 */
+    private const val FUSE_DOMAIN_GLASS = "glass.systemui"
+
     internal const val CLASS_BASE_DRAWABLE = "com.oplus.posteffect.drawable.BaseDrawable"
     internal const val CLASS_BLEND_DRAWABLE = "com.oplus.posteffect.drawable.BlendDrawable"
+    /** C15（PRE_AGSL）posteffect 根 drawable：无 BaseDrawable/agsl 层，draw(Canvas) 直接画 drawablePath。 */
+    private const val CLASS_PRE_AGSL_BLUR_DRAWABLE = "com.oplus.posteffect.BlurDrawable"
+    private const val METHOD_BLUR_DRAWABLE_DRAW = "draw"
+    private const val FIELD_PRE_AGSL_DRAWABLE_PATH = "drawablePath"
+    private const val FIELD_PRE_AGSL_PATH_PROVIDER = "pathProvider"
+    private const val FIELD_PLATFORM_INNER_BLUR = "blurDrawable"
     private const val CLASS_CONTINUOUS_BLUR_DRAWABLE = "com.oplus.posteffect.drawable.ContinuousBlurDrawable"
     private const val CLASS_DRAWABLE_SHADER = "com.oplus.posteffect.agsl.DrawableShader"
     private const val CLASS_BLUR_DRAWABLE_MANAGER = "com.oplus.posteffect.manager.BlurDrawableManager"
@@ -275,6 +286,8 @@ object BlurDrawHook {
     private var lastMainSyncFirstFrameAt = 0L
     /** 审计日志每 id 最小打印间隔（ms） */
     private const val AUDIT_PER_ID_INTERVAL_MS = 1000L
+    /** 精修判定结果缓存有效期（ms） */
+    private const val POLISH_VERDICT_TTL_MS = 500L
     /** [2026-08-13 用户要求「通知持续期间必须一直抓屏」] heads-up 活跃期间**不间断**抓屏间隔毫秒。
      *  通知是瞬态场景（持续数秒），持续抓屏可接受；间隔 50ms ≈ 20Hz（captureDisplay 同步 Binder 自身
      *  20-50ms 耗时叠加，实际 ~10-14Hz），覆盖通知内容/入场动画每一帧变化。worker 线程执行（主线程仅首帧
@@ -364,6 +377,9 @@ object BlurDrawHook {
     // 全 miss → 手电筒二级菜单亮度档方角。BaseRoundRectPathProvider.getMaxRadius()（反编译 line 54-56，
     // public final）读真实角半径。加为 pathProvider 级第 2 来源。
     private const val CLASS_BASE_ROUND_RECT_PATH_PROVIDER = "com.oplus.posteffect.path.BaseRoundRectPathProvider"
+    // 系统 addSmoothRoundRect（squircle 路径）的唯一 provider：它的可见形状由该系统路径裁剪，
+    // 玻璃必须按同一 squircle 渲染，否则圆弧玻璃在四个圆角被路径裁掉。
+    private const val CLASS_SMOOTH_ROUND_RECT_PATH_PROVIDER = "com.oplus.posteffect.path.SmoothRoundRectPathProvider"
     private const val METHOD_GET_MAX_RADIUS = "getMaxRadius"
     // [doc/spec/143 缺口 A] BaseRoundRectPathProvider 族写口方法名（基类 final；getWeight 与 CornerParams 共用 METHOD_GET_WEIGHT）
     private const val METHOD_SET_CORNER_RADII = "setCornerRadii"
@@ -392,6 +408,10 @@ object BlurDrawHook {
     /** 圆角解析最终兜底默认半径 px（[2026-08-13 用户要求]）：反射五级全失败 / blurConfig 不可用时回退
      *  默认 50px 圆角（原 30px 用户反馈不够，改 50）。该源（"default"）不缓存——反射恢复后立即用真实值。 */
     private const val DEFAULT_CORNER_RADIUS_PX = 50f
+    /** 可信圆角下限 px：低于此值的解析结果视为动画中间态，不写缓存（防尺寸不变的动画期锁死方角）。 */
+    private const val MIN_TRUSTED_CORNER_RADIUS_PX = 2f
+    /** 沿用阈值 px：新解析值低于此值时沿用上一个可信圆角（动画中间态不上屏）。 */
+    private const val MIN_TRUSTED_HELD_CORNER_RADIUS_PX = 8f
 
     // ---- 任务 G（问题 13）：运动事件源 hook（QS 翻页 + 面板展开）→ invalidate 宿主 View 强制重录 draw ----
     // 16.1 反编译源码核对（SystemUI\sources）：
@@ -411,6 +431,9 @@ object BlurDrawHook {
     private const val METHOD_ON_PAGE_SCROLLED = "onPageScrolled"
     private const val CLASS_QUICK_SETTINGS_CONTROLLER = "com.android.systemui.shade.QuickSettingsControllerImpl"
     private const val METHOD_SET_EXPANSION_HEIGHT = "setExpansionHeight"
+    /** QS 面板展开分数持有者（1=全展开，0=已收起），收起动画每帧经 setRawFraction 写入 */
+    private const val CLASS_QS_PANEL_EXPAND_FRACTION = "com.oplus.systemui.plugins.qs.animator.QSPanelExpandFraction"
+    private const val METHOD_SET_RAW_FRACTION = "setRawFraction"
     // ---- 任务 spec/14：未映射模糊控件补映射 hook（2026-08-13）----
     // 逆向依据（SystemUI\sources）：
     // - 锁屏胶囊（CapsuleBackgroundHelper.java:140-148 / CapsuleEarView.java:160-168）：
@@ -766,6 +789,14 @@ object BlurDrawHook {
         var clipBounds: Rect? = null
 
         /**
+         * 精修材质判定（注册期用真实宿主 View 算出并缓存；true 后保持）。
+         * null = 尚未判定（Launcher 等不注册宿主的链）→ 渲染期走旧父链兜底。
+         * 首帧即用注册期结论，避免「宿主弱引用取不到 → 判 false → 宽高光 → 下一帧才变细」。
+         */
+        @Volatile
+        var polished: Boolean? = null
+
+        /**
          * [doc/spec/100 方案2] 系统 metaball 黏连参数快照 —— 注册 hook 每次绘制从
          * `MetaBallBlurDrawable` 反射读出后写入（与 [clipBounds] 同款「镜像到 entry + previous」）。
          * **null = 非 metaball 元素 / 未生效（valid=false）/ 拿不到球数据 → 几何与 uniform 一律走原路径
@@ -1024,6 +1055,16 @@ object BlurDrawHook {
     private var mMbBlendRangeField: Field? = null
     private var mGetBounds: Method? = null
     private var mGetPaint: Method? = null
+    /** posteffect 架构探针结果（PRE_AGSL 时启用 C15 draw(Canvas) 接管面）。 */
+    @Volatile
+    private var posteffectArchProbed = PosteffectArch.UNKNOWN
+    /** C15：BlurDrawable.drawablePath（私有，局部坐标路径）与 pathProvider（圆角来源）。 */
+    private var mPreAgsDrawablePathField: Field? = null
+    private var mPreAgsPathProviderField: Field? = null
+    private var mPreAgsGetCornerRadii: Method? = null
+    /** 无 getBlurDrawable() 的版本（C15）：PlatformBlurDrawable.blurDrawable 私有字段即内部 posteffect 实例。 */
+    private var mPlatformInnerBlurField: Field? = null
+    private val preAgsGlassPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private var mAutoGetViewBlurProxy: Method? = null
     private var mViewProxyGetView: Method? = null
     private var mViewProxyGetBlurDrawable: Method? = null
@@ -1089,6 +1130,9 @@ object BlurDrawHook {
     private var mLegacyPathProviderField: Field? = null
     /** [spec/114] 16.00.14 旧架构 posteffect 判定（新 shader 类缺失且旧 shader 类命中），降级日志措辞用 */
     @Volatile private var legacyPosteffectArch = false
+    /** 玻璃渲染熔断域：异常累计超阈值即回系统模糊（fail-open），不在热路径做任何轮询。 */
+    private val glassFuse = SafetyFuse()
+    @Volatile private var glassFuseTripped = false
     // ---- [doc/spec/106 方案 A] 统一圆角写穿：写口反射（读口见上方任务 D；全部 public 成员） ----
     private var mBlurConfigSetCornerRadius: Method? = null
     private var mBlurConfigSetLeftTopCornerRadius: Method? = null
@@ -1104,6 +1148,8 @@ object BlurDrawHook {
     private var mViewProxyApplyBlurConfig: Method? = null
     private var mViewProxyInvalidatePath: Method? = null
     // ---- [doc/spec/143 缺口 A] BaseRoundRectPathProvider 族写口（基类 final 成员，全子类通用） ----
+    private var mSmoothRoundRectPathProviderClass: Class<*>? = null
+    private var mRoundRectOutlineProviderWeightNoArg: Method? = null
     private var mBaseRoundRectSetCornerRadii: Method? = null
     private var mBaseRoundRectSetCornerRadiiArray: Method? = null
     private var mBaseRoundRectGetCornerRadii: Method? = null
@@ -1201,6 +1247,11 @@ object BlurDrawHook {
 
     // ---- 侧滑按钮真实圆角 dimen：SystemUI R.dimen.notification_corner_radius（16dp，dimens.xml:3027 实证）----
     private var mNotificationCornerRadiusDimenId = 0
+    // ---- 设备固定圆角表：R.dimen（主题 RRO 覆盖后由 Resources 读出真值）+ OplusQsSmoothRoundUtil 映射 ----
+    private var mQsDetailBgCornerRadiusDimenId = 0
+    private var mSmoothRoundUtilGetRoundParams: Method? = null
+    private var mRoundParamsGetRadius: Method? = null
+    private var mRoundParamsGetWeight: Method? = null
 
     // ---- [Bug 3] 侧滑按钮圆角级 2 兜底：NotificationMenuRowMetaBallController2.getBlurMenuCornerRadius() ----
     //（私有实例方法，内部 `context.getResources().getDimensionPixelSize(R.dimen.notification_corner_radius)`
@@ -1940,6 +1991,12 @@ object BlurDrawHook {
      */
     private val clipBoundsMap = ConcurrentHashMap<Int, Rect>()
 
+    /** lg-clip-parent 祖先链裁剪诊断的逐元素节流间隔（ms）。 */
+    private const val CLIP_CHAIN_LOG_INTERVAL_MS = 10_000L
+
+    /** lg-clip-parent 逐元素上次打印时刻（key 与 screenRegionMap 同键空间）。 */
+    private val clipChainLoggedMs = ConcurrentHashMap<Int, Long>()
+
     /** [spec/38 2026-08-13] 背景 scrim 的 posteffect drawable identityHashCode 集合。
      *  scrim（ScrimView）恒透明不渲染玻璃 → **不写入 screenRegionMap**（全屏 region 令
      *  isOverGlassRegion 对状态栏时钟等一切坐标判"玻璃区域" → 文字变色误伤）；但渲染兜底
@@ -1947,20 +2004,10 @@ object BlurDrawHook {
     private val scrimDrawableIds = ConcurrentHashMap.newKeySet<Int>()
 
     /**
-     * [spec/86 音量条] QS 音量/亮度条**进度填充层** drawable → 登记表。
-     * 由 [mountQsSeekBarActiveDrawable] 在 `QsSeekBarBlurManager.getSeekBarActiveDrawable(View)`
-     * 返回时登记（该方法唯一调用点 = `OplusQsVerticalSeekBar:82` 赋给 `activeMixColorDrawable`）。
-     * [replaceShaderIfPossible] 命中 → 不套玻璃，改画半透明白 tint（见那里）。
-     *
-     * 用 **WeakHashMap**（drawable 无重写 equals/hashCode → 天然身份语义）：seekbar 重建后旧实例被 GC
-     * 即自动淘汰，既不泄漏也不需要「超限 clear」（clear 会把还在用的条目一起删掉 → tint 静默失效）。
-     * 同步包装：登记在 hook 线程、查询在 UI 绘制线程。
+     * [spec/86 音量条] QS 音量/亮度条进度填充层的两本账（包装层 / 实际渲染对象）在
+     * [QsSeekbarCompat.instance]：工厂返回时登记包装层，[registerScreenRegionCore]
+     * 解析出内层后 `bind` 补登记；本文件只经 instance 查询，不自留副本。
      */
-    private val seekbarActiveDrawables: MutableMap<Any, Boolean> =
-        java.util.Collections.synchronizedMap(java.util.WeakHashMap<Any, Boolean>())
-
-    /** [spec/86] 进度填充层 tint alpha（0..255）。半透明让轨道层玻璃的折射/高光透出；调大更亮。 */
-    private const val SEEKBAR_ACTIVE_TINT_ALPHA = 0x66
 
     /**
      * 已应用到各 drawable shader 的 uniform 状态（R1：变化检测，避免幂等短路冻结 uniform）。
@@ -1973,6 +2020,7 @@ object BlurDrawHook {
 
     private const val RENDER_LEG_POSTEFFECT = "posteffect-drawBlurShader"
     private const val RENDER_LEG_SEEDLING = "seedling-canvas"
+    private const val RENDER_LEG_PRE_AGSL = "posteffect-pre-agsl-draw"
 
     /** 记录最后渲染腿（值未变则零写入；超限整表清，同 screenRegionMap 语义）。 */
     private fun markRenderLeg(id: Int, leg: String) {
@@ -2221,6 +2269,42 @@ object BlurDrawHook {
     /** 去白底开关是否已打过首读值日志（只打一次） */
     @Volatile
     private var volumeCleanSwitchLogged = false
+    /** 控制中心进度条白色填充开关缓存（TTL [VOLUME_SEEKBAR_GLASS_TTL_MS] 重读） */
+    @Volatile
+    private var cachedControlProgressFill = false
+    @Volatile
+    private var cachedControlProgressFillAtMs = 0L
+    @Volatile
+    private var controlProgressFillLogged = false
+    /** 隐藏二级玻璃（2×1 横向磁贴内图标小圆底）开关缓存（TTL [VOLUME_SEEKBAR_GLASS_TTL_MS] 重读） */
+    @Volatile
+    private var cachedQsHideSecondaryGlass = Prefs.DEFAULT_QS_HIDE_SECONDARY_GLASS
+    @Volatile
+    private var cachedQsHideSecondaryGlassAtMs = 0L
+    @Volatile
+    private var qsHideSecondaryGlassLogged = false
+    /** 面板展开高度（setExpansionHeight 事件驱动写入，收起动画期逐帧下降） */
+    @Volatile
+    private var panelExpansionPx = 0f
+    /** 本次展开会话内见过的最大展开高度（淡出比例归一化基准；收起时复位） */
+    @Volatile
+    private var panelExpansionMaxPx = 0f
+    /** 白填充淡出的起止比例：展开比例高于此值保持满强度，低于此值线性淡出到 0 */
+    private const val PANEL_FADE_START = 0.82f
+    /** 宿主父链 alpha 连乘层数上限（面板容器层级远小于此值） */
+    private const val HOST_ALPHA_CHAIN_MAX_DEPTH = 14
+    /** 白填充淡出诊断日志上次打印时刻（ms） */
+    @Volatile
+    private var fillFadeLogAtMs = 0L
+    /** 面板展开高度诊断日志上次打印时刻（ms） */
+    @Volatile
+    private var expansionLogAtMs = 0L
+    /** QS 面板展开分数（1=全展开，0=已收起），setRawFraction 每帧事件写入 */
+    @Volatile
+    private var qsPanelRawFraction = 1f
+    /** QS 面板分数诊断日志上次打印时刻（ms） */
+    @Volatile
+    private var qsFractionLogAtMs = 0L
     /** 活跃音量弹窗宿主（isGlassOwnWindowRoot 身份判据；draw 命中时刷新） */
     private var volumeGlassHost: WeakReference<View>? = null
     @Volatile
@@ -2703,6 +2787,14 @@ object BlurDrawHook {
             Lg.w(TAG, "Hook B skipped: SDK=${Build.VERSION.SDK_INT} < Q")
             return
         }
+        // 玻璃域熔断：渲染异常持续出现时回系统模糊；只在异常路径计数，无轮询、无定时器
+        glassFuse.register(
+            FUSE_DOMAIN_GLASS,
+            SafetyFuse.Policy(threshold = 5, windowMs = 10 * 60_000L),
+        ) { report ->
+            glassFuseTripped = true
+            Lg.e(TAG, "lg-fuse: glass tripped failures=${report.failures} reason=${report.reason}; glass disabled, system blur restored")
+        }
         resolveMethods(classLoader)
         // 引擎挂载：映射/scrim/通知卡材质抑制/主渲染/兜底 + tile/header/metaColor/headsup 探针（迁为 HookSpec）
         HookEngine.mountAll(api, classLoader, buildEngineRequests(api, classLoader))
@@ -2715,6 +2807,8 @@ object BlurDrawHook {
         mountAddBlurDrawable(api, classLoader)
         // [spec/114] 16.00.14 旧架构：无 onDrawContent → 挂 drawBlur 作等价兜底（现役直接返回）
         mountLegacyDrawBlur(api, classLoader)
+        // C15（PRE_AGSL）：无 BaseDrawable/agsl → 挂根 drawable draw(Canvas) 作玻璃接管面（现役直接返回）
+        mountPreAgsDraw(api, classLoader)
         mountMotionSources(api, classLoader)
         // [spec/114] 四处多版本兼容自检小表（#39/#14 在 mount 内、R5/R6/R14 在 resolveMethods 内已各打命中行）
         Lg.i(TAG, "lg-hook compat #39 onBlurReady=$compatHitOnBlurReady")
@@ -2723,6 +2817,12 @@ object BlurDrawHook {
         Lg.i(TAG, "lg-hook compat R14 materialColor=$compatHitMaterialColor")
         // [spec/114] 16.00.14 能力自检：缺失项逐条打 lg-hook INFO 降级行（现役全命中只打一行汇总）
         legacyCompatCheck(classLoader)
+        logGlassAudit(classLoader)
+        CaptureApi.logAudit(
+            VersionPool.PKG_SYSTEMUI,
+            VersionPool.readVersion(VersionPool.PKG_SYSTEMUI),
+            classLoader,
+        )
         // [2026-08-15 偶发不抓屏根治] hook NotificationShadeWindowView.onAttachedToWindow/onDetachedFromWindow：
         // shade 窗口（重建后）重挂载时立即刷新 shadeRootViewCache（始终指向当前 attach 的 shade 根），
         // 根治「窗口重建后缓存失效 + 新根未登记 → resolveShadeSfc 三来源全空 → 一阵子不抓屏」。
@@ -2764,6 +2864,12 @@ object BlurDrawHook {
         mountCcBlurHooks(api, classLoader)
         // [spec/86 音量条] 进度填充层登记（音量/亮度条玻璃高光被进度填充盖住的修复）
         mountQsSeekBarActiveDrawable(api, classLoader)
+        // 控制中心滑杆外轮廓裁剪 + 2×1 横向按钮内圈白底跳过（玻璃开且非省电才生效）
+        QsSurfaceHook.install(
+            api, classLoader,
+            { Prefs.glassEnabled(api) && !isPowerSaveGlassOff() },
+            { qsHideSecondaryGlassEnabled() },
+        )
         // [doc/spec/09] 音量条液态玻璃化（hook COUIVerticalSeekBar.draw 盖玻璃，默认关）
         mountVolumeSeekBarGlass(api, classLoader)
         // 音量弹窗 dismissH：消失即清音量窗排除登记（volumeGlassHost + sfc 缓存）
@@ -3221,10 +3327,59 @@ object BlurDrawHook {
         return null
     }
 
-    /** [spec/114] 16.00.14 旧架构判定：新 shader 类缺失且旧 shader 类命中 */
-    private fun isLegacyPosteffect(classLoader: ClassLoader): Boolean =
-        resolveClassChain(classLoader, CLASS_DRAWABLE_SHADER) == null &&
-            resolveClassChain(classLoader, CLASS_DRAWABLE_SHADER_LEGACY) != null
+    /** [spec/114] 运行时架构探针：无 posteffect.BaseDrawable = C15 前一代（无 agsl）；有则再分新/旧 shader 名。 */
+    private fun probePosteffectArch(classLoader: ClassLoader): PosteffectArch {
+        if (resolveClassChain(classLoader, CLASS_BASE_DRAWABLE) == null) return PosteffectArch.PRE_AGSL
+        val modernMissing = resolveClassChain(classLoader, CLASS_DRAWABLE_SHADER) == null
+        val legacyPresent = resolveClassChain(classLoader, CLASS_DRAWABLE_SHADER_LEGACY) != null
+        return if (modernMissing && legacyPresent) PosteffectArch.LEGACY else PosteffectArch.MODERN
+    }
+
+    /**
+     * 运行时架构探针与版本池期望对账：探针是生效真值，池是「该版本号本来该长什么样」。
+     * 不一致 = 版本号与类结构错位（如 16.99.06 是旧架构），必须显式打出来，避免只按版本号误判。
+     */
+    private fun logPosteffectArchDecision(probed: PosteffectArch) {
+        try {
+            val ver = VersionPool.readVersion(VersionPool.PKG_SYSTEMUI)
+            val decision = VersionPool.query(VersionPool.PKG_SYSTEMUI, ver)
+            val expected = decision.profile.posteffectArch
+            if (expected != PosteffectArch.UNKNOWN && expected != probed) {
+                Lg.w(
+                    TAG,
+                    "lg-posteffect-arch MISMATCH ver=$ver expected=$expected probed=$probed " +
+                        "profile=${decision.profile.name} match=${decision.match}",
+                )
+            } else {
+                Lg.i(
+                    TAG,
+                    "lg-posteffect-arch ver=$ver arch=$probed expected=$expected " +
+                        "profile=${decision.profile.name} match=${decision.match}",
+                )
+            }
+        } catch (t: Throwable) {
+            Lg.w(TAG, "lg-posteffect-arch decision log failed ${t.javaClass.simpleName}")
+        }
+    }
+
+    /** 玻璃链路装载审计一行：判定「某功能不生效」时直接看到链路各节点是否就绪。 */
+    private fun logGlassAudit(classLoader: ClassLoader) {
+        try {
+            val ver = VersionPool.readVersion(VersionPool.PKG_SYSTEMUI)
+            val arch = probePosteffectArch(classLoader)
+            Lg.i(
+                TAG,
+                "lg-glass-audit ver=$ver arch=$arch capture=${CaptureApi.probedRev(classLoader)} " +
+                    "main=${mDrawBlurShader != null && mGetDrawableShaderPaint != null} " +
+                    "notifCard=${mNbvGetBgView != null && mViewProxyGetBlurDrawable != null} " +
+                    "legacyDrawBlur=${legacyPosteffectArch} " +
+                    "preAgsDraw=${posteffectArchProbed == PosteffectArch.PRE_AGSL && mPreAgsDrawablePathField != null} " +
+                    "fuse=${glassFuseTripped} captureFuse=${CaptureApi.isTripped()}",
+            )
+        } catch (t: Throwable) {
+            Lg.w(TAG, "lg-glass-audit failed ${t.javaClass.simpleName}")
+        }
+    }
 
     /** [spec/114] 能力缺失降级日志（16.00.14 上即「16.00.14 无 X，降级」） */
     private fun logLegacyDegrade(what: String) {
@@ -3319,8 +3474,13 @@ object BlurDrawHook {
         // getBlurShader*/BlurDrawableShader），原先整段一个 try 首个 miss 就连坐 getBounds/getPaint/
         // drawBlurShader 全部解析不到 → 主渲染链整体失效。旧名候选只在新名 miss 时才试，
         // 现役（16.99.12/17.99.02）新名第一命中，解析结果与原先逐字一致。
-        legacyPosteffectArch = isLegacyPosteffect(classLoader)
+        val probedArch = probePosteffectArch(classLoader)
+        posteffectArchProbed = probedArch
+        legacyPosteffectArch = probedArch == PosteffectArch.LEGACY
+        VersionPool.notePatch(VersionPool.PKG_SYSTEMUI, VersionPool.PATCH_LEGACY_POSTEFFECT_ARCH, legacyPosteffectArch)
+        logPosteffectArchDecision(probedArch)
         if (legacyPosteffectArch) Lg.i(TAG, "lg-hook: 16.00.14 旧架构 posteffect 检出，shader/圆角走旧名等价链")
+        if (probedArch == PosteffectArch.PRE_AGSL) resolvePreAgsMembers(classLoader)
         try {
             val base = Class.forName(CLASS_BASE_DRAWABLE, false, classLoader)
             val shaderCls = resolveClassChain(classLoader, CLASS_DRAWABLE_SHADER, CLASS_DRAWABLE_SHADER_LEGACY)
@@ -3401,11 +3561,28 @@ object BlurDrawHook {
             val vbp = Class.forName(CLASS_VIEW_BLUR_PROXY, false, classLoader)
             mViewProxyGetView = vbp.getMethod(METHOD_GET_VIEW)
             mViewProxyGetBlurDrawable = vbp.getMethod(METHOD_GET_BLUR_DRAWABLE, Drawable::class.java)
-            val pbd = Class.forName(CLASS_PLATFORM_BLUR_DRAWABLE, false, classLoader)
-            mPlatformGetBlurDrawable = pbd.getMethod(METHOD_GET_BLUR_DRAWABLE)
         } catch (t: Throwable) {
             Lg.e(TAG, "Hook B resolve AutoBlurDrawable methods failed, screen-region map disabled", t)
         }
+        // 包装层解包：新版本有 getBlurDrawable()，C15 只有 blurDrawable 字段（两者独立，永不双活）
+        try {
+            val pbd = Class.forName(CLASS_PLATFORM_BLUR_DRAWABLE, false, classLoader)
+            mPlatformGetBlurDrawable = pbd.getMethod(METHOD_GET_BLUR_DRAWABLE)
+        } catch (t: Throwable) {
+            mPlatformGetBlurDrawable = null
+        }
+        try {
+            mPlatformInnerBlurField = Class.forName(CLASS_PLATFORM_BLUR_DRAWABLE, false, classLoader)
+                .getDeclaredField(FIELD_PLATFORM_INNER_BLUR)
+                .apply { isAccessible = true }
+        } catch (t: Throwable) {
+            mPlatformInnerBlurField = null
+        }
+        Lg.i(
+            TAG,
+            "lg-hook: PlatformBlurDrawable 解包 getter=${mPlatformGetBlurDrawable != null} " +
+                "field=${mPlatformInnerBlurField != null}",
+        )
         // C1：通知卡片专属映射反射（独立 try-catch：失败只影响通知卡片映射）
         try {
             val ext = Class.forName(CLASS_NBV_EXT, false, classLoader)
@@ -3505,6 +3682,14 @@ object BlurDrawHook {
         try {
             mRoundRectOutlineProviderClass = Class.forName(CLASS_ROUND_RECT_OUTLINE_PROVIDER, false, classLoader)
             mRoundRectOutlineProviderCornerRadiusField = mRoundRectOutlineProviderClass?.getField(FIELD_CORNER_RADIUS)
+            // 同族无参 getCornerWeight()：非 null = 该 provider 走 addSmoothRoundRect（squircle），
+            // 玻璃必须按同一 squircle 渲染（QS 磁贴 tileOutline/mediaPanelOutline 即此形态）
+            mRoundRectOutlineProviderWeightNoArg = try {
+                mRoundRectOutlineProviderClass?.getMethod(METHOD_GET_CORNER_WEIGHT)
+            } catch (t: Throwable) {
+                Lg.e(TAG, "Hook B resolve RoundRectOutlineProvider.getCornerWeight() failed, squircle 判定降级圆弧", t)
+                null
+            }
             Lg.i(TAG, "Hook B RoundRectOutlineProvider.cornerRadius field resolved (pathProvider 级)")
         } catch (t: Throwable) {
             logLegacyAlt("RoundRectOutlineProvider", "BaseRoundRectPathProvider.getMaxRadius（级 3d）")
@@ -3567,6 +3752,15 @@ object BlurDrawHook {
             mBaseRoundRectGetCornerRadii = prCls.getMethod(METHOD_GET_CORNER_RADII)
             mBaseRoundRectSetWeight = prCls.getMethod(METHOD_SET_WEIGHT, Float::class.javaPrimitiveType)
             mBaseRoundRectGetWeight = prCls.getMethod(METHOD_GET_WEIGHT)
+            // 独立 try：失败只关闭「smooth-round → CONIC」分支，不影响写口
+            try {
+                mSmoothRoundRectPathProviderClass =
+                    Class.forName(CLASS_SMOOTH_ROUND_RECT_PATH_PROVIDER, false, classLoader)
+                Lg.i(TAG, "Hook B SmoothRoundRectPathProvider resolved (squircle path provider)")
+            } catch (t: Throwable) {
+                mSmoothRoundRectPathProviderClass = null
+                Lg.e(TAG, "Hook B resolve SmoothRoundRectPathProvider failed, squircle 判定降级圆弧", t)
+            }
             val baseCls = Class.forName(CLASS_BASE_DRAWABLE, false, classLoader)
             mBaseDrawableUpdatePath = baseCls.getMethod(METHOD_UPDATE_PATH, Boolean::class.javaPrimitiveType)
             Lg.i(TAG, "lg-hook: BaseRoundRectPathProvider.setCornerRadii/weight + BaseDrawable.updatePath resolved (缺口 A 写口)")
@@ -3585,9 +3779,27 @@ object BlurDrawHook {
         try {
             val rDimen = hostForName("com.android.systemui.R\$dimen", classLoader)
             mNotificationCornerRadiusDimenId = rDimen.getField("notification_corner_radius").getInt(null)
+            // 设备固定圆角表：QS 弹窗详情背景（读不到则回落解析链）
+            mQsDetailBgCornerRadiusDimenId = try { rDimen.getField("qs_detail_bg_corner_radius").getInt(null) } catch (t: Throwable) { 0 }
             Lg.i(TAG, "Hook B notification_corner_radius dimen id resolved: $mNotificationCornerRadiusDimenId")
         } catch (t: Throwable) {
             Lg.e(TAG, "Hook B resolve notification_corner_radius dimen id failed, swipe cornerRadius uses fallback", t)
+        }
+        // 设备固定圆角表的映射函数（设备内硬编码表）：dp → (radius, weight)，weight=0 表示纯圆角矩形
+        try {
+            val utilCls = hostForName("com.oplusos.systemui.common.util.OplusQsSmoothRoundUtil", classLoader)
+            mSmoothRoundUtilGetRoundParams = utilCls.getMethod(
+                "getRoundParams", android.content.Context::class.java, Float::class.javaPrimitiveType,
+            )
+            val paramsCls = hostForName("com.oplusos.systemui.common.util.OplusRoundParams", classLoader)
+            mRoundParamsGetRadius = paramsCls.getMethod("getRadius")
+            mRoundParamsGetWeight = paramsCls.getMethod("getWeight")
+            Lg.i(TAG, "Hook B OplusQsSmoothRoundUtil.getRoundParams resolved (设备固定圆角表)")
+        } catch (t: Throwable) {
+            mSmoothRoundUtilGetRoundParams = null
+            mRoundParamsGetRadius = null
+            mRoundParamsGetWeight = null
+            Lg.e(TAG, "Hook B resolve OplusQsSmoothRoundUtil failed, 固定表不可用回落解析链", t)
         }
         // [Bug 3] 侧滑按钮圆角级 2 兜底：NotificationMenuRowMetaBallController2.getBlurMenuCornerRadius()
         //（私有实例方法，反编译实证内部 `context.getResources().getDimensionPixelSize(R.dimen.notification_corner_radius)`
@@ -5219,8 +5431,30 @@ object BlurDrawHook {
      *            drawable 注册无意义且可能污染 bounds 兜底匹配 → 直接跳过。
      * @param cornerProxy 圆角解析用 proxy（resolveCornerRadius）；null → 0（正方形玻璃，强兜底）。
      */
+    /** PlatformBlurDrawable 包装层 → 内部 posteffect BlurDrawable；非包装层 / 解包失败返回 null。 */
+    private fun unwrapPlatformBlur(wrapper: Any): Any? {
+        val getter = mPlatformGetBlurDrawable
+        if (getter != null && getter.declaringClass.isInstance(wrapper)) {
+            return try {
+                getter.invoke(wrapper)
+            } catch (t: Throwable) {
+                Lg.e(TAG, "platform-unwrap: getBlurDrawable failed", t); null
+            }
+        }
+        val field = mPlatformInnerBlurField
+        if (field != null && field.declaringClass.isInstance(wrapper)) {
+            return try {
+                field.get(wrapper)
+            } catch (t: Throwable) {
+                Lg.e(TAG, "platform-unwrap: blurDrawable field failed", t); null
+            }
+        }
+        return null
+    }
+
     private fun registerPlatformBlurRegion(hostView: View, pbd: Any?, cornerProxy: Any?, logTag: String) {
-        if (mPlatformGetBlurDrawable == null || mViewProxyGetBlurDrawable == null) return
+        if (mPlatformGetBlurDrawable == null && mPlatformInnerBlurField == null) return
+        if (mViewProxyGetBlurDrawable == null) return
         val resolved: Any = if (pbd != null) {
             pbd
         } else {
@@ -5230,12 +5464,7 @@ object BlurDrawHook {
                 Lg.e(TAG, "$logTag: getBlurDrawable failed", t); return
             }
         }
-        if (!mPlatformGetBlurDrawable!!.declaringClass.isInstance(resolved)) return
-        val target = try {
-            mPlatformGetBlurDrawable?.invoke(resolved)
-        } catch (t: Throwable) {
-            Lg.e(TAG, "$logTag: PlatformBlurDrawable.getBlurDrawable() failed", t); return
-        } ?: return
+        val target = unwrapPlatformBlur(resolved) ?: return
         val targetBounds = try {
             mGetBounds?.invoke(target) as? Rect
         } catch (t: Throwable) {
@@ -5274,6 +5503,7 @@ object BlurDrawHook {
         val platformSeenMs = SystemClock.uptimeMillis()
         entry.lastSeenMs = platformSeenMs
         previous?.lastSeenMs = platformSeenMs
+        applyPolishVerdict(entry, previous, hostView)
         // [doc/spec/100 方案2] metaball 黏连参数快照（每帧刷新；拿不到 = null → 原路径零变化）
         applyMetaBall(key, entry, previous, target)
         // [doc/spec/24 任务 B 2026-08-13] 内容变化检测：仅新元素首次出现（previous==null）触发整屏快照
@@ -5421,7 +5651,10 @@ object BlurDrawHook {
                 Lg.i(TAG, "semantic-miss: host=$hostName parent=${(hostView.parent as? View)?.javaClass?.name}")
             }
         }
-        return registerScreenRegionCore(proxy, hostView, defaultDrawable, autoBounds, "map", hostClip, cardClass)
+        val seekbarWrapper = auto.takeIf { QsSeekbarCompat.instance.isActiveWrapper(it) }
+        return registerScreenRegionCore(
+            proxy, hostView, defaultDrawable, autoBounds, "map", hostClip, cardClass, seekbarWrapper,
+        )
     }
 
     /**
@@ -5634,7 +5867,26 @@ object BlurDrawHook {
         hostClip: Rect? = null,
         // 卡片语义类（通知卡/磁贴等），随 bind 登记供预设按卡片命中；null=按绘制对象类
         cardClass: String? = null,
+        // QS 进度层包装层（工厂返回的 AutoBlurDrawable）：非空时绕过 registerTargetCache 并 bind 内层
+        seekbarWrapper: Any? = null,
     ): Boolean {
+        // 独立硬件音量窗口自带抓屏/冻结管线：真实宿主识别后，遮罩与内层内容都留原生路径
+        if (VolumeMaskGuard.isVolumeHost(hostView)) {
+            val wrapper = try {
+                mViewProxyGetBlurDrawable?.invoke(proxy, defaultDrawable)
+            } catch (t: Throwable) {
+                Lg.e(TAG, "$logTag: volume host getBlurDrawable failed", t); null
+            }
+            val target = wrapper?.let { unwrapPlatformBlur(it) ?: it }
+            if (wrapper != null && target != null) {
+                protectNativeVolumeContent(wrapper, target)
+            } else {
+                logThrottled("$logTag-volume-skip", Log.INFO) {
+                    "$logTag: volume host skip, wrapper/target unresolved"
+                }
+            }
+            return false
+        }
         // [任务 G] 顺手登记宿主 View：运动事件源（QS 翻页/面板展开）触发时 invalidate 它，
         // 强制重录 draw → 映射随新位置更新（WeakReference 防泄漏，去重见 registerHostView）
         registerHostView(hostView)
@@ -5647,8 +5899,13 @@ object BlurDrawHook {
         // [2026-08-13 反射结果缓存] proxy 的 blurDrawable/target 解析结果稳定（同一 drawable 实例每次
         // draw 相同），缓存命中后跳过 getBlurDrawable + platformGetBlurDrawable 反射链，主线程只做
         // getLocationOnScreen + getBounds + region 算术（省控制中心每帧 40-60 次反射）。
+        // seekbar 场景绕过：系统材质会随主题/布局重建，缓存会拿到过期 target。
         val proxyKey = System.identityHashCode(proxy)
-        val cachedTarget = registerTargetCache[proxyKey]?.target
+        val cachedTarget = if (QsSeekbarCompat.instance.bypassTargetCache(seekbarWrapper)) {
+            null
+        } else {
+            registerTargetCache[proxyKey]?.target
+        }
         val target: Any
         if (cachedTarget != null) {
             target = cachedTarget
@@ -5658,21 +5915,19 @@ object BlurDrawHook {
             } catch (t: Throwable) {
                 Lg.e(TAG, "$logTag: getBlurDrawable(Drawable) failed", t); return false
             } ?: return false
-            // PlatformBlurDrawable（包装层）→ 取内部 posteffect BlurDrawable（drawBlurShader 的 this 同实例）
-            val resolved = if (mPlatformGetBlurDrawable != null &&
-                mPlatformGetBlurDrawable!!.declaringClass.isInstance(blurDrawable)
-            ) {
-                try {
-                    mPlatformGetBlurDrawable?.invoke(blurDrawable) ?: blurDrawable
-                } catch (t: Throwable) {
-                    Lg.e(TAG, "$logTag: PlatformBlurDrawable.getBlurDrawable() failed", t); return false
-                }
-            } else {
-                blurDrawable
+            // PlatformBlurDrawable（包装层）→ 取内部 posteffect BlurDrawable（渲染 hook 的 this 同实例）
+            val resolved = unwrapPlatformBlur(blurDrawable) ?: blurDrawable
+            if (!QsSeekbarCompat.instance.bypassTargetCache(seekbarWrapper)) {
+                if (registerTargetCache.size >= REGISTER_TARGET_CACHE_MAX) registerTargetCache.clear()
+                registerTargetCache[proxyKey] = RegisterTargetCache(resolved)
             }
-            if (registerTargetCache.size >= REGISTER_TARGET_CACHE_MAX) registerTargetCache.clear()
-            registerTargetCache[proxyKey] = RegisterTargetCache(resolved)
             target = resolved
+        }
+        // 包装层 → 实际渲染对象补登记（进度层 tint 判定走 isActiveTarget）
+        if (seekbarWrapper != null && QsSeekbarCompat.instance.bind(seekbarWrapper, target)) {
+            logThrottled("qs-seekbar-bind", Log.INFO) {
+                "seekbar: wrapper bound to render target ${target.javaClass.simpleName}"
+            }
         }
         // 咽喉点语义派生：显式 cardClass 优先；无则按宿主父链派生（设备卡/CC 滑杆预设独立命中）
         val effectiveCardClass = cardClass ?: hostSemanticCardClass(hostView)?.also { semantic ->
@@ -5762,9 +6017,11 @@ object BlurDrawHook {
         val coreSeenMs = SystemClock.uptimeMillis()
         entry.lastSeenMs = coreSeenMs
         previous?.lastSeenMs = coreSeenMs
+        applyPolishVerdict(entry, previous, hostView)
         // [doc/spec/99] 每次绘制刷新 clip（父容器 clip 随动画/布局逐帧可能变）：map 快照 + 新 entry
         // 镜像 + 稳态仍存活的旧 entry 镜像（region/bounds 未变时不换 entry，此时只能刷 previous）。
         applyHostClip(key, entry, previous, hostClip)
+        logHostClipChain(hostView, key, logTag)
         // [doc/spec/100 方案2] metaball 黏连参数快照（每帧刷新；拿不到 = null → 原路径零变化）
         applyMetaBall(key, entry, previous, target)
         // [doc/spec/24 任务 B 2026-08-13] 内容变化检测：仅新元素首次出现（previous==null）触发整屏快照
@@ -5815,6 +6072,63 @@ object BlurDrawHook {
     }
 
     /**
+     * [高光贴边裁剪排查] 打宿主到根的祖先链裁剪状态（每元素 10s 节流，需运行日志开）。
+     *
+     * RenderNode 级裁剪（父 clipChildren → 子 RenderNode `setClipToBounds`；View `clipToOutline`
+     * → RenderNode `setClipToOutline`）由合成器执行，**不进录制 canvas 的 clipBounds**，
+     * [applyHostClip] 采不到；[applyClipEffectiveRegion] 也补不了。本行把每层容器的
+     * clipChildren / clipToOutline / 当前 outline（半径、矩形/路径）打出来，供真机定位是哪一层裁。
+     */
+    private fun logHostClipChain(host: View?, key: Int, tag: String) {
+        if (host == null || !moduleLogEnabled) return
+        val now = SystemClock.uptimeMillis()
+        val prev = clipChainLoggedMs[key]
+        if (prev != null && now - prev < CLIP_CHAIN_LOG_INTERVAL_MS) return
+        if (clipChainLoggedMs.size > 512) clipChainLoggedMs.clear()
+        clipChainLoggedMs[key] = now
+        try {
+            val sb = StringBuilder("lg-clip-parent: id=$key tag=$tag")
+            var v: View? = host
+            var depth = 0
+            while (v != null && depth < 8) {
+                val g = v as? ViewGroup
+                sb.append(" | d").append(depth).append(' ')
+                    .append(v.javaClass.simpleName)
+                    .append(" l=").append(v.left).append(" t=").append(v.top)
+                    .append(" w=").append(v.width).append(" h=").append(v.height)
+                    .append(" clipChildren=")
+                    .append(if (g == null) "-" else if (g.clipChildren) 1 else 0)
+                    .append(" clipToOutline=").append(if (v.clipToOutline) 1 else 0)
+                    .append(" outline=").append(describeOutline(v))
+                v = v.parent as? View
+                depth++
+            }
+            Lg.d(TAG, sb.toString())
+        } catch (t: Throwable) {
+            Lg.e(TAG, "lg-clip-parent: walk failed id=$key", t)
+        }
+    }
+
+    /** 直调宿主 outline provider 取当前生效 outline：半径 + 矩形/自定义路径（失败只报类名）。 */
+    private fun describeOutline(view: View): String {
+        val p = view.outlineProvider ?: return "none"
+        return try {
+            val o = Outline()
+            p.getOutline(view, o)
+            val r = Rect()
+            val isRect = o.getRect(r)
+            val shape = when {
+                o.isEmpty -> "empty"
+                isRect -> "rect"
+                else -> "path"
+            }
+            "${p.javaClass.simpleName}(r=${o.radius},$shape,$r)"
+        } catch (t: Throwable) {
+            "${p.javaClass.simpleName}(err)"
+        }
+    }
+
+    /**
      * [doc/spec/100 方案2] 从系统 `MetaBallBlurDrawable` 读一帧黏连参数快照。
      *
      * 数据源是 `syncToShader()` **已经同步好的** `metaBallParams`（= 系统自己喂给它那颗
@@ -5830,7 +6144,23 @@ object BlurDrawHook {
      *  快照结果缓存的脏判据，不参与快照内容；传 null = 不启用尺寸判据（仅 blendRange + TTL）。
      */
     private fun readMetaBallSnapshot(target: Any, bounds: Rect? = null): MetaBallSnapshot? {
-        if (target.javaClass.name != CLASS_META_BALL_DRAWABLE) return null
+        if (!mbReflectStateLogged) {
+            mbReflectStateLogged = true
+            Lg.i(TAG, "metaball-reflect: params=${mGetMetaBallParams != null} " +
+                "balls=${mMbGetBallParams?.size ?: 0} valid=${mMbGetValid != null} mode=${mMbGetMode != null} " +
+                "index=${mMbGetIndex != null} posX=${mMbGetPosX != null} width=${mMbGetWidth != null} " +
+                "height=${mMbGetHeight != null} blendShape=${mMbGetBlendShape != null} " +
+                "blendRangeField=${mMbBlendRangeField != null}")
+        }
+        if (target.javaClass.name != CLASS_META_BALL_DRAWABLE) {
+            // 名字含 MetaBall 但不是权威类名 = 类名漂移，快照永远读不到（诊断用）
+            if (target.javaClass.name.contains("MetaBall")) {
+                logThrottled("lg-metaball-cls", Log.INFO) {
+                    "metaball-miss: class mismatch ${target.javaClass.name} (expect $CLASS_META_BALL_DRAWABLE)"
+                }
+            }
+            return null
+        }
         val gParams = mGetMetaBallParams ?: return null
         val getters = mMbGetBallParams ?: return null
         val gValid = mMbGetValid ?: return null
@@ -5880,7 +6210,12 @@ object BlurDrawHook {
         } catch (t: Throwable) {
             null
         } ?: return null
-        if (!valid) return null
+        if (!valid) {
+            logThrottled("lg-metaball-invalid", Log.INFO) {
+                "metaball-miss: valid=false id=${System.identityHashCode(target)} blendRange=$blendRangeNow"
+            }
+            return null
+        }
         val mode = try {
             gMode.invoke(params) as? Float ?: 0f
         } catch (t: Throwable) {
@@ -5937,6 +6272,10 @@ object BlurDrawHook {
 
     /** [doc/spec/105 P2-2] 快照结果缓存：key = `identityHashCode(drawable)`。仅注册链写。 */
     private val mbSnapCache = ConcurrentHashMap<Int, MbSnapCacheEntry>()
+
+    /** metaball 反射链状态是否已打过首读日志（只打一次） */
+    @Volatile
+    private var mbReflectStateLogged = false
 
     /** [doc/spec/105 P2-2] 快照缓存最大陈旧（ms）：≈2 帧@60Hz，兜底「尺寸与 blendRange 都没变但球在动」 */
     private const val MB_SNAP_CACHE_MAX_MS = 33L
@@ -6339,6 +6678,15 @@ object BlurDrawHook {
         }
     }
 
+    /** 独立音量面板隔离：遮罩包装层 + 内层内容双登记，清已登记映射并还原模块 shader。 */
+    private fun protectNativeVolumeContent(wrapper: Any, target: Any) {
+        VolumeMaskGuard.protectNativeContent(wrapper, target)
+        screenRegionMap.remove(System.identityHashCode(target))
+        if (mGetDrawableShaderPaint?.declaringClass?.isInstance(target) == true) {
+            restoreSystemShaderIfReplaced(target)
+        }
+    }
+
     /** [磨砂根因·修 2] 辅助：proceed 前置 blurMaskColor=0（跳过 drawRect 磨砂层），finally 恢复（SuppressPolicy 驱动）。 */
     private fun suppressPlatformBlurMaskColor(chain: XposedInterface.Chain) {
         val pbd = try {
@@ -6348,6 +6696,20 @@ object BlurDrawHook {
             chain.proceed(); return
         }
         if (pbd == null) {
+            chain.proceed(); return
+        }
+        // 音量面板遮罩归属 VolumeMaskGuard 唯一判定：命中即隔离并保留原生 blurMaskColor，不做抑制
+        if (VolumeMaskGuard.shouldProtectNative(pbd)) {
+            val inner = try {
+                if (mPlatformGetBlurDrawable?.declaringClass?.isInstance(pbd) == true) {
+                    mPlatformGetBlurDrawable?.invoke(pbd) ?: pbd
+                } else {
+                    pbd
+                }
+            } catch (t: Throwable) {
+                Lg.e(TAG, "volume: mask inner resolve failed", t); pbd
+            }
+            protectNativeVolumeContent(pbd, inner)
             chain.proceed(); return
         }
         val field = mPlatformBlurMaskColor ?: run {
@@ -6430,20 +6792,11 @@ object BlurDrawHook {
         }
         // 仅 PlatformBlurDrawable 内部 posteffect BlurDrawable（走我们管线）才注册；
         // BackgroundBlurDrawable（framework 自带）不触发 drawBlurShader hook，注册无意义
-        if (mPlatformGetBlurDrawable == null || !mPlatformGetBlurDrawable!!.declaringClass.isInstance(blurDrawable)) {
-            return
-        }
+        val nbvTarget = unwrapPlatformBlur(blurDrawable) ?: return
         // [spec/19 修复] drawable 创建确认 → 解除 isHeadsUpView 排除绕过（仅当本次绘制的 bgView
         // 正是强制玻璃化的那个才清，防其他卡片绘制误清；ProbeRegistry.clearIfMatch）。
         ProbeRegistry.clearIfMatch(HEADSUP_PROBE_GROUP, bgView)
-        val target = try {
-            mPlatformGetBlurDrawable?.invoke(blurDrawable)
-        } catch (t: Throwable) {
-            Lg.e(TAG, "nbv: PlatformBlurDrawable.getBlurDrawable() failed", t); return
-        } ?: run {
-            logThrottled("nbv-null-target", Log.INFO) { "nbv: PlatformBlurDrawable.getBlurDrawable null, skip registration" }
-            return
-        }
+        val target = nbvTarget
         val targetBounds = try {
             mGetBounds?.invoke(target) as? Rect
         } catch (t: Throwable) {
@@ -6491,6 +6844,7 @@ object BlurDrawHook {
         val notifSeenMs = SystemClock.uptimeMillis()
         entry.lastSeenMs = notifSeenMs
         previous?.lastSeenMs = notifSeenMs
+        applyPolishVerdict(entry, previous, bgView)
         // 每帧重绑（幂等，同 clazz 只 touch）：动画态重建的 target 换实例后 cardClass 不丢
         GlassRegistry.bind(key, target, CLASS_NBV_EXT_IMP)
         if (targetBounds != null) {
@@ -6503,6 +6857,7 @@ object BlurDrawHook {
         // [doc/spec/99] 每次绘制都刷新 clip（父容器 clip 随动画/布局逐帧可能变）：
         // map 快照 + 新 entry 镜像 + 稳态仍存活的旧 entry 镜像（region/bounds 未变时不换 entry）。
         applyHostClip(key, entry, previous, hostClip)
+        logHostClipChain(bgView, key, "notifCard")
         // [doc/spec/100 方案2] metaball 黏连参数快照（每帧刷新；拿不到 = null → 原路径零变化）
         applyMetaBall(key, entry, previous, target)
         // [doc/spec/135] 长按菜单黏连桥：菜单在屏时把菜单卡注入克隆卡 metaball 快照（内部自判条件）
@@ -6573,6 +6928,7 @@ object BlurDrawHook {
     private fun mountMotionSources(api: XposedInterface, classLoader: ClassLoader) {
         mountQsPageScroll(api, classLoader)
         mountPanelExpansion(api, classLoader)
+        mountQSPanelFraction(api, classLoader)
         mountCustomRowTranslation(api, classLoader)
     }
 
@@ -6728,6 +7084,18 @@ object BlurDrawHook {
                         markMotion()
                         invalidateRegisteredHostViews()
                         if (expansion > 0f) {
+                            panelExpansionPx = expansion
+                            if (expansion > panelExpansionMaxPx) panelExpansionMaxPx = expansion
+                        } else {
+                            panelExpansionPx = 0f
+                            panelExpansionMaxPx = 0f
+                        }
+                        val expLogNow = SystemClock.uptimeMillis()
+                        if (expLogNow - expansionLogAtMs >= 120L) {
+                            expansionLogAtMs = expLogNow
+                            Lg.i(TAG, "panel-expansion: exp=$expansion max=$panelExpansionMaxPx")
+                        }
+                        if (expansion > 0f) {
                             // [2026-08-13 延迟调查·竞争暂停] 面板展开中 → heads-up 连抓/持续 worker 暂停
                             // （避免与下拉抓屏并发锤 captureDisplay，SF 串行 → 主抓屏被排队拖后）
                             panelExpansionActive = true
@@ -6814,6 +7182,57 @@ object BlurDrawHook {
             }
         } catch (t: Throwable) {
             Lg.e(TAG, "Hook G mount FAILED: $CLASS_QUICK_SETTINGS_CONTROLLER#$METHOD_SET_EXPANSION_HEIGHT", t)
+        }
+    }
+
+    /**
+     * 运动事件源④：QS 面板展开分数（收起动画从 1 逐帧降到 0）。
+     * 控制中心收起时面板内容走 RenderNode 变换、不重绘，滑杆上的白色进度填充只能靠这里
+     * 每帧写分数 + 主动 invalidate 滑杆宿主，渲染期才能读到新 alpha。
+     */
+    private fun mountQSPanelFraction(api: XposedInterface, classLoader: ClassLoader) {
+        try {
+            val clazz = Class.forName(CLASS_QS_PANEL_EXPAND_FRACTION, false, classLoader)
+            val method = clazz.getDeclaredMethod(METHOD_SET_RAW_FRACTION, Float::class.javaPrimitiveType)
+                .apply { isAccessible = true }
+            api.hook(method)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .intercept { chain ->
+                    try {
+                        val f = chain.getArg(0) as? Float
+                        if (f != null && f.isFinite()) {
+                            val clamped = f.coerceIn(0f, 1f)
+                            qsPanelRawFraction = clamped
+                            // 白填充可见时才需要跟帧重绘滑杆，开关关时零开销
+                            if (controlProgressFillEnabled()) invalidateSeekbarFillHosts()
+                            val nowMs = SystemClock.uptimeMillis()
+                            if (nowMs - qsFractionLogAtMs >= 120L) {
+                                qsFractionLogAtMs = nowMs
+                                Lg.i(TAG, "qs-fraction: f=$clamped")
+                            }
+                        }
+                    } catch (t: Throwable) {
+                        Lg.e(TAG, "qs-fraction: intercept error", t)
+                    }
+                    chain.proceed()
+                }
+            Lg.i(TAG, "Hook G mounted: $CLASS_QS_PANEL_EXPAND_FRACTION#$METHOD_SET_RAW_FRACTION(float) (QS panel fraction -> fill fade)")
+        } catch (t: Throwable) {
+            Lg.e(TAG, "Hook G mount FAILED: $CLASS_QS_PANEL_EXPAND_FRACTION#$METHOD_SET_RAW_FRACTION", t)
+        }
+    }
+
+    /** 只重绘进度条宿主（亮度/音量滑杆），避免收起动画期全表 invalidate。 */
+    private fun invalidateSeekbarFillHosts() {
+        val it = screenRegionMap.values.iterator()
+        while (it.hasNext()) {
+            val host = it.next().hostViewRef?.get() ?: continue
+            if (!host.javaClass.simpleName.contains("VerticalSeekBar")) continue
+            try {
+                host.invalidate()
+            } catch (t: Throwable) {
+                Lg.e(TAG, "qs-fraction: invalidate seekbar host failed", t)
+            }
         }
     }
 
@@ -8184,11 +8603,13 @@ object BlurDrawHook {
                         null
                     }
                     val glass = volumeSeekBarGlassEnabled()
-                    val clean = volumePanelCleanEnabled()
+                    val clean = volumePanelCleanEnabled() || controlProgressFillEnabled()
                     if (!glass && !clean) {
                         logVolumeDiag(
                             "switch-off",
-                            "volume-seekbar: 命中音量条但开关 ${Prefs.KEY_VOLUME_SEEKBAR_GLASS} = false",
+                            "volume-seekbar: 命中音量条但开关 ${Prefs.KEY_VOLUME_SEEKBAR_GLASS} = false" +
+                                " / ${Prefs.KEY_VOLUME_PANEL_CLEAN} = false" +
+                                " / ${Prefs.KEY_CONTROL_PROGRESS_FILL} = false",
                         )
                         return@intercept chain.proceed()
                     }
@@ -8316,8 +8737,99 @@ object BlurDrawHook {
         return cachedVolumePanelClean
     }
 
-    /** 面板黑遮罩开关（TTL [VOLUME_PANEL_BACKDROP_TTL_MS] 重读，切换无需重启 SystemUI）。 */
-    private fun volumePanelBackdropEnabled(): Boolean {
+    /** 控制中心进度条白色填充开关（TTL [VOLUME_SEEKBAR_GLASS_TTL_MS] 重读，改动无需重启 SystemUI）。 */
+    private fun controlProgressFillEnabled(): Boolean {
+        val now = SystemClock.uptimeMillis()
+        if (now - cachedControlProgressFillAtMs > VOLUME_SEEKBAR_GLASS_TTL_MS) {
+            cachedControlProgressFillAtMs = now
+            val before = cachedControlProgressFill
+            cachedControlProgressFill = try {
+                api?.let {
+                    Prefs.read(it).getBoolean(
+                        Prefs.KEY_CONTROL_PROGRESS_FILL,
+                        Prefs.DEFAULT_CONTROL_PROGRESS_FILL,
+                    )
+                } ?: false
+            } catch (t: Throwable) {
+                Lg.w(TAG, "prefs read control_center_progress_fill_enable failed, default false", t)
+                false
+            }
+            if (cachedControlProgressFill != before || !controlProgressFillLogged) {
+                controlProgressFillLogged = true
+                Lg.i(TAG, "control-progress-fill: switch ${Prefs.KEY_CONTROL_PROGRESS_FILL} = $cachedControlProgressFill")
+            }
+        }
+        return cachedControlProgressFill
+    }
+
+    /** 隐藏二级玻璃开关（TTL [VOLUME_SEEKBAR_GLASS_TTL_MS] 重读，改动无需重启 SystemUI）。 */
+    private fun qsHideSecondaryGlassEnabled(): Boolean {
+        val now = SystemClock.uptimeMillis()
+        if (now - cachedQsHideSecondaryGlassAtMs > VOLUME_SEEKBAR_GLASS_TTL_MS) {
+            cachedQsHideSecondaryGlassAtMs = now
+            val before = cachedQsHideSecondaryGlass
+            cachedQsHideSecondaryGlass = try {
+                api?.let {
+                    Prefs.read(it).getBoolean(
+                        Prefs.KEY_QS_HIDE_SECONDARY_GLASS,
+                        Prefs.DEFAULT_QS_HIDE_SECONDARY_GLASS,
+                    )
+                } ?: Prefs.DEFAULT_QS_HIDE_SECONDARY_GLASS
+            } catch (t: Throwable) {
+                Lg.w(TAG, "prefs read ${Prefs.KEY_QS_HIDE_SECONDARY_GLASS} failed, default ${Prefs.DEFAULT_QS_HIDE_SECONDARY_GLASS}", t)
+                Prefs.DEFAULT_QS_HIDE_SECONDARY_GLASS
+            }
+            if (cachedQsHideSecondaryGlass != before || !qsHideSecondaryGlassLogged) {
+                qsHideSecondaryGlassLogged = true
+                Lg.i(TAG, "qs-hide-secondary: switch ${Prefs.KEY_QS_HIDE_SECONDARY_GLASS} = $cachedQsHideSecondaryGlass")
+            }
+        }
+        return cachedQsHideSecondaryGlass
+    }
+
+    /** 面板展开比例 0..1（收起动画期 setExpansionHeight 逐帧下降 → 白色填充随之淡出）。 */
+    private fun panelExpansionFraction(): Float {
+        val max = panelExpansionMaxPx
+        if (max <= 0f) return 1f
+        // 只有最后 18% 收起行程才淡出：完全展开时恒定满强度，不因回弹峰值把白填充调暗
+        return (((panelExpansionPx / max) - PANEL_FADE_START) / (1f - PANEL_FADE_START)).coerceIn(0f, 1f)
+    }
+
+    /** 宿主 + 祖先链 alpha 连乘（系统收面板就是给容器 setAlpha，白填充跟着它淡出）。 */
+    private fun hostAlphaChain(host: View?): Float {
+        if (host == null) return 1f
+        var acc = 1f
+        var cursor: View? = host
+        var depth = 0
+        while (cursor != null && depth < HOST_ALPHA_CHAIN_MAX_DEPTH) {
+            acc *= cursor.alpha
+            if (acc <= 0.002f) return 0f
+            cursor = cursor.parent as? View
+            depth++
+        }
+        return acc
+    }
+
+    /** 激活段白色填充 alpha：开关关 → 0（走玻璃路径）；开关开 → 展开比例 × 宿主父链 alpha。 */
+    private fun controlProgressFillAlpha(elementId: Int): Int {
+        if (!controlProgressFillEnabled()) return 0
+        val host = screenRegionMap[elementId]?.hostViewRef?.get()
+        val chain = hostAlphaChain(host)
+        // QS 面板分数是控制中心收起进度的真值；hook 未命中时恒 1，退化为展开比例兜底
+        val panel = minOf(qsPanelRawFraction, panelExpansionFraction())
+        val fraction = minOf(panel, chain)
+        val alpha = (QsSeekbarCompat.ACTIVE_TINT_ALPHA * fraction).toInt().coerceIn(0, 255)
+        // 淡出诊断：不受「运行日志」开关门控（每次展开/收起都要能看到曲线），150ms 节流
+        val nowMs = SystemClock.uptimeMillis()
+        if (nowMs - fillFadeLogAtMs >= 150L) {
+            fillFadeLogAtMs = nowMs
+            Lg.i(TAG, "fill-fade: alpha=$alpha fraction=$fraction qsFrac=$qsPanelRawFraction " +
+                "exp=${panelExpansionPx}/${panelExpansionMaxPx} hostAlpha=$chain host=${host?.javaClass?.simpleName}")
+        }
+        return alpha
+    }
+
+    /** 面板黑遮罩开关（TTL [VOLUME_PANEL_BACKDROP_TTL_MS] 重读，切换无需重启 SystemUI）。 */    private fun volumePanelBackdropEnabled(): Boolean {
         val now = SystemClock.uptimeMillis()
         if (now - cachedVolumePanelBackdropAtMs > VOLUME_PANEL_BACKDROP_TTL_MS) {
             // api 未就绪时不打时间戳：避免污染 TTL 致就绪后仍按未初始化的 false 执行
@@ -11326,7 +11838,10 @@ object BlurDrawHook {
         val sizeKey = cornerSizeKey(bounds)
         val minSide = Math.min(bounds.width(), bounds.height())
         cornerRadiusCache[key]?.let { cached ->
-            if (cached.seekbarQuantizedMinSide != null) {
+            // 半径 < 2px 视为瞬时未定值（启动动画首帧/系统动画中间态），不参与命中，强制重解析
+            if (cached.info.radius < MIN_TRUSTED_CORNER_RADIUS_PX) {
+                // 落到下面重解析
+            } else if (cached.seekbarQuantizedMinSide != null) {
                 if (cached.seekbarQuantizedMinSide == quantizedMinSide) return cached.info
             } else if (cached.bounds.width() == bounds.width() && cached.bounds.height() == bounds.height()) {
                 // [doc/spec/105 P2-3] 尺寸相等即命中（原为整 Rect 精确相等）：圆角只依赖尺寸
@@ -11345,8 +11860,15 @@ object BlurDrawHook {
         }
         val info = resolveCornerRadiusUncached(proxy, bounds, hostView, drawable)
         // 仅缓存有效结果（radius>0 且非默认兜底）：反射失败 / 默认 30px 回退（source="default"）不缓存，
-        // 防锁死默认值——每次 draw 可重试反射，一旦反射恢复立即用真实圆角
-        if (info.radius > 0f && info.source != "default") {
+        // 防锁死默认值——每次 draw 可重试反射，一旦反射恢复立即用真实圆角；
+        // 半径 < 2px 同样不缓存：启动动画首帧拿到的是中间态，缓存后尺寸不变会一直命中 → 恒定方角
+        // 解析值跌到可信下限以下（动画中间态）→ 沿用上一个可信圆角，不写缓存也不让方角上屏
+        val prevCached = cornerRadiusCache[key]
+        val radiusCollapsed = prevCached != null &&
+            prevCached.info.radius >= MIN_TRUSTED_HELD_CORNER_RADIUS_PX &&
+            info.radius < MIN_TRUSTED_HELD_CORNER_RADIUS_PX
+        if (radiusCollapsed) return prevCached!!.info
+        if (info.radius >= MIN_TRUSTED_CORNER_RADIUS_PX && info.source != "default") {
             if (cornerRadiusCache.size >= CORNER_CACHE_MAX) cornerRadiusCache.clear()
             // bounds 存副本：调用方 Rect 可能为系统内部缓存实例（getBounds()），后续被 mutate 不影响缓存判定
             cornerRadiusCache[key] = CornerCacheEntry(
@@ -11392,8 +11914,137 @@ object BlurDrawHook {
     /** [2026-08-13 滑动延迟修复] seekbar 级 6 兜底缓存量化步长（px）。 */
     private const val SEEKBAR_CORNER_QUANT_STEP = 16
 
+    /** 设备固定圆角表：资源名 → 运行时查到的 dimen id（R\$dimen 反射失败时的兜底） */
+    private val devTableDimenIds = ConcurrentHashMap<String, Int>()
+
+    /**
+     * 设备固定圆角表取值：宿主类 → 系统 dimen（`Resources` 已叠加主题 RRO → 主题改圆角自动跟随）
+     * → `OplusQsSmoothRoundUtil.getRoundParams` 映射 (radius, weight)。
+     * 只覆盖系统源码里确实「读该 dimen + 走这张表」的宿主；其它宿主返回 null 交回解析链。
+     */
+    private fun deviceTableCorner(hostView: View?, bounds: Rect): CornerInfo? {
+        if (hostView == null) return null
+        if (bounds.width() <= 0 || bounds.height() <= 0) return null
+        val clsName = hostView.javaClass.name
+        val resName = when {
+            clsName.contains("MaxHeightAndWidthLinearLayout") -> "qs_detail_bg_corner_radius"
+            else -> {
+                // 未入表的宿主打一次类名，便于按实测补表
+                logThrottled("lg-dev-table-skip-${clsName.substringAfterLast('.')}", Log.DEBUG) {
+                    "dev-table-skip: cls=${clsName.substringAfterLast('.')} 回落解析链"
+                }
+                return null
+            }
+        }
+        // R\$dimen 反射可能拿不到（id=0）→ 按资源名运行时查一次并缓存命中值
+        var dimenId = if (resName == "qs_detail_bg_corner_radius") mQsDetailBgCornerRadiusDimenId else 0
+        if (dimenId == 0) dimenId = devTableDimenIds[resName] ?: 0
+        if (dimenId == 0) {
+            dimenId = try {
+                hostView.resources.getIdentifier(resName, "dimen", hostView.context.packageName)
+            } catch (t: Throwable) {
+                0
+            }
+            if (dimenId != 0) devTableDimenIds[resName] = dimenId
+        }
+        if (dimenId == 0) {
+            logThrottled("lg-dev-table-noid-$resName", Log.WARN) {
+                "dev-table: $resName 资源 id 解析失败，回落解析链"
+            }
+            return null
+        }
+        val basePx = try {
+            hostView.resources.getDimensionPixelSize(dimenId).toFloat()
+        } catch (t: Throwable) {
+            return null
+        }
+        if (basePx <= 0f) return null
+        var radius = basePx
+        var weight = 0f
+        val getParams = mSmoothRoundUtilGetRoundParams
+        if (getParams != null) {
+            try {
+                val p = getParams.invoke(null, hostView.context, basePx)
+                if (p != null) {
+                    val r = (mRoundParamsGetRadius?.invoke(p) as? Number)?.toFloat() ?: 0f
+                    val w = (mRoundParamsGetWeight?.invoke(p) as? Number)?.toFloat() ?: 0f
+                    if (r > 0f) {
+                        radius = r
+                        weight = w
+                    }
+                }
+            } catch (t: Throwable) {
+                logThrottled("lg-dev-table-fail", Log.WARN) { "dev-table: getRoundParams 失败，用 dimen 原值" }
+            }
+        }
+        val maxValid = Math.min(bounds.width(), bounds.height()) / 2f
+        if (radius > maxValid) radius = maxValid
+        if (radius < MIN_TRUSTED_CORNER_RADIUS_PX) return null
+        val isConic = weight > 0f
+        val transformed = if (isConic) (8f * weight) / (3f * weight + 3f) else DEFAULT_CORNER_WEIGHT
+        logThrottled("lg-dev-table-${clsName.substringAfterLast('.')}", Log.INFO) {
+            "dev-table: cls=${clsName.substringAfterLast('.')} base=$basePx radius=$radius w=$weight conic=$isConic"
+        }
+        return CornerInfo(radius, "dev-table", isConic, transformed)
+    }
+
+    // 滑杆圆角字段（COUIVerticalSeekBar 公开字段，宿主类固定；解析一次复用）
+    private var seekbarCornerFieldsResolved = false
+    private var mSeekbarCurProgressRadiusField: java.lang.reflect.Field? = null
+    private var mSeekbarBgCornerWeightField: java.lang.reflect.Field? = null
+    private var mSeekbarSmoothCornerFlagField: java.lang.reflect.Field? = null
+
+    /**
+     * 滑杆真实圆角：系统用 `mCurProgressRadius` + `mBackgroundRoundCornerWeight` 构建裁剪路径，
+     * 轨道层与进度层共用。进度层的 BlurConfig 从不设圆角（五级反射恒 0），
+     * 不读宿主字段就会退成方角，底部圆角处的高光被裁剪路径切掉。
+     */
+    private fun seekbarProgressCorner(hostView: View?, bounds: Rect): CornerInfo? {
+        if (hostView == null || bounds.width() <= 0 || bounds.height() <= 0) return null
+        val cls = hostView.javaClass
+        if (!cls.name.contains("SeekBar")) return null
+        if (!seekbarCornerFieldsResolved) {
+            seekbarCornerFieldsResolved = true
+            try {
+                mSeekbarCurProgressRadiusField = cls.getField("mCurProgressRadius")
+                mSeekbarBgCornerWeightField = cls.getField("mBackgroundRoundCornerWeight")
+                mSeekbarSmoothCornerFlagField = cls.getField("mIsSupportSmoothRoundCorner")
+                Lg.i(TAG, "seekbar-corner: fields resolved (radius/weight/smooth) cls=${cls.simpleName}")
+            } catch (t: Throwable) {
+                Lg.w(TAG, "seekbar-corner: fields unavailable, fallback to heuristic cls=${cls.simpleName}", t)
+            }
+        }
+        val radius = try {
+            (mSeekbarCurProgressRadiusField?.get(hostView) as? Number)?.toFloat()
+        } catch (t: Throwable) {
+            null
+        } ?: return null
+        if (radius <= 0f) return null
+        val maxValid = Math.min(bounds.width(), bounds.height()) / 2f
+        if (maxValid <= 0f) return null
+        val smooth = try {
+            mSeekbarSmoothCornerFlagField?.get(hostView) as? Boolean ?: false
+        } catch (t: Throwable) {
+            false
+        }
+        val weight = try {
+            (mSeekbarBgCornerWeightField?.get(hostView) as? Number)?.toFloat() ?: 0f
+        } catch (t: Throwable) {
+            0f
+        }
+        val r = Math.min(radius, maxValid)
+        val isConic = smooth && weight > 0f
+        val transformed = if (isConic) (8f * weight) / (3f * weight + 3f) else DEFAULT_CORNER_WEIGHT
+        logThrottled("seekbar-corner-${cls.simpleName}", Log.INFO) {
+            "seekbar-corner: cls=${cls.simpleName} radius=$radius r=$r smooth=$smooth weight=$weight conic=$isConic"
+        }
+        return CornerInfo(r, "seekbar-progress", isConic, transformed)
+    }
+
     /** 无缓存的原始解析（5-6 级降级链 + seekbar 启发式兜底；仅由 [resolveCornerRadius] 调用）。 */
     private fun resolveCornerRadiusUncached(proxy: Any?, bounds: Rect, hostView: View? = null, drawable: Any? = null): CornerInfo {
+        // 滑杆真圆角优先：系统用宿主 mCurProgressRadius 裁进度层，BlurConfig 里没有这个值
+        seekbarProgressCorner(hostView, bounds)?.let { return it }
         if (mViewProxyGetBlurConfig == null) return CornerInfo(DEFAULT_CORNER_RADIUS_PX, "default")
         try {
             val blurConfig = mViewProxyGetBlurConfig?.invoke(proxy)
@@ -11406,19 +12057,25 @@ object BlurDrawHook {
                     val maxValidS = Math.min(bounds.width(), bounds.height()) / 2f
                     if (maxValidS > 0f) {
                         val rS = Math.min(shadowOwn.ownBase, maxValidS)
-                        // CONIC 规则按**来源**判定（pathProvider/oval 级恒圆弧），与未写穿时逐字一致
-                        val conicS = shadowOwn.ownSource != "pathProvider" &&
-                            shadowOwn.ownSource != "smoothRoundPathProvider" &&
-                            shadowOwn.ownSource != "ovalProvider"
+                        // 形状判定与未写穿时逐字一致（oval 恒圆弧；squircle provider 优先）
                         val srcS = if (rS < shadowOwn.ownBase) "${shadowOwn.ownSource}-clamped" else shadowOwn.ownSource
-                        return if (conicS) {
-                            val (cS, wS) = cornerConicInfo(blurConfig, rS, drawable)
-                            CornerInfo(rS, srcS, cS, wS)
-                        } else {
+                        return if (srcS.startsWith("ovalProvider")) {
                             CornerInfo(rS, srcS)
+                        } else {
+                            val (pConicS, pWeightS) = smoothPathConicInfo(blurConfig, rS)
+                            if (pConicS) {
+                                CornerInfo(rS, srcS, true, pWeightS)
+                            } else if (srcS.startsWith("pathProvider") || srcS.startsWith("smoothRoundPathProvider")) {
+                                CornerInfo(rS, srcS)
+                            } else {
+                                val (cS, wS) = cornerConicInfo(blurConfig, rS, drawable)
+                                CornerInfo(rS, srcS, cS, wS)
+                            }
                         }
                     }
                 }
+                // 设备固定圆角表优先（主题 RRO 生效后由 Resources 读出真值）；读不出来才回落解析链
+                deviceTableCorner(hostView, bounds)?.let { return it }
                 val maxValid = Math.min(bounds.width(), bounds.height()) / 2f
                 var src = "reflect"
                 // 级 1：getCornerRadius()（亮度条/QS seekbar 走了 setCornerRadius，恒非 0）
@@ -11486,6 +12143,25 @@ object BlurDrawHook {
                         if (ppR4 > 0f) { r = ppR4; src = "smoothRoundPathProvider" }
                     }
                 }
+                // 级 3e（C15 PRE_AGSL）：根 BlurDrawable.pathProvider + BaseRoundRectPathProvider.getCornerRadii()
+                //（该代无 getMaxRadius，圆角只由 provider 承载；取四角最大值）。门控 = PRE_AGSL 成员已解析。
+                if (r <= 0f && drawable != null && mPreAgsPathProviderField != null) {
+                    val pp5 = try {
+                        mPreAgsPathProviderField?.get(drawable)
+                    } catch (t: Throwable) {
+                        null
+                    }
+                    val getRadii = mPreAgsGetCornerRadii
+                    if (pp5 != null && getRadii != null && getRadii.declaringClass.isInstance(pp5)) {
+                        val radii = try {
+                            getRadii.invoke(pp5) as? FloatArray
+                        } catch (t: Throwable) {
+                            null
+                        }
+                        val ppR5 = radii?.maxOrNull() ?: 0f
+                        if (ppR5 > 0f) { r = ppR5; src = "smoothRoundPathProvider" }
+                    }
+                }
                 // 级 4：getGradientStrokeCornerParam().getRadius()（侧滑按钮/MetaBall）
                 if (r <= 0f) {
                     val cp = cornerParamsHolder(blurConfig, drawable)
@@ -11508,15 +12184,22 @@ object BlurDrawHook {
                 if (r > 0f && r <= maxValid + 1f) {
                     // [spec/18 圆角过渡区深挖修正] 级 4b：CONIC 本体判定（通知卡/custom 卡/QS seekbar 的
                     // BlurConfig.gradientStrokeCornerParam.type=CONIC（CornerParams(int) 默认 i 偶数 → CONIC）
-                    // → 本体用三次贝塞尔 sdBezierDistance + shader 内 1.5×半径；pathProvider 级（QS tile
-                    // 弧线，系统 setPathProvider 覆盖 corner 为 RBox 圆弧）强制 isConic=false 保持圆弧。
-                    // [spec/22] ovalProvider 级同理强制 isConic=false：正圆/胶囊须用 RBox 圆弧
+                    // → 本体用三次贝塞尔 sdBezierDistance + shader 内 1.5×半径；pathProvider 为 squircle
+                    // provider（cornerWeight 非 null）时必须同按 CONIC，按圆弧渲染会在四角被系统路径裁掉。
+                    // [spec/22] ovalProvider 级强制 isConic=false：正圆/胶囊须用 RBox 圆弧
                     //（radius=min/2 → 精确圆），CONIC 三次贝塞尔 cc=1.5×min/2 > halfSize 会破坏 SDF 定义域。
-                    return if (src != "pathProvider" && src != "smoothRoundPathProvider" && src != "ovalProvider") {
-                        val (c, w) = cornerConicInfo(blurConfig, r, drawable)
-                        CornerInfo(r, src, c, w)
-                    } else {
+                    return if (src == "ovalProvider") {
                         CornerInfo(r, src)
+                    } else {
+                        val (pConic, pWeight) = smoothPathConicInfo(blurConfig, r)
+                        if (pConic) {
+                            CornerInfo(r, src, true, pWeight)
+                        } else if (src == "pathProvider" || src == "smoothRoundPathProvider") {
+                            CornerInfo(r, src)
+                        } else {
+                            val (c, w) = cornerConicInfo(blurConfig, r, drawable)
+                            CornerInfo(r, src, c, w)
+                        }
                     }
                 }
                 // 级 6（spec/18 Bug 1 真机方角兜底，2026-08-13 用户要求修）：
@@ -11549,9 +12232,10 @@ object BlurDrawHook {
         } catch (t: Throwable) {
             Lg.e(TAG, "map: resolve BlurConfig cornerRadius failed, no valid cornerRadius (use square)", t)
         }
+        // 解析链全程失败时再读一次设备固定表（blurConfig 为空或不可用的宿主同样适用）
+        deviceTableCorner(hostView, bounds)?.let { return it }
         return CornerInfo(DEFAULT_CORNER_RADIUS_PX, "default")
     }
-
     /** CONIC 本体判定结果（resolveCornerRadius 返回）：radius + 来源 + CONIC 开关 + CONIC 角权重。 */
     private data class CornerInfo(
         val radius: Float,
@@ -11623,6 +12307,47 @@ object BlurDrawHook {
             false to DEFAULT_CORNER_WEIGHT
         } catch (t: Throwable) {
             Lg.e(TAG, "map: resolve CornerParams getType/getWeight failed, conic 判定降级圆弧", t)
+            false to DEFAULT_CORNER_WEIGHT
+        }
+    }
+
+    /**
+     * pathProvider 来源的 squircle 判定：系统用 addSmoothRoundRect 画可见形状时（SmoothRoundRectPathProvider，
+     * 或 CornerOutlineProvider 家族里 cornerWeight 非 null 的 RoundRectOutlineProvider —— QS 磁贴/媒体卡的
+     * tileOutline 即此形态），玻璃必须按同一 CONIC 模型渲染；按圆弧渲染会在四个圆角被该路径裁掉
+     * （45° 处 squircle 比同半径圆弧外扩约 0.09×半径），高光带随之在角区消失。
+     * weight=null / 纯圆角矩形 provider / 反射失败 → 圆弧（与改动前逐像素一致）。
+     */
+    private fun smoothPathConicInfo(blurConfig: Any?, radius: Float): Pair<Boolean, Float> {
+        if (radius <= 0f) return false to DEFAULT_CORNER_WEIGHT
+        return try {
+            val pp = mBlurConfigGetPathProvider?.invoke(blurConfig) ?: return false to DEFAULT_CORNER_WEIGHT
+            if (mSmoothRoundRectPathProviderClass?.isInstance(pp) == true) {
+                val w = (mBaseRoundRectGetWeight?.invoke(pp) as? Number)?.toFloat() ?: 0f
+                if (w > 0f) {
+                    val weight = (8f * w) / (3f * w + 3f)
+                    logThrottled("lg-conic-pp", Log.INFO) {
+                        "conic-pp: smooth-round pp=${pp.javaClass.simpleName} w=$w weight=$weight radius=$radius"
+                    }
+                    return true to weight
+                }
+            }
+            if (mRoundRectOutlineProviderClass?.isInstance(pp) == true && mRoundRectOutlineProviderWeightNoArg != null) {
+                val w = (mRoundRectOutlineProviderWeightNoArg?.invoke(pp) as? Number)?.toFloat()
+                if (w != null && w > 0f) {
+                    val weight = (8f * w) / (3f * w + 3f)
+                    logThrottled("lg-conic-pp", Log.INFO) {
+                        "conic-pp: outline-pp=${pp.javaClass.simpleName} w=$w weight=$weight radius=$radius"
+                    }
+                    return true to weight
+                }
+            }
+            logThrottled("lg-conic-miss", Log.DEBUG) {
+                "conic-miss: pp=${pp.javaClass.simpleName} radius=$radius (path provider 非 squircle)"
+            }
+            false to DEFAULT_CORNER_WEIGHT
+        } catch (t: Throwable) {
+            Lg.e(TAG, "map: smoothPathConicInfo failed, conic 判定降级圆弧", t)
             false to DEFAULT_CORNER_WEIGHT
         }
     }
@@ -11892,27 +12617,26 @@ object BlurDrawHook {
     // ------------------------------------------------------------ [spec/86] 音量条进度填充层登记
 
     /**
-     * [spec/86] hook `QsSeekBarBlurManager.getSeekBarActiveDrawable(View)`（唯一调用点
-     * `OplusQsVerticalSeekBar:82` → `activeMixColorDrawable`），登记返回的 AutoBlurDrawable 到
-     * [seekbarActiveDrawables] → [replaceShaderIfPossible] 命中即改画半透明白 tint（不套玻璃），
+     * [spec/86] hook `QsSeekBarBlurManager.getSeekBarActiveDrawable`（7 参 / 1 参经
+     * [QsSeekbarCompat.resolveActiveFactory] 解析），工厂返回的包装层登记进 instance；
+     * 内层实际渲染对象由 [registerScreenRegionCore] 解析后 `bind` 补登记 →
+     * [replaceShaderIfPossible] 经 `isActiveTarget` 命中即改画半透明白 tint（不套玻璃），
      * 让轨道层（`getSeekBarBackground`，带真实主题圆角）玻璃的折射/高光透出来。
      *
-     * 挂这里而不是挂 onDraw：本方法**只在 seekbar 构造/刷新 drawable 时调一次**，登记零热路径开销；
-     * 返回值引用就是后续 drawBlurShader 的 `this` 同实例（同 [registerScreenRegionCore] 的 target
-     * 解析约定），判定可靠。
+     * 挂这里而不是挂 onDraw：本方法**只在 seekbar 构造/刷新 drawable 时调一次**，登记零热路径开销。
      * 挂载失败独立 try-catch（不影响其他 hook，退化为现状 = 填充层照旧盖住高光）。
      */
     private fun mountQsSeekBarActiveDrawable(api: XposedInterface, classLoader: ClassLoader) {
         try {
             val clazz = Class.forName(CLASS_QS_SEEKBAR_BLUR_MANAGER, false, classLoader)
-            val method = clazz.getDeclaredMethod(METHOD_GET_SEEKBAR_ACTIVE_DRAWABLE, View::class.java)
+            val method = QsSeekbarCompat.instance.resolveActiveFactory(clazz)
             api.hook(method)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
                 .intercept { chain ->
                     val ret = chain.proceed()
                     try {
                         if (ret != null) {
-                            seekbarActiveDrawables[ret] = true
+                            QsSeekbarCompat.instance.registerFactoryResult(ret)
                             if (moduleLogEnabled) {
                                 Lg.i(TAG, "seekbar: active drawable registered id=${System.identityHashCode(ret)}")
                             }
@@ -11922,7 +12646,7 @@ object BlurDrawHook {
                     }
                     ret
                 }
-            Lg.i(TAG, "Hook mounted: $CLASS_QS_SEEKBAR_BLUR_MANAGER#$METHOD_GET_SEEKBAR_ACTIVE_DRAWABLE(View) (spec/86 seekbar active tint)")
+            Lg.i(TAG, "Hook mounted: $method (spec/86 seekbar active tint)")
         } catch (t: Throwable) {
             Lg.w(TAG, "Hook mount skipped: $CLASS_QS_SEEKBAR_BLUR_MANAGER#$METHOD_GET_SEEKBAR_ACTIVE_DRAWABLE", t)
         }
@@ -11938,11 +12662,21 @@ object BlurDrawHook {
             } catch (t: Throwable) {
                 Lg.e(TAG, "drawBlurShader: getThisObject failed", t); null
             }
+            var applied = false
             if (drawable != null) {
-                try {
-                    replaceShaderIfPossible(drawable)
-                } catch (t: Throwable) {
-                    Lg.e(TAG, "render: drawBlurShader intercept error", t)
+                if (glassFuseTripped) {
+                    // 熔断后回系统模糊：清掉可能残留的模块 shader，交回系统绘制
+                    try {
+                        restoreSystemShaderIfReplaced(drawable)
+                    } catch (_: Throwable) {
+                    }
+                } else {
+                    try {
+                        applied = replaceShaderIfPossible(drawable)
+                    } catch (t: Throwable) {
+                        Lg.e(TAG, "render: drawBlurShader intercept error", t)
+                        glassFuse.recordFailure(FUSE_DOMAIN_GLASS, "drawBlurShader:${t.javaClass.simpleName}")
+                    }
                 }
                 // clip 诊断（moduleLogEnabled 门控）：lg-clip = 画布 clip 与 bounds 四向差值，
                 // 其 clip 实为 RenderNode.beginRecording 录制视口（节点本地坐标，与 bounds
@@ -11993,6 +12727,23 @@ object BlurDrawHook {
                     }
                 }
             }
+            // 进度填充层 tint 只包住这一次绘制，finally 恢复（关玻璃后不残留白色填充）
+            // 开关关 → alpha 0 → 不上白 tint，激活段保留纯玻璃；开关开 → alpha 随面板收起比例递减（淡出）
+            if (applied && drawable != null && QsSeekbarCompat.instance.isActiveTarget(drawable)) {
+                val tintAlpha = controlProgressFillAlpha(System.identityHashCode(drawable))
+                if (tintAlpha > 0) {
+                    val tintPaint = try {
+                        mGetDrawableShaderPaint?.invoke(drawable) as? Paint
+                    } catch (t: Throwable) {
+                        Lg.e(TAG, "seekbar: getDrawableShaderPaint failed (draw tint)", t); null
+                    }
+                    if (tintPaint != null) {
+                        return QsSeekbarCompat.instance.withActiveTint(
+                            tintPaint, tintAlpha,
+                        ) { chain.proceed() }
+                    }
+                }
+            }
             return chain.proceed()
         }
     }
@@ -12016,17 +12767,158 @@ object BlurDrawHook {
             } catch (t: Throwable) {
                 Lg.e(TAG, "onDrawContent: getArg(0) failed", t); null
             }
-            var handled = false
-            if (drawable != null && canvas != null) {
-                try {
-                    handled = tryRenderOnDrawContent(drawable, canvas)
-                } catch (t: Throwable) {
-                    Lg.e(TAG, "onDrawContent: intercept error", t)
+            if (glassFuseTripped) {
+                if (drawable != null) {
+                    try {
+                        restoreSystemShaderIfReplaced(drawable)
+                    } catch (_: Throwable) {
+                    }
                 }
+                return chain.proceed()
             }
-            if (!handled) return chain.proceed()
-            return null
+            return ContentDrawBridge.dispatch(
+                ownedDraw = { drawable != null && canvas != null && tryRenderOnDrawContent(drawable, canvas) },
+                original = { chain.proceed() },
+                onOwnedFailure = {
+                    Lg.e(TAG, "onDrawContent: intercept error", it)
+                    glassFuse.recordFailure(FUSE_DOMAIN_GLASS, "onDrawContent:${it.javaClass.simpleName}")
+                },
+            )
         }
+    }
+
+    /** C15（PRE_AGSL）成员解析：draw(Canvas) + drawablePath / pathProvider 私有字段。 */
+    private fun resolvePreAgsMembers(classLoader: ClassLoader) {
+        try {
+            val cls = Class.forName(CLASS_PRE_AGSL_BLUR_DRAWABLE, false, classLoader)
+            cls.getMethod(METHOD_BLUR_DRAWABLE_DRAW, Canvas::class.java)
+            mPreAgsDrawablePathField = cls.getDeclaredField(FIELD_PRE_AGSL_DRAWABLE_PATH).apply { isAccessible = true }
+            mPreAgsPathProviderField = cls.getDeclaredField(FIELD_PRE_AGSL_PATH_PROVIDER).apply { isAccessible = true }
+            mPreAgsGetCornerRadii = Class.forName(CLASS_BASE_ROUND_RECT_PATH_PROVIDER, false, classLoader)
+                .getMethod(METHOD_GET_CORNER_RADII)
+            Lg.i(
+                TAG,
+                "lg-hook: C15 PRE_AGSL 成员解析 path=${mPreAgsDrawablePathField != null} " +
+                    "provider=${mPreAgsPathProviderField != null} radii=${mPreAgsGetCornerRadii != null}",
+            )
+        } catch (t: Throwable) {
+            mPreAgsDrawablePathField = null
+            mPreAgsPathProviderField = null
+            mPreAgsGetCornerRadii = null
+            Lg.e(TAG, "lg-hook: C15 PRE_AGSL 成员解析失败（玻璃接管关闭）", t)
+        }
+    }
+
+    /**
+     * C15（PRE_AGSL）玻璃接管：hook 根 `BlurDrawable.draw(Canvas)`。
+     * 系统该版本 draw 只画自身 RenderNode 里的「已模糊位图 + 前景混合」，没有 shader 面；
+     * 成功接管时按 drawablePath 自绘液态玻璃并跳过系统绘制，失败一律交回系统原绘制。
+     */
+    private fun mountPreAgsDraw(api: XposedInterface, classLoader: ClassLoader) {
+        if (posteffectArchProbed != PosteffectArch.PRE_AGSL) return
+        if (mPreAgsDrawablePathField == null) {
+            Lg.e(TAG, "Hook B mount FAILED: C15 PRE_AGSL drawablePath unresolved (glass off)")
+            return
+        }
+        try {
+            val cls = Class.forName(CLASS_PRE_AGSL_BLUR_DRAWABLE, false, classLoader)
+            val method = cls.getMethod(METHOD_BLUR_DRAWABLE_DRAW, Canvas::class.java)
+            api.hook(method)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .intercept { chain ->
+                    val drawable = try {
+                        chain.getThisObject()
+                    } catch (t: Throwable) {
+                        Lg.e(TAG, "c15-glass: getThisObject failed", t); null
+                    }
+                    val canvas = try {
+                        chain.getArg(0) as? Canvas
+                    } catch (t: Throwable) {
+                        Lg.e(TAG, "c15-glass: getArg(0) failed", t); null
+                    }
+                    var handled = false
+                    if (drawable != null && canvas != null) {
+                        try {
+                            handled = tryRenderPreAgsDraw(drawable, canvas)
+                        } catch (t: Throwable) {
+                            Lg.e(TAG, "c15-glass: intercept error", t)
+                            glassFuse.recordFailure(FUSE_DOMAIN_GLASS, "preAgsDraw:${t.javaClass.simpleName}")
+                        }
+                    }
+                    if (handled) null else chain.proceed()
+                }
+            Lg.i(TAG, "Hook B mounted: $CLASS_PRE_AGSL_BLUR_DRAWABLE#draw(Canvas) (C15 PRE_AGSL glass)")
+        } catch (t: Throwable) {
+            Lg.e(TAG, "Hook B mount FAILED: $CLASS_PRE_AGSL_BLUR_DRAWABLE#draw (C15 glass off)", t)
+        }
+    }
+
+    /**
+     * C15 玻璃自绘：几何/参数/背景源复用 [buildLiquidShader]，形状直接取系统 drawablePath
+     * （与系统 software 分支同坐标空间：drawable 本地 0..w，需先 translate bounds.left/top）。
+     * 任一环节不满足 → false，交回系统原绘制（系统模糊）。
+     */
+    private fun tryRenderPreAgsDraw(drawable: Any, canvas: Canvas): Boolean {
+        if (glassFuseTripped) return false
+        val id = System.identityHashCode(drawable)
+        if (isPowerSaveGlassOff()) {
+            logThrottled("c15-glass-skip", Log.INFO) { "c15-glass: skip power-save id=$id" }
+            return false
+        }
+        if (!Prefs.glassEnabled(api)) {
+            logThrottled("c15-glass-skip-switch", Log.INFO) { "c15-glass: skip glass switch off id=$id" }
+            return false
+        }
+        if (VolumeMaskGuard.preservesContent(drawable)) return false
+        if (!BlurSceneRegistry.isGlassable(drawable)) {
+            logThrottled("c15-glass-skip-scene", Log.INFO) { "c15-glass: skip non-glass scene id=$id" }
+            return false
+        }
+        if (SfGlassChannel.renderMode(api) == Prefs.RENDER_MODE_SF) {
+            logThrottled("c15-glass-sf", Log.INFO) { "c15-glass: sf mode, hand back to system id=$id" }
+            return false
+        }
+        val d = drawable as? Drawable ?: return false
+        val bounds = Rect(d.bounds)
+        if (bounds.width() <= 0 || bounds.height() <= 0) {
+            logThrottled("c15-glass-empty-bounds-$id", Log.DEBUG) { "c15-glass: empty bounds id=$id bounds=$bounds" }
+            return false
+        }
+        val build = try {
+            buildLiquidShader(drawable, bounds)
+        } catch (t: Throwable) {
+            Lg.e(TAG, "c15-glass: build shader failed id=$id", t)
+            glassFuse.recordFailure(FUSE_DOMAIN_GLASS, "preAgsBuild:${t.javaClass.simpleName}")
+            null
+        } ?: run {
+            logThrottled("c15-glass-nobuild-$id", Log.DEBUG, 1000L) {
+                "c15-glass: skip build id=$id bounds=$bounds view=${screenRegionMap[id]?.hostViewName}"
+            }
+            return false
+        }
+        val path = try {
+            mPreAgsDrawablePathField?.get(drawable) as? Path
+        } catch (t: Throwable) {
+            Lg.e(TAG, "c15-glass: read drawablePath failed id=$id", t); null
+        } ?: return false
+        canvas.save()
+        try {
+            canvas.translate(bounds.left.toFloat(), bounds.top.toFloat())
+            preAgsGlassPaint.shader = build.shader
+            canvas.drawPath(path, preAgsGlassPaint)
+        } catch (t: Throwable) {
+            Lg.e(TAG, "c15-glass: draw path failed id=$id", t)
+            glassFuse.recordFailure(FUSE_DOMAIN_GLASS, "preAgsDrawPath:${t.javaClass.simpleName}")
+            return false
+        } finally {
+            preAgsGlassPaint.shader = null
+            canvas.restore()
+        }
+        markRenderLeg(id, RENDER_LEG_PRE_AGSL)
+        logThrottled("c15-glass-ok", Log.INFO, 1000L) {
+            "c15-glass: draw ok id=$id bounds=$bounds view=${screenRegionMap[id]?.hostViewName}"
+        }
+        return true
     }
 
     /**
@@ -12074,6 +12966,7 @@ object BlurDrawHook {
 
     /** [spec/114] 旧架构 shader 不可用兜底：改写 blurShaderPaint 为液态玻璃后触发 drawBlurShader。 */
     private fun tryRenderLegacyDrawBlur(drawable: Any, canvas: Canvas): Boolean {
+        if (glassFuseTripped) return false
         if (mDrawBlurShader == null) return false
         if (!replaceShaderIfPossible(drawable)) return false
         return try {
@@ -12081,15 +12974,29 @@ object BlurDrawHook {
             true
         } catch (t: Throwable) {
             Lg.e(TAG, "legacy-drawBlur: drawBlurShader invoke failed", t)
+            glassFuse.recordFailure(FUSE_DOMAIN_GLASS, "legacyDrawBlur:${t.javaClass.simpleName}")
             false
         }
     }
 
     /**
-     * onDrawContent 兜底：仅当系统 shader 路径不可用（将走 drawBitmapContent 位图平铺）时接管。
-     * 系统 shader 可用时返回 false，让系统 proceed → 内部走 drawBlurShader → Hook 1 替换。
+     * onDrawContent 接管：判据换向成「自家背景源/几何/场景开关/shader 齐了就直接录玻璃」，
+     * 不再看系统 shader 是否可用（系统有 shader 不等于系统会画它）；
+     * 不满足或接管失败 → 交回原生分支恰好执行一次（dispatch 在 catch 外调用，不吞宿主异常）。
      */
     private fun tryRenderOnDrawContent(drawable: Any, canvas: Canvas): Boolean {
+        if (glassFuseTripped) {
+            restoreSystemShaderIfReplaced(drawable)
+            return false
+        }
+        // 音量面板内层内容留原生：还原可能残留的模块 shader 后交回系统
+        if (VolumeMaskGuard.preservesContent(drawable)) {
+            logThrottled("volume-preserve-content", Log.INFO) {
+                "volume: native content preserved in onDrawContent, id=${System.identityHashCode(drawable)}"
+            }
+            restoreSystemShaderIfReplaced(drawable)
+            return false
+        }
         // [spec/85 省电模式] 省电开启 → 不接管：先还原可能残留的模块 shader，再交回系统原绘制
         //（return false → chain.proceed() 走系统 onDrawContent 分支，enableShader=false 时系统自己
         // 走 drawBitmapContent 位图平铺 = 恢复系统表现）。
@@ -12097,31 +13004,14 @@ object BlurDrawHook {
             restoreSystemShaderIfReplaced(drawable)
             return false
         }
-        val drawableShader = try {
-            mGetDrawableShader?.invoke(drawable)
-        } catch (t: Throwable) {
-            Lg.e(TAG, "onDrawContent: getDrawableShader failed", t); null
-        }
-        if (drawableShader != null) {
-            val sysShader = try {
-                mGetShaderOrNull?.invoke(drawableShader)
-            } catch (t: Throwable) {
-                Lg.e(TAG, "onDrawContent: getShaderOrNull failed", t); null
-            }
-            // [修4 2026-08-12] 系统 onDrawContent 三分支（BlendDrawable.java:52-65）：enableShader=false 时
-            // 即使 sysShader 非 null 也走 drawBitmapContent（画模糊位图+foregroundBlend 色层）→ 磨砂。
-            // 必须同时判 getEnableShader()，false 时接管画玻璃。反射失败默认 true（维持原放行语义）。
-            val enableShader = try {
-                (mGetEnableShader?.invoke(drawable) as? Boolean) ?: true
-            } catch (t: Throwable) {
-                Lg.e(TAG, "onDrawContent: getEnableShader failed, assume true", t); true
-            }
-            if (sysShader != null && enableShader) return false  // 系统走 drawBlurShader，Hook 1 处理
-        }
-        // 系统 shader 不可用 → 接管：替换 shader 并手动画液态玻璃 path
-        if (!replaceShaderIfPossible(drawable)) return false
+        if (!ContentDrawBridge.shouldRenderOwned(
+                isBackgroundScrim = { isBackgroundScrimById(drawable) },
+                ownedReady = { mDrawBlurShader != null && replaceShaderIfPossible(drawable) },
+            )
+        ) return false
+        val draw = mDrawBlurShader ?: return false
         return try {
-            mDrawBlurShader?.invoke(drawable, canvas)  // 触发 Hook 1（幂等跳过重建），画液态玻璃
+            draw.invoke(drawable, canvas)  // 触发 Hook 1（幂等跳过重建），画液态玻璃
             // 模拟系统 onDrawContent 结尾的 getPaint().reset()，防 paint 脏状态残留
             try {
                 (mGetPaint?.invoke(drawable) as? Paint)?.reset()
@@ -12130,6 +13020,7 @@ object BlurDrawHook {
             true
         } catch (t: Throwable) {
             Lg.e(TAG, "onDrawContent: drawBlurShader invoke failed", t)
+            glassFuse.recordFailure(FUSE_DOMAIN_GLASS, "onDrawContentDraw:${t.javaClass.simpleName}")
             false
         }
     }
@@ -12168,6 +13059,14 @@ object BlurDrawHook {
      * 返回值 true 仅代表 paint.shader 已替换为液态玻璃（后续由系统 drawPath 完成实际绘制）。
      */
     private fun replaceShaderIfPossible(drawable: Any): Boolean {
+        // 独立音量面板内层内容留原生：还原模块 shader 后回退系统绘制
+        if (VolumeMaskGuard.preservesContent(drawable)) {
+            logThrottled("volume-preserve-replace", Log.INFO) {
+                "volume: native content preserved in replaceShader, id=${System.identityHashCode(drawable)}"
+            }
+            restoreSystemShaderIfReplaced(drawable)
+            return false
+        }
         val id = System.identityHashCode(drawable)
         GlassRegistry.bind(id, drawable, renderSideCardClass())
 
@@ -12204,28 +13103,25 @@ object BlurDrawHook {
         // 位置必须在 **BlurSceneRegistry 场景判定之前**：该层由本模块显式登记，不受黑白名单影响
         //（否则音量场景被 registry 黑名单拦在前面，TINT 永远走不到）。
         // 也必须在「已是本模块 RuntimeShader」幂等分支之前命中（否则首帧套上玻璃后再也回不到 TINT）。
-        if (seekbarActiveDrawables.containsKey(drawable)) {
-            val tintPaint = try {
-                mGetDrawableShaderPaint?.invoke(drawable) as? Paint
-            } catch (t: Throwable) {
-                Lg.e(TAG, "seekbar: getDrawableShaderPaint failed", t); null
+        // tint 实际只在一次绘制内生效（EffectGlassDraw 用 withActiveTint 包住 proceed、finally 恢复），
+        // 此处只校验 paint 可取：常驻 colorFilter 会在关玻璃后留下白色填充。
+        if (QsSeekbarCompat.instance.isActiveTarget(drawable)) {
+            // 开关关：不接管，落回下面的正常玻璃路径（等价 spec/86 之前的不透明玻璃）
+            if (!controlProgressFillEnabled()) {
+                logRenderMode(id, "GLASS", "seekbar active glass (fill switch off)", drawable)
+            } else {
+                val tintPaint = try {
+                    mGetDrawableShaderPaint?.invoke(drawable) as? Paint
+                } catch (t: Throwable) {
+                    Lg.e(TAG, "seekbar: getDrawableShaderPaint failed", t); null
+                }
+                if (tintPaint == null) {
+                    logRenderMode(id, "BLUR", "seekbar tint: paint null", drawable)
+                    return false
+                }
+                logRenderMode(id, "GLASS", "seekbar active tint")
+                return true
             }
-            if (tintPaint == null) {
-                logRenderMode(id, "BLUR", "seekbar tint: paint null", drawable)
-                return false
-            }
-            try {
-                tintPaint.shader = null
-                tintPaint.colorFilter = PorterDuffColorFilter(
-                    Color.argb(SEEKBAR_ACTIVE_TINT_ALPHA, 255, 255, 255),
-                    PorterDuff.Mode.SRC,
-                )
-            } catch (t: Throwable) {
-                Lg.e(TAG, "seekbar: active tint paint failed (id=$id)", t)
-                return false
-            }
-            logRenderMode(id, "GLASS", "seekbar active tint")
-            return true
         }
 
         // [M1 方案 A] 场景判定（增量补充，registry 只是补充判定，现有逻辑为默认）：
@@ -12305,12 +13201,19 @@ object BlurDrawHook {
             if (sfEntry != null && sfRegion != null && sfRegion.width() > 0f && sfRegion.height() > 0f) {
                 val sfShort = minOf(sfRegion.width(), sfRegion.height()) / 2f
                 val sfCorner = sfEntry.cornerRadius.coerceIn(0f, sfShort)
+                val sfDrawable = drawable as? android.graphics.drawable.Drawable
+                val sfHost = sfDrawable?.callback as? android.view.View
+                if (sfHost == null) {
+                    logThrottled("sf-host-null", Log.INFO) {
+                        "sf host null: drawable=${sfDrawable?.javaClass?.name} callback=${sfDrawable?.callback?.javaClass?.name}"
+                    }
+                }
                 SfGlassChannel.claimForDraw(
                     id,
                     sfRegion.left, sfRegion.top,
                     sfRegion.width(), sfRegion.height(),
                     sfCorner,
-                    host = (drawable as? android.graphics.drawable.Drawable)?.callback as? android.view.View,
+                    host = sfHost,
                 )
                 restoreSystemShaderIfReplaced(drawable)
                 logRenderMode(id, "SF", "sf channel claim, hand over", drawable, bounds)
@@ -12634,6 +13537,22 @@ object BlurDrawHook {
             // （滑动叠影"多张合在一起"根因，同款）。快照缺失（null）→ 保持上次 uniform（下帧
             // 快照就绪自动恢复），不破坏现有绘制。
             val entry = lookupScreenRegion(id, bounds)
+            // 通知卡几何取证：滑动/展开态逐帧打出宿主矩形与 clip，定位高光带落点
+            if (entry != null && entry.hostViewName.contains("Notification")) {
+                logThrottled("lg-geo-diag-$id", Log.INFO, intervalMs = 300L) {
+                    val hv = entry.hostViewRef?.get()
+                    val loc = IntArray(2)
+                    try {
+                        hv?.getLocationOnScreen(loc)
+                    } catch (_: Throwable) {
+                    }
+                    "geo-diag: id=$id host=${entry.hostViewName} bounds=$bounds loc=${loc[0]},${loc[1]} " +
+                        "hw=${hv?.width} hh=${hv?.height} clip=${entry.clipBounds} vp=${cg.viewport} " +
+                        "off=(${cg.maskOffsetX},${cg.maskOffsetY}) mask=${cg.maskRect} maskR=${cg.maskCornerRadius} " +
+                        "mb=${entry.metaBall != null} hl=${cg.params.highlight} hlw=${cg.params.highlightWidth} " +
+                        "polish=${cg.params.surfacePolish}"
+                }
+            }
             // [doc/spec/99 clip∩bounds] clip 变化检测：宿主 clip 随父容器动画/布局逐帧变，几何必须跟上。
             // 不一致 → 后台强制重算（当前帧继续用旧值零卡顿，下帧收敛；与既有 1s 材质 TTL 同语义，
             // 兜底双保险）。后台任务只读 entry.clipBounds 快照，**绝不碰 Canvas**。
@@ -12682,12 +13601,36 @@ object BlurDrawHook {
                 applied.cornerRadius != cg.cornerRadius ||
                 // [2026-08-13] cornerConicBlend 恒 1（角形状恒 CONIC），该比对恒 false，保留作防御
                 (cg.cornerIsConic && applied.cornerConicBlend != cg.cornerConicBlend)
+            if (cornerChanged) {
+                if (applied == null) {
+                    logThrottled("lg-corner-first", Log.INFO, intervalMs = 0L) {
+                        "corner-first: id=$id conic=${cg.cornerIsConic} w=${cg.cornerWeight} " +
+                            "r=${cg.cornerRadius} hlW=${bindParams.highlightWidth} " +
+                            "hl=${bindParams.highlight} floor=${bindParams.highlightFloor}"
+                    }
+                } else {
+                    logThrottled("lg-corner-flip", Log.INFO, intervalMs = 0L) {
+                        "corner-flip: id=$id conic ${applied.cornerIsConic}->${cg.cornerIsConic} " +
+                            "w ${applied.cornerWeight}->${cg.cornerWeight} r ${applied.cornerRadius}->${cg.cornerRadius}"
+                    }
+                }
+            }
             // [spec/35 黑遮罩 / spec/41 作用范围修正] 遮罩 uniform 变化检测：SystemUI 下拉所有元素
             // 统一值，配置/首次应用变化 → 走全量 setUniforms 重设 uMaskAlpha（禁用轻量分支）
             val maskOverlayChanged = applied == null || applied.maskAlpha != cg.maskAlpha
             // [2026-09-16 doc/spec/67] 材质参数指纹变化（任何材质滑杆改动）→ 必须走全量 setUniforms 重设。
             // 否则材质改动被 `if (!uniformsChanged) return true` 吃掉，直到几何变化才生效。
             val materialChanged = applied == null || applied.materialHash != bindParams.hashCode()
+            // 材质下发诊断：逐次记录实际下发值，定位「首帧高光比配置粗亮」的取值来源
+            if (materialChanged) {
+                logThrottled("lg-mat-$id", Log.INFO, intervalMs = 0L) {
+                    "mat: id=$id first=${applied == null} hl=${bindParams.highlight} w=${bindParams.highlightWidth} " +
+                        "floor=${bindParams.highlightFloor} falloff=${bindParams.highlightFalloff} " +
+                        "innerAtt=${bindParams.highlightInnerAtt} glow=${bindParams.innerGlow} " +
+                        "polish=${bindParams.surfacePolish} conic=${cg.cornerIsConic} r=${cg.cornerRadius} " +
+                        "host=${cg.hostViewName}"
+                }
+            }
             // [doc/spec/100 方案2] metaball 球心/半尺寸/blendShape 逐帧随动画变 → data class equals
             // 命中差异 → 必须走全量 setUniforms 重设 uBall1/2/3（否则桥位置停在上一帧）。
             val metaBallChanged = applied != null && applied.metaBalls != mbNow
@@ -12966,7 +13909,10 @@ object BlurDrawHook {
             val cornerConicBlend = if (effectiveCornerIsConic) this.cornerConicBlend else 1f
             // [用户补充 2026-08-13] buildParams（材质参数 14 项 Prefs 派生：vibrancy/falloff/refraction/
             // highlight/depth/dispersion 等）一并后台算；readMaterialParams 1s 节流缓存 @Volatile 线程安全。
-            val params = buildParams(viewport.width(), viewport.height(), cornerRadius, effectiveCornerIsConic, entry.cornerWeight, elementId = id)
+            val params = buildParams(
+                viewport.width(), viewport.height(), cornerRadius, effectiveCornerIsConic,
+                entry.cornerWeight, elementId = id, polishedOverride = entry.polished,
+            )
             return ComputedGeometry(
                 bounds = Rect(bounds),
                 frame = 0L,  // [2026-08-13] 无全局帧概念（BlurService 端全移除）；源变化靠 sourceBitmapId
@@ -13243,6 +14189,12 @@ object BlurDrawHook {
             logThrottled("lg-clip-bypass-draw-build", Log.DEBUG) {
                 "lg-clip-bypass-draw-build: mask=${params.clipBypassMask} shape=${params.clipBypassShape} id=${region.id}"
             }
+        }
+        // 首次同步应用诊断：记录实际上榜的材质值（定位首帧高光比配置粗亮的取值来源）
+        logThrottled("lg-mat-sync-${region.id}", Log.INFO, intervalMs = 0L) {
+            "mat-sync: id=${region.id} hl=${params.highlight} w=${params.highlightWidth} " +
+                "floor=${params.highlightFloor} falloff=${params.highlightFalloff} " +
+                "polish=${params.surfacePolish} host=${region.hostViewName}"
         }
         // 记录已应用状态（R1：后续每帧 refresh 据此判断是否重设 uniform）
         appliedUniformsMap[region.id] = AppliedKey(
@@ -13647,6 +14599,34 @@ object BlurDrawHook {
         val hostW2 = try { hostV2?.width ?: -1 } catch (t: Throwable) { -1 }
         val hostH2 = try { hostV2?.height ?: -1 } catch (t: Throwable) { -1 }
         val hostName2 = entry.hostViewName
+        // 真实元素矩形按宿主 View 尺寸取：drawable 本地原点 = 视图左上 − bounds.left/top。
+        // 只在 bounds 确实大于宿主（真外扩，如桥区扩宽）且视图矩形完整落在 bounds 内时启用；
+        // 不假设两侧等宽，扩展区因此不会算进玻璃形状（高光留在卡片边，而不是画到外扩区被父层裁掉）。
+        val viewLeft = if (hostW2 > 0) (-bounds.left).toFloat() else 0f
+        val viewTop = if (hostH2 > 0) (-bounds.top).toFloat() else 0f
+        val hostRectValid = hostW2 > 1 && hostH2 > 1 &&
+            (bounds.width() > hostW2 + 1 || bounds.height() > hostH2 + 1) &&
+            hostW2 * 2 >= bounds.width() && hostH2 * 2 >= bounds.height() &&
+            viewLeft >= -0.5f && viewTop >= -0.5f &&
+            viewLeft + hostW2 <= bounds.width() + 0.5f &&
+            viewTop + hostH2 <= bounds.height() + 0.5f
+        if (hostRectValid) {
+            val hostRect = RectF(viewLeft, viewTop, viewLeft + hostW2, viewTop + hostH2)
+            logThrottled("lg-realhost", Log.INFO) {
+                "real-host: host=$hostName2 bounds=$bounds view=$hostRect"
+            }
+            return applyClipEffectiveRegion(
+                bounds, entry, screenRegion,
+                RealGeometry(
+                    RectF(0f, 0f, hostW2.toFloat(), hostH2.toFloat()),
+                    viewLeft, viewTop, hostRect,
+                    RectF(
+                        screenRegion.left + viewLeft, screenRegion.top + viewTop,
+                        screenRegion.left + viewLeft + hostW2, screenRegion.top + viewTop + hostH2,
+                    ),
+                ),
+            )
+        }
         val capsuleDisplacement = hostName2.contains("CapsuleEar") || hostName2.contains("Capsule") &&
             hostW2 > 0 && hostH2 > 0 &&
             bounds.width() <= hostW2 && bounds.height() <= hostH2
@@ -13854,6 +14834,10 @@ object BlurDrawHook {
         val highlightInnerAtt: Float = Prefs.DEFAULT_HIGHLIGHT_INNER_ATT,
         /** 内侧光 0~1（默认 0=关）。末尾带默认值，兜底分支位置构造不传即用配置默认。 */
         val innerGlow: Float = Prefs.DEFAULT_INNER_GLOW,
+        /** 外描边强度 0~1（默认 0=关）。 */
+        val edgeStroke: Float = Prefs.DEFAULT_EDGE_STROKE,
+        /** 外描边宽度 px（默认 1.2）。 */
+        val edgeStrokeWidth: Float = Prefs.DEFAULT_EDGE_STROKE_WIDTH,
     )
 
     @Volatile
@@ -13905,6 +14889,8 @@ object BlurDrawHook {
                     prefs.getFloat(Prefs.KEY_HIGHLIGHT_FLOOR, Prefs.DEFAULT_HIGHLIGHT_FLOOR),
                     prefs.getFloat(Prefs.KEY_HIGHLIGHT_INNER_ATT, Prefs.DEFAULT_HIGHLIGHT_INNER_ATT),
                     prefs.getFloat(Prefs.KEY_INNER_GLOW, Prefs.DEFAULT_INNER_GLOW).coerceIn(0f, 1f),
+                    prefs.getFloat(Prefs.KEY_EDGE_STROKE, Prefs.DEFAULT_EDGE_STROKE).coerceIn(0f, 1f),
+                    prefs.getFloat(Prefs.KEY_EDGE_STROKE_WIDTH, Prefs.DEFAULT_EDGE_STROKE_WIDTH).coerceIn(0f, 8f),
                 )
             } catch (t: Throwable) {
                 Lg.e(TAG, "buildParams: prefs float read failed, use defaults", t)
@@ -13921,6 +14907,52 @@ object BlurDrawHook {
         return result
     }
 
+    private class PolishVerdict(val atMs: Long, val value: Boolean)
+
+    /** elementId → 判定时刻与结果；宿主身份短窗稳定，TTL 内不重复走父链 */
+    private val polishVerdictCache = ConcurrentHashMap<Int, PolishVerdict>()
+
+    /**
+     * 注册期用真实宿主 View 判定精修材质并写进 entry（同时镜像到仍存活的旧 entry）。
+     * true 一旦成立即保持：重排/复用中间态父链断开不会把高光带打回宽钝形态。
+     */
+    private fun applyPolishVerdict(entry: RegionEntry, previous: RegionEntry?, host: View) {
+        try {
+            val value = previous?.polished == true || MaterialPolishPolicy.usePolishedMaterial(host)
+            entry.polished = value
+            previous?.polished = value
+            // 每个宿主类只记一条：注册期结论直接决定首帧高光形态，出问题先看这里
+            val hostName = host.javaClass.simpleName
+            if (polishVerdictSeenHosts.putIfAbsent(hostName, value) == null) {
+                Lg.i(TAG, "polish-verdict: host=$hostName polished=$value (registered, key=paint-polish-register)")
+            }
+        } catch (t: Throwable) {
+            Lg.e(TAG, "polish-verdict: register failed", t)
+        }
+    }
+
+    /** 注册期精修判定审计表（宿主类名 → 首次结论，只记一次） */
+    private val polishVerdictSeenHosts = ConcurrentHashMap<String, Boolean>()
+
+    /** 精修判定结果按 elementId 缓存 500ms，热路径免每帧父链上溯 */
+    private fun polishedVerdictFor(elementId: Int): Boolean {
+        val nowMs = SystemClock.uptimeMillis()
+        val cached = polishVerdictCache[elementId]
+        // 一旦判定为精修即保持：重排/复用瞬间父链断开不会把高光带打回宽钝形态再切回
+        if (cached != null && (cached.value || nowMs - cached.atMs < POLISH_VERDICT_TTL_MS)) return cached.value
+        val entry = screenRegionMap[elementId]
+        val host = entry?.hostViewRef?.get()
+        // 注册期已有结论直接用；取不到宿主（重排/复用中间态）→ 沿用上次判定，不让宽高光先上屏
+        val value = entry?.polished ?: if (host != null) {
+            MaterialPolishPolicy.usePolishedMaterial(host)
+        } else {
+            cached?.value ?: false
+        }
+        if (polishVerdictCache.size > 512) polishVerdictCache.clear()
+        polishVerdictCache[elementId] = PolishVerdict(nowMs, value)
+        return value
+    }
+
     private fun buildParams(
         width: Float,
         height: Float,
@@ -13928,6 +14960,7 @@ object BlurDrawHook {
         cornerIsConic: Boolean = false,
         cornerWeight: Float = DEFAULT_CORNER_WEIGHT,
         elementId: Int = 0,
+        polishedOverride: Boolean? = null,
     ): LiquidGlassShader.Params {
         val def = LiquidGlassShader.Params(viewportWidth = width, viewportHeight = height)
         return try {
@@ -13990,6 +15023,9 @@ object BlurDrawHook {
                 parallaxY = pick(Prefs.KEY_PARALLAX_Y, m.parallaxY),
                 clipBypassMask = cb.mask,
                 clipBypassShape = cb.shape,
+                surfacePolish = polishedOverride ?: polishedVerdictFor(elementId),
+                edgeStroke = pick(Prefs.KEY_EDGE_STROKE, m.edgeStroke).coerceIn(0f, 1f),
+                edgeStrokeWidth = pick(Prefs.KEY_EDGE_STROKE_WIDTH, m.edgeStrokeWidth).coerceIn(0f, 8f),
             )
         } catch (t: Throwable) {
             Lg.e(TAG, "buildParams: prefs float read failed, use defaults", t)
@@ -15723,6 +16759,7 @@ object BlurDrawHook {
             Lg.w(TAG, "bg-element: empty crop after clamp $region -> $crop")
             return null
         }
+        if (!CaptureApi.beginCapture()) return null
         return try {
             // [spec/82] 新抓屏源：OPPO display token + 进程内静态 `ScreenCapture.captureDisplay`。
             // 动机：旧路径 `IWindowManager.captureDisplay` 每抓一次都在 system_server 记一行
@@ -15736,6 +16773,7 @@ object BlurDrawHook {
                 systemUiContext(), crop, newScale, newExcludes.toTypedArray()
             )
             if (viaToken != null) {
+                CaptureApi.recordSuccess()
                 logThrottled("capture-display-token-ok", Log.INFO) {
                     "bg-element: captureDisplay(token) ok ${viaToken.width}x${viaToken.height} crop=$crop (${newScale}x, excl=${newExcludes.size})"
                 }
@@ -15754,9 +16792,9 @@ object BlurDrawHook {
                     Lg.w(TAG, "bg-element: IWindowManager.Stub.asInterface null")
                     null
                 } else {
-                    val captureCls = hostForName("android.window.ScreenCapture")
-                    val argsCls = hostForName("android.window.ScreenCapture\$CaptureArgs")
-                    val builderCls = hostForName("android.window.ScreenCapture\$CaptureArgs\$Builder")
+                    val captureCls = CaptureApi.load("android.window.ScreenCapture", hostClassLoader)
+                    val argsCls = CaptureApi.load("android.window.ScreenCapture\$CaptureArgs", hostClassLoader)
+                    val builderCls = CaptureApi.load("android.window.ScreenCapture\$CaptureArgs\$Builder", hostClassLoader)
                     val builder = builderCls.getConstructor().newInstance()
                     // [spec/17 配置接线] 降采样比例读 Prefs（KEY_BG_CAPTURE_SCALE，clamp 0.25~1.0，替代硬编码 0.5f）
                     // [doc/spec/49 回退 2026-08-13] 拖动期不再强制 0.25 降采样：运动时保持配置清晰度
@@ -15779,7 +16817,7 @@ object BlurDrawHook {
                             Lg.w(TAG, "bg-element: createSyncCaptureListener() null")
                             null
                         } else {
-                            val listenerCls = hostForName("android.window.ScreenCapture\$ScreenCaptureListener")
+                            val listenerCls = CaptureApi.load("android.window.ScreenCapture\$ScreenCaptureListener", hostClassLoader)
                             val m = wm.javaClass.getMethod(
                                 "captureDisplay",
                                 Int::class.javaPrimitiveType, argsCls, listenerCls
@@ -15833,6 +16871,7 @@ object BlurDrawHook {
                                                     // [spec/59 追加 2026-08-14 诊断] captureDisplay Binder 阻塞告警（根因候选 B）：
                                                     // start→ok 超 500ms = SF 端忙/同步 Binder 阻塞（worker 卡住期间入队积压 = 竞态窗口）
                                                     if (capElapsed > 500) diagWorkerLog("capture-slow", " elapsed=${capElapsed}ms crop=$crop")
+                                                    CaptureApi.recordSuccess()
                                                     ElementBackground(copy, region)
                                                 }
                                             } finally {
@@ -15857,6 +16896,7 @@ object BlurDrawHook {
                 }
             }
         } catch (t: Throwable) {
+            CaptureApi.recordFailure("systemui:${t.javaClass.simpleName}")
             Lg.e(TAG, "bg-element: IWindowManager.captureDisplay failed", t)
             null
         }

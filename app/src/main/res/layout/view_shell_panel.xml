@@ -1,0 +1,375 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingHorizontal="16dp"
+        android:paddingBottom="24dp">
+
+        <LinearLayout style="@style/ShellGroupHead">
+            <TextView
+                style="@style/ShellGroupTitle"
+                android:text="@string/settings_panel_group_notification" />
+            <View style="@style/ShellGroupRule" />
+        </LinearLayout>
+
+        <com.google.android.material.card.MaterialCardView
+            style="@style/ShellPlate"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:cardCornerRadius="14dp"
+            app:cardElevation="0dp"
+            app:strokeWidth="0dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <Switch
+                    android:id="@+id/switchNotificationDissolve"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_notification_dissolve"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="@string/settings_notification_dissolve_desc"
+                    android:textAppearance="?attr/textAppearanceBodySmall"
+                    android:textColor="?android:attr/textColorSecondary" />
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="16dp">
+    <TextView
+                    android:layout_width="0dp"
+            android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_notification_dissolve_speed"
+                    android:textAppearance="?attr/textAppearanceTitleSmall" />
+    <TextView
+                    android:id="@+id/notificationDissolveSpeedValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
+</LinearLayout>
+
+                <SeekBar
+                    android:id="@+id/seekNotificationDissolveSpeed"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:max="265"
+                    android:progress="65"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
+
+                
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="16dp"
+                    android:layout_marginBottom="12dp"
+                    android:background="?attr/colorOutlineVariant" />
+
+                <Switch
+                    android:id="@+id/switchNotifTilt"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_notif_tilt_enabled"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="@string/settings_notif_tilt_enabled_desc"
+                    android:textAppearance="?attr/textAppearanceBodySmall"
+                    android:textColor="?android:attr/textColorSecondary" />
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="16dp">
+    <TextView
+                    android:layout_width="0dp"
+            android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_notif_tilt_strength"
+                    android:textAppearance="?attr/textAppearanceTitleSmall" />
+    <TextView
+                    android:id="@+id/notifTiltStrengthValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
+</LinearLayout>
+
+                <SeekBar
+                    android:id="@+id/seekNotifTiltStrength"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:max="45"
+                    android:progress="3"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
+
+                
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="16dp">
+    <TextView
+                    android:layout_width="0dp"
+            android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_notif_fly_scale"
+                    android:textAppearance="?attr/textAppearanceTitleSmall" />
+    <TextView
+                    android:id="@+id/notifFlyScaleValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
+</LinearLayout>
+
+                <SeekBar
+                    android:id="@+id/seekNotifFlyScale"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:max="80"
+                    android:progress="75"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
+
+                
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="16dp"
+                    android:layout_marginBottom="12dp"
+                    android:background="?attr/colorOutlineVariant" />
+
+                <Switch
+                    android:id="@+id/switchNotificationPopupGlass"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_notification_popup_glass"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="@string/settings_notification_popup_glass_desc"
+                    android:textAppearance="?attr/textAppearanceBodySmall"
+                    android:textColor="?android:attr/textColorSecondary" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <LinearLayout style="@style/ShellGroupHead">
+            <TextView
+                style="@style/ShellGroupTitle"
+                android:text="@string/settings_panel_group_cc" />
+            <View style="@style/ShellGroupRule" />
+        </LinearLayout>
+
+        <com.google.android.material.card.MaterialCardView
+            style="@style/ShellPlate"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:cardCornerRadius="14dp"
+            app:cardElevation="0dp"
+            app:strokeWidth="0dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal">
+    <TextView
+                    android:layout_width="0dp"
+            android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_cc_blur_strength"
+                    android:textAppearance="?attr/textAppearanceTitleSmall" />
+    <TextView
+                    android:id="@+id/ccBlurStrengthValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
+</LinearLayout>
+
+                <SeekBar
+                    android:id="@+id/seekCcBlurStrength"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:max="200"
+                    android:progress="100"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
+
+                
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="@string/settings_cc_blur_strength_desc"
+                    android:textAppearance="?attr/textAppearanceBodySmall"
+                    android:textColor="?android:attr/textColorSecondary" />
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="16dp"
+                    android:layout_marginBottom="12dp"
+                    android:background="?attr/colorOutlineVariant" />
+
+                <Switch
+                    android:id="@+id/switchKeepSystemCcBlur"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_keep_system_cc_blur"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="@string/settings_keep_system_cc_blur_desc"
+                    android:textAppearance="?attr/textAppearanceBodySmall"
+                    android:textColor="?android:attr/textColorSecondary" />
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="16dp"
+                    android:layout_marginBottom="12dp"
+                    android:background="?attr/colorOutlineVariant" />
+
+                <Switch
+                    android:id="@+id/switchRemovePanelMixColor"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_remove_panel_mix_color"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="@string/settings_remove_panel_mix_color_desc"
+                    android:textAppearance="?attr/textAppearanceBodySmall"
+                    android:textColor="?android:attr/textColorSecondary" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <LinearLayout style="@style/ShellGroupHead">
+            <TextView
+                style="@style/ShellGroupTitle"
+                android:text="@string/settings_panel_group_volume" />
+            <View style="@style/ShellGroupRule" />
+        </LinearLayout>
+
+        <com.google.android.material.card.MaterialCardView
+            style="@style/ShellPlate"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:cardCornerRadius="14dp"
+            app:cardElevation="0dp"
+            app:strokeWidth="0dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <Switch
+                    android:id="@+id/switchVolumePanelClean"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_volume_panel_clean"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="@string/settings_volume_panel_clean_desc"
+                    android:textAppearance="?attr/textAppearanceBodySmall"
+                    android:textColor="?android:attr/textColorSecondary" />
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="16dp"
+                    android:layout_marginBottom="12dp"
+                    android:background="?attr/colorOutlineVariant" />
+
+                <Switch
+                    android:id="@+id/switchVolumePanelBackdrop"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_volume_panel_backdrop"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="@string/settings_volume_panel_backdrop_desc"
+                    android:textAppearance="?attr/textAppearanceBodySmall"
+                    android:textColor="?android:attr/textColorSecondary" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+    </LinearLayout>
+</ScrollView>

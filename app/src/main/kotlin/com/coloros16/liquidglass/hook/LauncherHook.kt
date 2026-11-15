@@ -93,23 +93,21 @@ object LauncherHook {
     // ---- [spec/117] 17.3.12 玻璃渲染链指纹（BaseDrawable→b、drawBlurShader 内联进 static a(d)） ----
     /** 指纹/17.x 兼容日志 tag（logcat `-s lg-hook`） */
     private const val TAG_FINGERPRINT = "lg-hook"
-    /** [spec/116 P0/P1] 桌面 17.3.12 versionCode 门槛 */
-    private const val VERSION_LAUNCHER_17_3_12 = 170030012L
     /** 稳定探针：内部类名未混淆，可反查外层 BaseDrawable（17.3.12 = drawable.b） */
     private const val PROBE_BASE_DRAWABLE_INNER =
         "com.oplus.posteffect.drawable.BaseDrawable\$configurationChangeObserver\$1"
     /** 17.3.12 blurShaderPaint getter 被拆 → public final 字段 M */
     private const val FIELD_BLUR_SHADER_PAINT_17 = "M"
-    /** 17.3.12 paint getter 被拆 → public final 字段 f28547f */
-    private const val FIELD_PAINT_17 = "f28547f"
-    /** 17.3.12 renderNode → f28549h（路径 A 自录用） */
-    private const val FIELD_RENDER_NODE_17 = "f28549h"
-    /** 17.3.12 drawablePath → f28550i（路径 A 自录用） */
-    private const val FIELD_DRAWABLE_PATH_17 = "f28550i"
+    /** 17.3.12 paint getter 被拆 → public final 字段 f */
+    private const val FIELD_PAINT_17 = "f"
+    /** 17.3.12 renderNode → h（路径 A 自录用） */
+    private const val FIELD_RENDER_NODE_17 = "h"
+    /** 17.3.12 drawablePath → i（路径 A 自录用） */
+    private const val FIELD_DRAWABLE_PATH_17 = "i"
     /** 17.3.12 paintAlpha → F（路径 A 自录用，等价旧 drawBlurShader 的 setAlpha） */
     private const val FIELD_PAINT_ALPHA_17 = "F"
-    /** 17.3.12 enableBlurShader → f28542a（false 时系统跳过 shader 分支） */
-    private const val FIELD_ENABLE_BLUR_SHADER_17 = "f28542a"
+    /** 17.3.12 enableBlurShader → a（false 时系统跳过 shader 分支） */
+    private const val FIELD_ENABLE_BLUR_SHADER_17 = "a"
     /** 17.3.12 drawBlurShader 内联目标：static void a(d)，按指纹确认防撞名 */
     private const val INLINE_RECORD_STATIC_NAME = "a"
     /** 17.3.12 onBlurReady 单 drawable 重载改名 f（同签名 List,HardwareBuffer,int,float） */
@@ -375,15 +373,15 @@ object LauncherHook {
     private var mBaseDrawableFp: String? = null
     /** 17.3.12 blurShaderPaint 字段 M（旧名路径下为 null） */
     private var mBlurShaderPaintField: Field? = null
-    /** 17.3.12 paint 字段 f28547f */
+    /** 17.3.12 paint 字段 f */
     private var mPaintField: Field? = null
-    /** 17.3.12 renderNode 字段 f28549h（路径 A 自录） */
+    /** 17.3.12 renderNode 字段 h（路径 A 自录） */
     private var mRenderNodeField: Field? = null
-    /** 17.3.12 drawablePath 字段 f28550i（路径 A 自录） */
+    /** 17.3.12 drawablePath 字段 i（路径 A 自录） */
     private var mDrawablePathField: Field? = null
     /** 17.3.12 paintAlpha 字段 F（路径 A 自录） */
     private var mPaintAlphaField: Field? = null
-    /** 17.3.12 enableBlurShader 字段 f28542a */
+    /** 17.3.12 enableBlurShader 字段 a */
     private var mEnableBlurShaderField: Field? = null
     /** 17.3.12 内联录制方法 static void a(d)（16.x 恒 null） */
     private var mInlineRecordMethod: Method? = null
@@ -766,6 +764,11 @@ object LauncherHook {
             processLabel = "launcher",
         )
         Lg.i(TAG, "LauncherHook install done")
+        CaptureApi.logAudit(
+            "com.android.launcher",
+            VersionPool.readVersion("com.android.launcher"),
+            classLoader,
+        )
     }
 
     private fun mainHandler(): android.os.Handler {
@@ -958,7 +961,7 @@ object LauncherHook {
             Lg.i(TAG_FINGERPRINT, "launcher-glass: getBlurShaderPaint @ method (old-name)")
         } catch (_: NoSuchMethodException) {
             try {
-                mBlurShaderPaintField = base.getDeclaredField(FIELD_BLUR_SHADER_PAINT_17)
+                mBlurShaderPaintField = Cos17Contract.checkedField(base, FIELD_BLUR_SHADER_PAINT_17, Paint::class.java)
                 Lg.i(TAG_FINGERPRINT, "launcher-glass: getBlurShaderPaint @ field $FIELD_BLUR_SHADER_PAINT_17 (17.3.12)")
             } catch (t: Throwable) {
                 Lg.e(TAG_FINGERPRINT, "launcher-glass: getBlurShaderPaint unresolved (no method, no field $FIELD_BLUR_SHADER_PAINT_17)", t)
@@ -966,13 +969,13 @@ object LauncherHook {
         } catch (t: Throwable) {
             Lg.e(TAG_FINGERPRINT, "launcher-glass: getBlurShaderPaint resolve error", t)
         }
-        // getPaint：旧方法 → 17.x 字段 f28547f（当前渲染链未消费，兼容预留）
+        // getPaint：旧方法 → 17.x 字段 f（当前渲染链未消费，兼容预留）
         try {
             mGetPaint = base.getMethod(METHOD_GET_PAINT)
             Lg.i(TAG_FINGERPRINT, "launcher-glass: getPaint @ method (old-name)")
         } catch (_: NoSuchMethodException) {
             try {
-                mPaintField = base.getDeclaredField(FIELD_PAINT_17)
+                mPaintField = Cos17Contract.checkedField(base, FIELD_PAINT_17, Paint::class.java)
                 Lg.i(TAG_FINGERPRINT, "launcher-glass: getPaint @ field $FIELD_PAINT_17 (17.3.12)")
             } catch (t: Throwable) {
                 Lg.w(TAG_FINGERPRINT, "launcher-glass: getPaint unresolved (no method, no field $FIELD_PAINT_17)", t)
@@ -1006,10 +1009,10 @@ object LauncherHook {
         // 路径 A 自录所需字段（仅 17.3.12；16.x 不解析不触发）
         if (isLauncher17Plus() && mInlineRecordMethod != null) {
             try {
-                mRenderNodeField = base.getDeclaredField(FIELD_RENDER_NODE_17)
-                mDrawablePathField = base.getDeclaredField(FIELD_DRAWABLE_PATH_17)
-                mPaintAlphaField = base.getDeclaredField(FIELD_PAINT_ALPHA_17)
-                mEnableBlurShaderField = base.getDeclaredField(FIELD_ENABLE_BLUR_SHADER_17)
+                mRenderNodeField = Cos17Contract.checkedField(base, FIELD_RENDER_NODE_17, RenderNode::class.java)
+                mDrawablePathField = Cos17Contract.checkedField(base, FIELD_DRAWABLE_PATH_17, Path::class.java)
+                mPaintAlphaField = Cos17Contract.checkedField(base, FIELD_PAINT_ALPHA_17, Int::class.javaPrimitiveType!!)
+                mEnableBlurShaderField = Cos17Contract.checkedField(base, FIELD_ENABLE_BLUR_SHADER_17, Boolean::class.javaPrimitiveType!!)
                 Lg.i(
                     TAG_FINGERPRINT,
                     "launcher-glass: inline record fields @ $FIELD_RENDER_NODE_17/$FIELD_DRAWABLE_PATH_17/" +
@@ -1060,8 +1063,13 @@ object LauncherHook {
                     Lg.i(TAG_FINGERPRINT, "launcher-glass: CornerType.CONIC @ values()[2] ($CLASS_CORNER_TYPE_17)")
                 } else {
                     try {
-                        mCornerTypeConic = ct17.getField("f28674c").get(null)
-                        Lg.i(TAG_FINGERPRINT, "launcher-glass: CornerType.CONIC @ field f28674c ($CLASS_CORNER_TYPE_17)")
+                        mCornerTypeConic = Cos17Contract.checkedField(
+                            ct17, Cos17Contract.Launcher17.FIELD_CORNER_TYPE_CONIC, ct17,
+                        ).get(null)
+                        Lg.i(
+                            TAG_FINGERPRINT,
+                            "launcher-glass: CornerType.CONIC @ field ${Cos17Contract.Launcher17.FIELD_CORNER_TYPE_CONIC} ($CLASS_CORNER_TYPE_17)",
+                        )
                     } catch (t: Throwable) {
                         Lg.w(TAG_FINGERPRINT, "launcher-glass: CornerType.CONIC unresolved on 17.3.12", t)
                     }
@@ -1274,11 +1282,11 @@ object LauncherHook {
         }
     }
 
-    /** [spec/116 P0/P1] 宿主 ≥17.3.12 判定（进程内缓存；读失败/-1 按 false，指纹路径不触发）。 */
+    /** [spec/116 P0/P1] 宿主是否走 17.3.12+ 分支（进程内缓存；查版本池，读失败/-1 按 false）。 */
     private fun isLauncher17Plus(): Boolean {
         launcherVer17Plus?.let { return it }
-        val ver = HostVersion.hostVersionCode("com.android.launcher")
-        val v = ver >= VERSION_LAUNCHER_17_3_12
+        val ver = VersionPool.readVersion("com.android.launcher")
+        val v = VersionPool.query("com.android.launcher", ver).profile.tiltPath == TiltPath.NATIVE_ZUYQA
         launcherVer17Plus = v
         Lg.i(TAG_FINGERPRINT, "launcher-glass: host versionCode=$ver,17.3.12+=$v")
         return v
@@ -3555,6 +3563,7 @@ object LauncherHook {
             Lg.w(TAG, "bg-element: empty crop after clamp $region -> $crop")
             return null
         }
+        if (!CaptureApi.beginCapture()) return null
         return try {
             val wmBinder = hostForName("android.os.ServiceManager")
                 .getMethod("getService", String::class.java).invoke(null, "window")
@@ -3568,9 +3577,9 @@ object LauncherHook {
                     Lg.w(TAG, "bg-element: IWindowManager.Stub.asInterface null")
                     null
                 } else {
-                    val captureCls = hostForName("android.window.ScreenCapture")
-                    val argsCls = hostForName("android.window.ScreenCapture\$CaptureArgs")
-                    val builderCls = hostForName("android.window.ScreenCapture\$CaptureArgs\$Builder")
+                    val captureCls = CaptureApi.load("android.window.ScreenCapture", hostClassLoader)
+                    val argsCls = CaptureApi.load("android.window.ScreenCapture\$CaptureArgs", hostClassLoader)
+                    val builderCls = CaptureApi.load("android.window.ScreenCapture\$CaptureArgs\$Builder", hostClassLoader)
                     val builder = builderCls.getConstructor().newInstance()
                     val scale = bgCaptureScale()
                     builderCls.getMethod("setSourceCrop", Rect::class.java).invoke(builder, crop)
@@ -3616,7 +3625,7 @@ object LauncherHook {
                             Lg.w(TAG, "bg-element: createSyncCaptureListener() null")
                             null
                         } else {
-                            val listenerCls = hostForName("android.window.ScreenCapture\$ScreenCaptureListener")
+                            val listenerCls = CaptureApi.load("android.window.ScreenCapture\$ScreenCaptureListener", hostClassLoader)
                             val m = wm.javaClass.getMethod(
                                 "captureDisplay",
                                 Int::class.javaPrimitiveType, argsCls, listenerCls
@@ -3650,6 +3659,7 @@ object LauncherHook {
                                                     logOncePerSecond("captureDisplayOk") {
                                                         Lg.i(TAG, "bg-element: IWindowManager.captureDisplay ok hw=${hb.width}x${hb.height} crop=$crop (${scale}x, excl launcher)")
                                                     }
+                                                    CaptureApi.recordSuccess()
                                                     ElementBackground(copy, region, wallpaperZoomScale)
                                                 }
                                             } finally {
@@ -3672,6 +3682,7 @@ object LauncherHook {
                 }
             }
         } catch (t: Throwable) {
+            CaptureApi.recordFailure("launcher:${t.javaClass.simpleName}")
             Lg.e(TAG, "bg-element: IWindowManager.captureDisplay failed", t)
             null
         }
@@ -3968,6 +3979,10 @@ object LauncherHook {
         val lightAngleDegrees: Float,
         val parallaxX: Float,
         val parallaxY: Float,
+        /** 外描边强度 0~1（默认 0=关）。末尾带默认值，兜底分支位置构造不传即用配置默认。 */
+        val edgeStroke: Float = Prefs.DEFAULT_EDGE_STROKE,
+        /** 外描边宽度 px（默认 1.2）。 */
+        val edgeStrokeWidth: Float = Prefs.DEFAULT_EDGE_STROKE_WIDTH,
     )
 
     @Volatile
@@ -4018,6 +4033,8 @@ object LauncherHook {
                     prefs.getFloat(Prefs.KEY_LIGHT_ANGLE, def.lightAngleDegrees),
                     prefs.getFloat(Prefs.KEY_PARALLAX_X, def.parallaxX),
                     prefs.getFloat(Prefs.KEY_PARALLAX_Y, def.parallaxY),
+                    prefs.getFloat(Prefs.KEY_EDGE_STROKE, Prefs.DEFAULT_EDGE_STROKE).coerceIn(0f, 1f),
+                    prefs.getFloat(Prefs.KEY_EDGE_STROKE_WIDTH, Prefs.DEFAULT_EDGE_STROKE_WIDTH).coerceIn(0f, 8f),
                 )
             } catch (t: Throwable) {
                 Lg.e(TAG, "launcher material: prefs float read failed, use defaults", t)
@@ -4072,6 +4089,8 @@ object LauncherHook {
                 lightAngleDegrees = pick(Prefs.KEY_LIGHT_ANGLE, m.lightAngleDegrees),
                 parallaxX = pick(Prefs.KEY_PARALLAX_X, m.parallaxX),
                 parallaxY = pick(Prefs.KEY_PARALLAX_Y, m.parallaxY),
+                edgeStroke = pick(Prefs.KEY_EDGE_STROKE, m.edgeStroke).coerceIn(0f, 1f),
+                edgeStrokeWidth = pick(Prefs.KEY_EDGE_STROKE_WIDTH, m.edgeStrokeWidth).coerceIn(0f, 8f),
             )
         } catch (t: Throwable) {
             Lg.e(TAG, "launcher buildParams: prefs float read failed, use defaults", t)

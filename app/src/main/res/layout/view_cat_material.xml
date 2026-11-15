@@ -79,13 +79,19 @@
             android:text="@string/settings_section_material"
             android:textAppearance="?attr/textAppearanceTitleMedium" />
 
-        <TextView
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="16dp">
+    <TextView
             android:id="@+id/blurRadiusLabel"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
+            android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
             android:text="@string/settings_blur_radius"
             android:textAppearance="?attr/textAppearanceTitleSmall" />
+    <TextView
+            android:id="@+id/blurRadiusValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+</LinearLayout>
 
         <SeekBar
             android:id="@+id/seekBlurRadius"
@@ -93,13 +99,13 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:max="32"
-            android:progress="8" />
+            android:progress="8"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
 
-        <TextView
-            android:id="@+id/blurRadiusValue"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="?attr/textAppearanceBodySmall" />
+        
 
         <TextView
             android:id="@+id/blurRadiusDesc"
@@ -110,13 +116,19 @@
             android:textAppearance="?attr/textAppearanceBodySmall"
             android:textColor="?android:attr/textColorSecondary" />
 
-        <TextView
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="16dp">
+    <TextView
             android:id="@+id/vibrancyLabel"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
+            android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
             android:text="@string/settings_vibrancy"
             android:textAppearance="?attr/textAppearanceTitleSmall" />
+    <TextView
+            android:id="@+id/vibrancyValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+</LinearLayout>
 
         <SeekBar
             android:id="@+id/seekVibrancy"
@@ -124,13 +136,13 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:max="100"
-            android:progress="50" />
+            android:progress="50"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
 
-        <TextView
-            android:id="@+id/vibrancyValue"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="?attr/textAppearanceBodySmall" />
+        
 
         <TextView
             android:id="@+id/vibrancyDesc"
@@ -141,13 +153,19 @@
             android:textAppearance="?attr/textAppearanceBodySmall"
             android:textColor="?android:attr/textColorSecondary" />
 
-        <TextView
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="16dp">
+    <TextView
             android:id="@+id/highlightFalloffLabel"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
+            android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
             android:text="@string/settings_highlight_falloff"
             android:textAppearance="?attr/textAppearanceTitleSmall" />
+    <TextView
+            android:id="@+id/highlightFalloffValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+</LinearLayout>
 
         <SeekBar
             android:id="@+id/seekHighlightFalloff"
@@ -155,13 +173,13 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:max="3"
-            android:progress="1" />
+            android:progress="1"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
 
-        <TextView
-            android:id="@+id/highlightFalloffValue"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="?attr/textAppearanceBodySmall" />
+        
 
         <TextView
             android:id="@+id/highlightFalloffDesc"
@@ -201,13 +219,19 @@
             android:textAppearance="?attr/textAppearanceBodySmall"
             android:textColor="?android:attr/textColorSecondary" />
 
-        <TextView
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="16dp">
+    <TextView
             android:id="@+id/refractionHeightRatioLabel"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
+            android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
             android:text="@string/settings_refraction_height_ratio"
             android:textAppearance="?attr/textAppearanceTitleSmall" />
+    <TextView
+            android:id="@+id/refractionHeightRatioValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+</LinearLayout>
 
         <SeekBar
             android:id="@+id/seekRefractionHeightRatio"
@@ -215,13 +239,13 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:max="90"
-            android:progress="40" />
+            android:progress="40"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
 
-        <TextView
-            android:id="@+id/refractionHeightRatioValue"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="?attr/textAppearanceBodySmall" />
+        
 
         <TextView
             android:id="@+id/refractionHeightRatioDesc"
@@ -232,14 +256,21 @@
             android:textAppearance="?attr/textAppearanceBodySmall"
             android:textColor="?android:attr/textColorSecondary" />
 
-        <TextView
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="16dp">
+    <TextView
             android:id="@+id/refractionHeightPxLabel"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
+            android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
             android:text="@string/settings_refraction_height_px"
             android:textAppearance="?attr/textAppearanceTitleSmall"
             android:visibility="gone" />
+    <TextView
+            android:id="@+id/refractionHeightPxValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:visibility="gone" />
+</LinearLayout>
 
         <SeekBar
             android:id="@+id/seekRefractionHeightPx"
@@ -248,14 +279,13 @@
             android:layout_marginTop="4dp"
             android:max="392"
             android:progress="56"
-            android:visibility="gone" />
+            android:visibility="gone"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
 
-        <TextView
-            android:id="@+id/refractionHeightPxValue"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="?attr/textAppearanceBodySmall"
-            android:visibility="gone" />
+        
 
         <TextView
             android:id="@+id/refractionHeightPxDesc"
@@ -267,13 +297,19 @@
             android:textColor="?android:attr/textColorSecondary"
             android:visibility="gone" />
 
-        <TextView
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="16dp">
+    <TextView
             android:id="@+id/refractionAmountLabel"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
+            android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
             android:text="@string/settings_refraction_amount"
             android:textAppearance="?attr/textAppearanceTitleSmall" />
+    <TextView
+            android:id="@+id/refractionAmountValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+</LinearLayout>
 
         <SeekBar
             android:id="@+id/seekRefractionAmount"
@@ -281,13 +317,13 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:max="250"
-            android:progress="100" />
+            android:progress="100"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
 
-        <TextView
-            android:id="@+id/refractionAmountValue"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="?attr/textAppearanceBodySmall" />
+        
 
         <TextView
             android:id="@+id/refractionAmountDesc"
@@ -298,13 +334,19 @@
             android:textAppearance="?attr/textAppearanceBodySmall"
             android:textColor="?android:attr/textColorSecondary" />
 
-        <TextView
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="16dp">
+    <TextView
             android:id="@+id/dispersionLabel"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
+            android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
             android:text="@string/settings_dispersion"
             android:textAppearance="?attr/textAppearanceTitleSmall" />
+    <TextView
+            android:id="@+id/dispersionValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+</LinearLayout>
 
         <SeekBar
             android:id="@+id/seekDispersion"
@@ -312,13 +354,13 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:max="30"
-            android:progress="0" />
+            android:progress="0"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
 
-        <TextView
-            android:id="@+id/dispersionValue"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="?attr/textAppearanceBodySmall" />
+        
 
         <TextView
             android:id="@+id/dispersionDesc"
@@ -329,13 +371,19 @@
             android:textAppearance="?attr/textAppearanceBodySmall"
             android:textColor="?android:attr/textColorSecondary" />
 
-        <TextView
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="16dp">
+    <TextView
             android:id="@+id/depthLabel"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
+            android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
             android:text="@string/settings_depth"
             android:textAppearance="?attr/textAppearanceTitleSmall" />
+    <TextView
+            android:id="@+id/depthValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+</LinearLayout>
 
         <SeekBar
             android:id="@+id/seekDepth"
@@ -343,13 +391,13 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:max="100"
-            android:progress="33" />
+            android:progress="33"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
 
-        <TextView
-            android:id="@+id/depthValue"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="?attr/textAppearanceBodySmall" />
+        
 
         <TextView
             android:id="@+id/depthDesc"
@@ -360,13 +408,19 @@
             android:textAppearance="?attr/textAppearanceBodySmall"
             android:textColor="?android:attr/textColorSecondary" />
 
-        <TextView
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="16dp">
+    <TextView
             android:id="@+id/highlightLabel"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
+            android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
             android:text="@string/settings_highlight"
             android:textAppearance="?attr/textAppearanceTitleSmall" />
+    <TextView
+            android:id="@+id/highlightValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+</LinearLayout>
 
         <SeekBar
             android:id="@+id/seekHighlight"
@@ -374,13 +428,13 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:max="100"
-            android:progress="25" />
+            android:progress="25"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
 
-        <TextView
-            android:id="@+id/highlightValue"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="?attr/textAppearanceBodySmall" />
+        
 
         <TextView
             android:id="@+id/highlightDesc"
@@ -391,13 +445,19 @@
             android:textAppearance="?attr/textAppearanceBodySmall"
             android:textColor="?android:attr/textColorSecondary" />
 
-        <TextView
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="16dp">
+    <TextView
             android:id="@+id/highlightWidthLabel"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
+            android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
             android:text="@string/settings_highlight_width"
             android:textAppearance="?attr/textAppearanceTitleSmall" />
+    <TextView
+            android:id="@+id/highlightWidthValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+</LinearLayout>
 
         <SeekBar
             android:id="@+id/seekHighlightWidth"
@@ -405,13 +465,13 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:max="200"
-            android:progress="12" />
+            android:progress="12"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
 
-        <TextView
-            android:id="@+id/highlightWidthValue"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="?attr/textAppearanceBodySmall" />
+        
 
         <TextView
             android:id="@+id/highlightWidthDesc"
@@ -423,13 +483,19 @@
             android:textColor="?android:attr/textColorSecondary" />
 
         <!-- [doc/spec/67] 弧线高光保底：0=纯方向性（圆角弧线偏暗）、1=整圈均匀一条亮线 -->
-        <TextView
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="16dp">
+    <TextView
             android:id="@+id/highlightFloorLabel"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
+            android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
             android:text="@string/settings_highlight_floor"
             android:textAppearance="?attr/textAppearanceTitleSmall" />
+    <TextView
+            android:id="@+id/highlightFloorValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+</LinearLayout>
 
         <SeekBar
             android:id="@+id/seekHighlightFloor"
@@ -437,13 +503,13 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:max="100"
-            android:progress="40" />
+            android:progress="40"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
 
-        <TextView
-            android:id="@+id/highlightFloorValue"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="?attr/textAppearanceBodySmall" />
+        
 
         <TextView
             android:id="@+id/highlightFloorDesc"
@@ -454,13 +520,19 @@
             android:textAppearance="?attr/textAppearanceBodySmall"
             android:textColor="?android:attr/textColorSecondary" />
 
-        <TextView
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="16dp">
+    <TextView
             android:id="@+id/highlightInnerAttLabel"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
+            android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
             android:text="@string/settings_highlight_inner_att"
             android:textAppearance="?attr/textAppearanceTitleSmall" />
+    <TextView
+            android:id="@+id/highlightInnerAttValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+</LinearLayout>
 
         <SeekBar
             android:id="@+id/seekHighlightInnerAtt"
@@ -468,13 +540,13 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:max="100"
-            android:progress="0" />
+            android:progress="0"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
 
-        <TextView
-            android:id="@+id/highlightInnerAttValue"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="?attr/textAppearanceBodySmall" />
+        
 
         <TextView
             android:id="@+id/highlightInnerAttDesc"
@@ -485,13 +557,19 @@
             android:textAppearance="?attr/textAppearanceBodySmall"
             android:textColor="?android:attr/textColorSecondary" />
 
-        <TextView
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="16dp">
+    <TextView
             android:id="@+id/innerGlowLabel"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
+            android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
             android:text="@string/settings_inner_glow"
             android:textAppearance="?attr/textAppearanceTitleSmall" />
+    <TextView
+            android:id="@+id/innerGlowValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+</LinearLayout>
 
         <SeekBar
             android:id="@+id/seekInnerGlow"
@@ -499,13 +577,13 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:max="100"
-            android:progress="0" />
+            android:progress="0"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
 
-        <TextView
-            android:id="@+id/innerGlowValue"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="?attr/textAppearanceBodySmall" />
+        
 
         <TextView
             android:id="@+id/innerGlowDesc"
@@ -516,13 +594,93 @@
             android:textAppearance="?attr/textAppearanceBodySmall"
             android:textColor="?android:attr/textColorSecondary" />
 
-        <TextView
-            android:id="@+id/maskGlassDimLabel"
-            android:layout_width="wrap_content"
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="16dp">
+    <TextView
+            android:id="@+id/edgeStrokeLabel"
+            android:layout_width="0dp"
+            android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
+            android:text="@string/settings_edge_stroke"
+            android:textAppearance="?attr/textAppearanceTitleSmall" />
+    <TextView
+            android:id="@+id/edgeStrokeValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+</LinearLayout>
+
+        <SeekBar
+            android:id="@+id/seekEdgeStroke"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:max="100"
+            android:progress="0"
+                    android:progressTint="@color/lg_blued"
+                    android:progressBackgroundTint="@color/lg_track_off"
+                    android:thumbTint="@color/lg_thumb_off"
+                    />
+
+        
+
+        <TextView
+            android:id="@+id/edgeStrokeDesc"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="@string/settings_edge_stroke_desc"
+            android:textAppearance="?attr/textAppearanceBodySmall"
+            android:textColor="?android:attr/textColorSecondary" />
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="16dp">
+    <TextView
+            android:id="@+id/edgeStrokeWidthLabel"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:text="@string/settings_edge_stroke_width"
+            android:textAppearance="?attr/textAppearanceTitleSmall" />
+    <TextView
+            android:id="@+id/edgeStrokeWidthValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+</LinearLayout>
+
+        <SeekBar
+            android:id="@+id/seekEdgeStrokeWidth"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:max="60"
+            android:progress="12"
+                    android:progressTint="@color/lg_blued"
+                    android:progressBackgroundTint="@color/lg_track_off"
+                    android:thumbTint="@color/lg_thumb_off"
+                    />
+
+        
+
+        <TextView
+            android:id="@+id/edgeStrokeWidthDesc"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="@string/settings_edge_stroke_width_desc"
+            android:textAppearance="?attr/textAppearanceBodySmall"
+            android:textColor="?android:attr/textColorSecondary" />
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="16dp">
+    <TextView
+            android:id="@+id/maskGlassDimLabel"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
             android:text="@string/settings_mask_glass_dim"
             android:textAppearance="?attr/textAppearanceTitleSmall" />
+    <TextView
+            android:id="@+id/maskGlassDimValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+</LinearLayout>
 
         <SeekBar
             android:id="@+id/seekMaskGlassDim"
@@ -530,13 +688,13 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:max="100"
-            android:progress="0" />
+            android:progress="0"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
 
-        <TextView
-            android:id="@+id/maskGlassDimValue"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="?attr/textAppearanceBodySmall" />
+        
 
         <TextView
             android:id="@+id/maskGlassDimDesc"
@@ -547,13 +705,19 @@
             android:textAppearance="?attr/textAppearanceBodySmall"
             android:textColor="?android:attr/textColorSecondary" />
 
-        <TextView
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="16dp">
+    <TextView
             android:id="@+id/lightAngleLabel"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
+            android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
             android:text="@string/settings_light_angle"
             android:textAppearance="?attr/textAppearanceTitleSmall" />
+    <TextView
+            android:id="@+id/lightAngleValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+</LinearLayout>
 
         <SeekBar
             android:id="@+id/seekLightAngle"
@@ -561,13 +725,13 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:max="360"
-            android:progress="45" />
+            android:progress="45"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
 
-        <TextView
-            android:id="@+id/lightAngleValue"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="?attr/textAppearanceBodySmall" />
+        
 
         <TextView
             android:id="@+id/lightAngleDesc"
@@ -578,13 +742,19 @@
             android:textAppearance="?attr/textAppearanceBodySmall"
             android:textColor="?android:attr/textColorSecondary" />
 
-        <TextView
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="16dp">
+    <TextView
             android:id="@+id/parallaxXLabel"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
+            android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
             android:text="@string/settings_parallax_x"
             android:textAppearance="?attr/textAppearanceTitleSmall" />
+    <TextView
+            android:id="@+id/parallaxXValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+</LinearLayout>
 
         <SeekBar
             android:id="@+id/seekParallaxX"
@@ -592,13 +762,13 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:max="200"
-            android:progress="100" />
+            android:progress="100"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
 
-        <TextView
-            android:id="@+id/parallaxXValue"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="?attr/textAppearanceBodySmall" />
+        
 
         <TextView
             android:id="@+id/parallaxXDesc"
@@ -609,13 +779,19 @@
             android:textAppearance="?attr/textAppearanceBodySmall"
             android:textColor="?android:attr/textColorSecondary" />
 
-        <TextView
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="16dp">
+    <TextView
             android:id="@+id/parallaxYLabel"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
+            android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
             android:text="@string/settings_parallax_y"
             android:textAppearance="?attr/textAppearanceTitleSmall" />
+    <TextView
+            android:id="@+id/parallaxYValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+</LinearLayout>
 
         <SeekBar
             android:id="@+id/seekParallaxY"
@@ -623,13 +799,13 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:max="200"
-            android:progress="100" />
+            android:progress="100"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
 
-        <TextView
-            android:id="@+id/parallaxYValue"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="?attr/textAppearanceBodySmall" />
+        
 
         <TextView
             android:id="@+id/parallaxYDesc"

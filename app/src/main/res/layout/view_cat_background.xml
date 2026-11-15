@@ -40,13 +40,19 @@
             android:textColor="?android:attr/textColorSecondary" />
 
         <!-- 即时抓屏速率（瞬态场景与即时模式共用，任何模式下都显示） -->
-        <TextView
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="16dp">
+    <TextView
             android:id="@+id/panelCaptureHzLabel"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
+            android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
             android:text="@string/settings_panel_capture_hz"
             android:textAppearance="?attr/textAppearanceTitleSmall" />
+    <TextView
+            android:id="@+id/panelCaptureHzValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+</LinearLayout>
 
         <SeekBar
             android:id="@+id/seekPanelCaptureHz"
@@ -54,13 +60,13 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:max="90"
-            android:progress="30" />
+            android:progress="30"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
 
-        <TextView
-            android:id="@+id/panelCaptureHzValue"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="?attr/textAppearanceBodySmall" />
+        
 
         <TextView
             android:id="@+id/panelCaptureHzDesc"
@@ -72,13 +78,19 @@
             android:textColor="?android:attr/textColorSecondary" />
 
         <!-- 最大抓屏间隔（仅模式=变化抓屏时显示） -->
-        <TextView
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="16dp">
+    <TextView
             android:id="@+id/periodicCaptureIntervalLabel"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
+            android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
             android:text="@string/settings_periodic_capture_interval"
             android:textAppearance="?attr/textAppearanceTitleSmall" />
+    <TextView
+            android:id="@+id/periodicCaptureIntervalValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+</LinearLayout>
 
         <SeekBar
             android:id="@+id/seekPeriodicCaptureInterval"
@@ -86,13 +98,13 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:max="4900"
-            android:progress="400" />
+            android:progress="400"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
 
-        <TextView
-            android:id="@+id/periodicCaptureIntervalValue"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="?attr/textAppearanceBodySmall" />
+        
 
         <TextView
             android:id="@+id/periodicCaptureIntervalDesc"
@@ -138,7 +150,13 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
-            android:text="@string/settings_capture_retry_enabled" />
+            android:text="@string/settings_capture_retry_enabled"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
 
         <TextView
             android:id="@+id/captureRetryEnabledDesc"
@@ -154,7 +172,13 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="@string/settings_bg_region_capture_experimental" />
+            android:text="@string/settings_bg_region_capture_experimental"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
 
         <TextView
             android:id="@+id/regionCaptureExperimentalDesc"
@@ -165,13 +189,19 @@
             android:textAppearance="?attr/textAppearanceBodySmall"
             android:textColor="?android:attr/textColorSecondary" />
 
-        <TextView
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="16dp">
+    <TextView
             android:id="@+id/wallpaperMaxDimLabel"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
+            android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
             android:text="@string/settings_bg_wallpaper_max_dim"
             android:textAppearance="?attr/textAppearanceTitleSmall" />
+    <TextView
+            android:id="@+id/wallpaperMaxDimValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+</LinearLayout>
 
         <SeekBar
             android:id="@+id/seekWallpaperMaxDim"
@@ -179,13 +209,13 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:max="2048"
-            android:progress="1024" />
+            android:progress="1024"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
 
-        <TextView
-            android:id="@+id/wallpaperMaxDimValue"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="?attr/textAppearanceBodySmall" />
+        
 
         <TextView
             android:id="@+id/wallpaperMaxDimDesc"
@@ -204,13 +234,19 @@
             android:text="@string/settings_section_cc_blur"
             android:textAppearance="?attr/textAppearanceTitleMedium" />
 
-        <TextView
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="12dp">
+    <TextView
             android:id="@+id/ccBlurStrengthLabel"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
+            android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
             android:text="@string/settings_cc_blur_strength"
             android:textAppearance="?attr/textAppearanceTitleSmall" />
+    <TextView
+            android:id="@+id/ccBlurStrengthValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+</LinearLayout>
 
         <SeekBar
             android:id="@+id/seekCcBlurStrength"
@@ -218,13 +254,13 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:max="200"
-            android:progress="100" />
+            android:progress="100"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
 
-        <TextView
-            android:id="@+id/ccBlurStrengthValue"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="?attr/textAppearanceBodySmall" />
+        
 
         <TextView
             android:id="@+id/ccBlurStrengthDesc"
@@ -240,7 +276,13 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="@string/settings_keep_system_cc_blur" />
+            android:text="@string/settings_keep_system_cc_blur"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
 
         <TextView
             android:id="@+id/keepSystemCcBlurDesc"
@@ -256,7 +298,13 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="@string/settings_remove_panel_mix_color" />
+            android:text="@string/settings_remove_panel_mix_color"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
 
         <TextView
             android:id="@+id/removePanelMixColorDesc"

@@ -58,6 +58,8 @@ object GlassRegistry {
         Prefs.KEY_REFRACTION_HEIGHT_RATIO,
         Prefs.KEY_REFRACTION_HEIGHT_PX,
         Prefs.KEY_MASK_GLASS_DIM,
+        Prefs.KEY_EDGE_STROKE,
+        Prefs.KEY_EDGE_STROKE_WIDTH,
     )
 
     // ------------------------------------------------------------ JSON 编解码（两端共用） ------------------------------------------------------------

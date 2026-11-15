@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto" android:layout_width="match_parent" android:layout_height="match_parent" android:fillViewport="true">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="16dp">
+        <LinearLayout style="@style/ShellGroupHead">
+            <TextView style="@style/ShellGroupTitle" android:text="@string/settings_corner_preview" />
+            <View style="@style/ShellGroupRule" />
+        </LinearLayout>
+        <com.google.android.material.card.MaterialCardView style="@style/ShellPlate" android:layout_width="match_parent" android:layout_height="180dp" android:layout_marginTop="8dp" app:cardCornerRadius="20dp">
+            <FrameLayout android:layout_width="match_parent" android:layout_height="match_parent" android:padding="24dp">
+                <View android:id="@+id/cornerPreviewBox" android:layout_width="match_parent" android:layout_height="match_parent" />
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_gravity="bottom|center_horizontal" android:text="@string/settings_corner_preview_hint" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
+            </FrameLayout>
+        </com.google.android.material.card.MaterialCardView>
+        <LinearLayout style="@style/ShellGroupHead">
+            <TextView style="@style/ShellGroupTitle" android:text="@string/settings_corner_config_default" />
+            <View style="@style/ShellGroupRule" />
+        </LinearLayout>
+        <com.google.android.material.card.MaterialCardView style="@style/ShellPlate" android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="14dp">
+            <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:divider="@drawable/bg_seam_line_inset" android:dividerHeight="1dp" android:showDividers="middle">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal">
+    <TextView android:layout_width="0dp"
+            android:layout_weight="1" android:layout_height="wrap_content" android:text="@string/settings_corner_radius" android:textAppearance="?attr/textAppearanceTitleSmall" />
+    <TextView android:id="@+id/cornerRadiusValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+</LinearLayout>
+                    <SeekBar android:id="@+id/seekCornerRadius" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:progressDrawable="@drawable/lg_seek_track" android:splitTrack="false" android:thumb="@drawable/lg_seek_thumb" />
+                    
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
+                    <Switch android:id="@+id/switchCornerAdaptive" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_corner_adaptive" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                    />
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_corner_adaptive_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
+                    <Switch android:id="@+id/switchCornerFollowParent" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_corner_follow_parent" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                    />
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_corner_follow_parent_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
+                </LinearLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+        <TextView style="@style/ShellHint" android:text="@string/settings_corner_hint" />
+    </LinearLayout>
+</ScrollView>

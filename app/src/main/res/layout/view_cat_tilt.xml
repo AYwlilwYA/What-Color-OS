@@ -12,23 +12,41 @@
         android:padding="16dp">
 
         <Switch android:id="@+id/switchNotificationDissolve" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:text="@string/settings_notification_dissolve" />
+            android:layout_height="wrap_content" android:text="@string/settings_notification_dissolve"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
         <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
             android:text="@string/settings_notification_dissolve_desc"
             android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
-        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:layout_marginTop="12dp" android:text="@string/settings_notification_dissolve_speed" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="12dp">
+    <TextView android:fontFamily="sans-serif-medium" android:textColor="@color/lg_ink_100" android:textSize="14sp" android:layout_width="0dp"
+            android:layout_weight="1" android:layout_height="wrap_content" android:text="@string/settings_notification_dissolve_speed" />
+    <TextView android:id="@+id/notificationDissolveSpeedValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:layout_marginBottom="20dp" />
+</LinearLayout>
         <SeekBar android:id="@+id/seekNotificationDissolveSpeed" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:max="265" android:progress="65" />
-        <TextView android:id="@+id/notificationDissolveSpeedValue" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:layout_marginBottom="20dp"
-            android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
+            android:layout_height="wrap_content" android:max="265" android:progress="65"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
+        
 
         <Switch
             android:id="@+id/switchAnimTilt"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/settings_anim_tilt_enabled" />
+            android:text="@string/settings_anim_tilt_enabled"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
 
         <TextView
             android:layout_width="match_parent"
@@ -38,12 +56,18 @@
             android:textAppearance="?attr/textAppearanceBodySmall"
             android:textColor="?android:attr/textColorSecondary" />
 
-        <TextView
-            android:layout_width="wrap_content"
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="16dp">
+    <TextView
+            android:layout_width="0dp"
+            android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
             android:text="@string/settings_anim_tilt_strength"
             android:textAppearance="?attr/textAppearanceTitleSmall" />
+    <TextView
+            android:id="@+id/animTiltStrengthValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+</LinearLayout>
 
         <SeekBar
             android:id="@+id/seekAnimTiltStrength"
@@ -51,14 +75,13 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:max="200"
-            android:progress="100" />
+            android:progress="100"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
 
-        <TextView
-            android:id="@+id/animTiltStrengthValue"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="?attr/textAppearanceBodySmall"
-            android:textColor="?android:attr/textColorSecondary" />
+        
 
         <TextView
             android:layout_width="match_parent"
@@ -68,12 +91,18 @@
             android:textAppearance="?attr/textAppearanceBodySmall"
             android:textColor="?android:attr/textColorSecondary" />
 
-        <TextView
-            android:layout_width="wrap_content"
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="16dp">
+    <TextView
+            android:layout_width="0dp"
+            android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
             android:text="@string/settings_anim_tilt_perspective"
             android:textAppearance="?attr/textAppearanceTitleSmall" />
+    <TextView
+            android:id="@+id/animTiltPerspectiveValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+</LinearLayout>
 
         <SeekBar
             android:id="@+id/seekAnimTiltPerspective"
@@ -81,14 +110,13 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:max="150"
-            android:progress="100" />
+            android:progress="100"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
 
-        <TextView
-            android:id="@+id/animTiltPerspectiveValue"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="?attr/textAppearanceBodySmall"
-            android:textColor="?android:attr/textColorSecondary" />
+        
 
         <TextView
             android:layout_width="match_parent"
@@ -115,7 +143,13 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="24dp"
-            android:text="@string/settings_notif_tilt_enabled" />
+            android:text="@string/settings_notif_tilt_enabled"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
 
         <TextView
             android:layout_width="match_parent"
@@ -125,12 +159,18 @@
             android:textAppearance="?attr/textAppearanceBodySmall"
             android:textColor="?android:attr/textColorSecondary" />
 
-        <TextView
-            android:layout_width="wrap_content"
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="16dp">
+    <TextView
+            android:layout_width="0dp"
+            android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
             android:text="@string/settings_notif_tilt_strength"
             android:textAppearance="?attr/textAppearanceTitleSmall" />
+    <TextView
+            android:id="@+id/notifTiltStrengthValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+</LinearLayout>
 
         <SeekBar
             android:id="@+id/seekNotifTiltStrength"
@@ -138,21 +178,26 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:max="45"
-            android:progress="3" />
+            android:progress="3"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
 
-        <TextView
-            android:id="@+id/notifTiltStrengthValue"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="?attr/textAppearanceBodySmall"
-            android:textColor="?android:attr/textColorSecondary" />
+        
 
-        <TextView
-            android:layout_width="wrap_content"
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="16dp">
+    <TextView
+            android:layout_width="0dp"
+            android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
             android:text="@string/settings_notif_fly_scale"
             android:textAppearance="?attr/textAppearanceTitleSmall" />
+    <TextView
+            android:id="@+id/notifFlyScaleValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+</LinearLayout>
 
         <SeekBar
             android:id="@+id/seekNotifFlyScale"
@@ -160,14 +205,13 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:max="80"
-            android:progress="75" />
+            android:progress="75"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
 
-        <TextView
-            android:id="@+id/notifFlyScaleValue"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="?attr/textAppearanceBodySmall"
-            android:textColor="?android:attr/textColorSecondary" />
+        
 
         <TextView
             android:layout_width="match_parent"

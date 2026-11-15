@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="lg_bench_900">#F2F4F7</color>
+    <color name="lg_bench_800">#F7F8FA</color>
+    <color name="lg_plate_700">#FFFFFF</color>
+    <color name="lg_plate_600">#F0F2F5</color>
+    <color name="lg_seam">#E2E6EC</color>
+    <color name="lg_seam_hi">#CFD5DE</color>
+    <color name="lg_ink_100">#14171C</color>
+    <color name="lg_ink_300">#3D444E</color>
+    <color name="lg_ink_400">#6A7380</color>
+    <color name="lg_blued">#3E6FD1</color>
+    <color name="lg_blued_ink">#2F5CB8</color>
+    <color name="lg_brass">#8A6E14</color>
+    <color name="lg_brass_ink">#7A6110</color>
+    <color name="lg_ruby">#C0454F</color>
+    <color name="lg_primary_container">#DCE6FA</color>
+    <color name="lg_brass_container">#F3ECD3</color>
+    <color name="lg_track_off">#D7DCE4</color>
+    <color name="lg_thumb_off">#FFFFFF</color>
+    <color name="lg_sw_stroke">#B9C1CD</color>
+</resources>

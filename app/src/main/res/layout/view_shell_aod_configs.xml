@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingHorizontal="16dp"
+        android:paddingBottom="24dp">
+
+        <TextView
+            style="@style/ShellHint"
+            android:text="@string/settings_aod_configs_hint" />
+
+        <TextView
+            android:id="@+id/aodConfigAdd"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_plate"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="14dp"
+            android:text="@string/settings_aod_configs_add"
+            android:textColor="@color/lg_blued_ink"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <LinearLayout
+            android:id="@+id/aodConfigList"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/bg_plate"
+            android:divider="@drawable/bg_seam_line_inset"
+            android:dividerHeight="1dp"
+            android:orientation="vertical"
+            android:showDividers="middle" />
+
+        <TextView
+            android:id="@+id/aodConfigEmpty"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:gravity="center"
+            android:paddingHorizontal="24dp"
+            android:paddingVertical="28dp"
+            android:text="@string/settings_aod_configs_empty"
+            android:textColor="@color/lg_ink_400"
+            android:textSize="12.5sp"
+            android:visibility="gone" />
+    </LinearLayout>
+</ScrollView>

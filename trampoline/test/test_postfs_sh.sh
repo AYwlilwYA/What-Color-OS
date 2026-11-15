@@ -37,6 +37,7 @@ seed_mod() {
     chmod +x "$OUT/bin/log"
     echo TRAMP > "$TREE/libdisplayppex.so"
     echo REAL > "$TREE/libdisplayppex.real.so"
+    echo WCALL > "$MOD/system/system_ext/lib64/liboplus_display_watchcall.so"
     echo "id=lg_sf_channel" > "$MOD/module.prop"
     echo FEATURE > "$FEATURE_FILE"
     : > "$OUT/postfs_log"

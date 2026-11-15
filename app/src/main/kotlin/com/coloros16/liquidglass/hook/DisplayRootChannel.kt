@@ -172,12 +172,13 @@ object DisplayRootChannel {
         frameScale: Float,
         excludes: Array<SurfaceControl>,
     ): Bitmap? {
+        if (!CaptureApi.beginCapture()) return null
         val token = displayToken(ctx) ?: return null
         return try {
             val dm = android.content.res.Resources.getSystem().displayMetrics
-            val builderCls = hostForName("android.window.ScreenCapture\$DisplayCaptureArgs\$Builder", ctx)
-            val baseBuilderCls = hostForName("android.window.ScreenCapture\$CaptureArgs\$Builder", ctx)
-            val argsCls = hostForName("android.window.ScreenCapture\$DisplayCaptureArgs", ctx)
+            val builderCls = CaptureApi.load("android.window.ScreenCapture\$DisplayCaptureArgs\$Builder", ctx?.classLoader)
+            val baseBuilderCls = CaptureApi.load("android.window.ScreenCapture\$CaptureArgs\$Builder", ctx?.classLoader)
+            val argsCls = CaptureApi.load("android.window.ScreenCapture\$DisplayCaptureArgs", ctx?.classLoader)
 
             val builder = builderCls.getConstructor(IBinder::class.java).newInstance(token)
             // setSourceCrop / setExcludeLayers 继承自 CaptureArgs.Builder
@@ -195,7 +196,7 @@ object DisplayRootChannel {
             ).invoke(builder, outW, outH)
 
             val args = builderCls.getMethod("build").invoke(builder) ?: return null
-            val shot = hostForName("android.window.ScreenCapture", ctx)
+            val shot = CaptureApi.load("android.window.ScreenCapture", ctx?.classLoader)
                 .getMethod("captureDisplay", argsCls)
                 .invoke(null, args) ?: return null
             val hb = shot.javaClass.getMethod("getHardwareBuffer").invoke(shot) as? HardwareBuffer
@@ -203,9 +204,11 @@ object DisplayRootChannel {
             // 取到 buffer 后立刻 wrap+copy 出自有软件位图，再关掉 hb（避免泄漏）。
             val bitmap = Bitmap.wrapHardwareBuffer(hb, null)?.copy(Bitmap.Config.ARGB_8888, false)
             hb.close()
+            if (bitmap != null) CaptureApi.recordSuccess()
             // 不打成功日志：本函数在抓屏热路径上（面板拖动期每秒数十次），由调用方按需节流记录。
             bitmap
         } catch (t: Throwable) {
+            CaptureApi.recordFailure("display-token:${t.javaClass.simpleName}")
             Lg.e(TAG, "display-token: captureDisplay 失败", t)
             null
         }

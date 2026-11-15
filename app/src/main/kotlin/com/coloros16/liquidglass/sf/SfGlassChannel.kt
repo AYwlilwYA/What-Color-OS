@@ -269,18 +269,24 @@ object SfGlassChannel {
         originX: Float,
         originY: Float,
     ): SuResult {
-        val err = applyRegions(host, left, top, width, height, corner, originX, originY)
+        val sc = SfBlurCall.hostScOf(host) ?: return SuResult(false, "", "host SurfaceControl 解析失败")
+        val err = applyRegionsToSc(sc, left, top, width, height, corner, originX, originY)
         return if (err == null) SuResult(true, "ok", null) else SuResult(false, "", err)
     }
 
     /** 直调下发几何到宿主窗口 SC；返回 null=成功，否则失败原因。 */
     private fun applyGeom(g: Geom): String? {
-        val host = g.host ?: return "host view 不可用"
-        return applyRegions(host, g.l, g.t, g.w, g.h, g.corner, g.originX, g.originY)
+        val sc = if (g.host != null) {
+            SfBlurCall.hostScOf(g.host) ?: return "host SurfaceControl 解析失败"
+        } else {
+            SfBlurCall.fallbackSc() ?: return "host view 不可用且兜底窗口 SC 失败"
+        }
+        return applyRegionsToSc(sc, g.l, g.t, g.w, g.h, g.corner, g.originX, g.originY)
     }
 
-    private fun applyRegions(
-        host: View,
+    /** 把单条区域下发到指定 SC；换窗时先清旧窗防残留。 */
+    private fun applyRegionsToSc(
+        sc: Any,
         left: Float,
         top: Float,
         width: Float,
@@ -289,7 +295,6 @@ object SfGlassChannel {
         originX: Float,
         originY: Float,
     ): String? {
-        val sc = SfBlurCall.hostScOf(host) ?: return "host SurfaceControl 解析失败"
         if (sc !== lastHostSc) {
             // 换窗：先把旧窗口的模糊清掉，防残留
             lastHostSc?.let { old ->

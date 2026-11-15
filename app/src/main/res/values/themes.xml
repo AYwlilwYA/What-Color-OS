@@ -1,5 +1,144 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Material You 动态取色主题（Android 12+ 自动跟随壁纸取色，低版本回退静态色） -->
-    <style name="Theme.LiquidGlass" parent="Theme.Material3.DynamicColors.DayNight.NoActionBar" />
+    <style name="Theme.LiquidGlass" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/lg_blued</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="colorPrimaryContainer">@color/lg_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/lg_blued_ink</item>
+        <item name="colorSecondary">@color/lg_brass</item>
+        <item name="colorOnSecondary">#FFFFFF</item>
+        <item name="colorSecondaryContainer">@color/lg_brass_container</item>
+        <item name="colorOnSecondaryContainer">@color/lg_brass_ink</item>
+        <item name="colorTertiary">@color/lg_blued</item>
+        <item name="colorError">@color/lg_ruby</item>
+
+        <item name="android:colorBackground">@color/lg_bench_800</item>
+        <item name="android:switchMinWidth">52dp</item>
+        <item name="colorSurface">@color/lg_bench_800</item>
+        <item name="colorOnSurface">@color/lg_ink_100</item>
+        <item name="colorSurfaceVariant">@color/lg_plate_700</item>
+        <item name="colorOnSurfaceVariant">@color/lg_ink_400</item>
+        <item name="colorOutline">@color/lg_seam</item>
+        <item name="colorOutlineVariant">@color/lg_seam</item>
+        <item name="colorSurfaceContainerLowest">@color/lg_bench_900</item>
+        <item name="colorSurfaceContainerLow">@color/lg_bench_800</item>
+        <item name="colorSurfaceContainer">@color/lg_bench_800</item>
+        <item name="colorSurfaceContainerHigh">@color/lg_plate_600</item>
+        <item name="colorSurfaceContainerHighest">@color/lg_plate_700</item>
+
+        <item name="android:windowBackground">@color/lg_bench_800</item>
+        <item name="android:statusBarColor">@color/lg_bench_800</item>
+        <item name="android:navigationBarColor">@color/lg_bench_800</item>
+        <item name="android:windowLightStatusBar">@bool/lg_light_system_bars</item>
+        <item name="android:windowLightNavigationBar">@bool/lg_light_system_bars</item>
+        <item name="android:textColorPrimary">@color/lg_ink_100</item>
+        <item name="android:textColorSecondary">@color/lg_ink_400</item>
+    </style>
+
+    <!-- 内容卡片：暗色板 + 细缝描边 -->
+    <style name="ShellPlate" parent="Widget.Material3.CardView.Filled">
+        <item name="cardBackgroundColor">@color/lg_plate_700</item>
+        <item name="strokeColor">@color/lg_seam</item>
+        <item name="strokeWidth">1dp</item>
+        <item name="cardCornerRadius">14dp</item>
+        <item name="cardElevation">0dp</item>
+    </style>
+
+    <!-- 描边按钮：细边 + 蓝字 + 胶囊 -->
+    <style name="ShellBtnOutlined" parent="Widget.Material3.Button.OutlinedButton">
+        <item name="android:textColor">@color/lg_blued_ink</item>
+        <item name="android:textSize">13.5sp</item>
+        <item name="android:letterSpacing">0.02</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="android:minHeight">40dp</item>
+        <item name="android:minWidth">0dp</item>
+        <item name="strokeColor">@color/lg_seam_hi</item>
+        <item name="strokeWidth">1dp</item>
+        <item name="cornerRadius">99dp</item>
+        <item name="backgroundTint">@android:color/transparent</item>
+        <item name="rippleColor">#1F5B8DE8</item>
+    </style>
+
+    <!-- 文字按钮 -->
+    <style name="ShellBtnText" parent="Widget.Material3.Button.TextButton">
+        <item name="android:textColor">@color/lg_blued_ink</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:minWidth">0dp</item>
+        <item name="cornerRadius">99dp</item>
+        <item name="rippleColor">#1F5B8DE8</item>
+    </style>
+
+    <!-- 顶栏标题与副标题 -->
+    <style name="ShellToolbarTitle" parent="TextAppearance.Material3.TitleMedium">
+        <item name="android:textSize">19sp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:textColor">@color/lg_ink_100</item>
+        <item name="android:letterSpacing">0.01</item>
+    </style>
+
+    <style name="ShellToolbarSubtitle" parent="TextAppearance.Material3.BodySmall">
+        <item name="android:textSize">10.5sp</item>
+        <item name="android:textColor">@color/lg_ink_400</item>
+        <item name="android:letterSpacing">0.14</item>
+    </style>
+
+    <!-- 分组标题：黄铜小字 + 右侧渐隐横线 -->
+    <style name="ShellGroupHead">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">22dp</item>
+        <item name="android:layout_marginBottom">9dp</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:orientation">horizontal</item>
+    </style>
+
+    <style name="ShellGroupTitle">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:letterSpacing">0.22</item>
+        <item name="android:textColor">@color/lg_brass</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="ShellGroupLabel">
+        <item name="android:letterSpacing">0.22</item>
+        <item name="android:textColor">@color/lg_brass</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="ShellGroupRule">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">1dp</item>
+        <item name="android:layout_marginStart">12dp</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:background">@drawable/bg_rule_brass</item>
+    </style>
+
+    <style name="ShellGroupInfo">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginStart">6dp</item>
+        <item name="android:padding">4dp</item>
+        <item name="android:text">ⓘ</item>
+        <item name="android:textColor">@color/lg_ink_400</item>
+        <item name="android:textSize">13sp</item>
+        <item name="android:background">?attr/selectableItemBackgroundBorderless</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+        <item name="android:contentDescription">@string/settings_info_label</item>
+    </style>
+
+    <!-- 三栏壳说明文字 -->
+    <style name="ShellHint">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">8dp</item>
+        <item name="android:paddingStart">4dp</item>
+        <item name="android:paddingEnd">4dp</item>
+        <item name="android:textAppearance">?attr/textAppearanceBodySmall</item>
+        <item name="android:textColor">@color/lg_ink_400</item>
+    </style>
 </resources>

@@ -24,14 +24,20 @@ import java.util.zip.ZipOutputStream
 internal object SfModulePacker {
     private const val TAG = "SfModulePacker"
     private const val REAL_SO_PATH = "/system_ext/lib64/oplusex/libdisplayppex.so"
+    private const val REAL_SO_DOT_PATH = "/system_ext/lib64/oplusex/libdisplayppex.real.so"
     private const val TRAMPOLINE_DIR = "lg-sf"
     private const val TRAMPOLINE_NAME = "trampoline.so"
     private const val SERVICE_SH_NAME = "service.sh"
+    private const val WATCHCALL_NAME = "watchcall_patched.so"
+    private const val WATCHCALL_TARGET_PATH = "/system_ext/lib64/liboplus_display_watchcall.so"
+    private const val WATCHCALL_SHA256 = "3486e37093d97a41e1968041291ac324ce6ca15cf1a7f7b29cee4b1b72a77780"
+    private const val EXPECTED_FINGERPRINT = "OnePlus/PJZ110/OP5D0DL1:16/BP2A.250605.015/V.24d75ae-2bd31-33d92:user/release-keys"
     private const val MODULE_ID = "lg_sf_channel"
     private const val DOWNLOAD_PATH_PREFIX = "/sdcard/Download/"
     private const val REAL_SO_MAX_BYTES = 64L * 1024 * 1024
     private const val MISSING_TRAMPOLINE_MSG = "打包件未就绪（trampoline 通用件未生成）"
     private const val MISSING_SERVICE_MSG = "打包件未就绪（开机服务脚本未生成）"
+    private const val MISSING_WATCHCALL_MSG = "打包件未就绪（watchcall 改件未生成）"
 
     /** 打包结果：ok=true 时 path=zip 落盘路径；失败时 message=如实回执文案。 */
     internal data class Result(
@@ -50,14 +56,22 @@ internal object SfModulePacker {
         return try {
             val trampoline = readAsset(context, TRAMPOLINE_NAME, MISSING_TRAMPOLINE_MSG)
             val serviceSh = readAsset(context, SERVICE_SH_NAME, MISSING_SERVICE_MSG)
+            val watchcall = readAsset(context, WATCHCALL_NAME, MISSING_WATCHCALL_MSG)
+            val watchcallSha = sha256Hex(watchcall)
+            if (watchcallSha != WATCHCALL_SHA256) {
+                throw PackError("watchcall 改件校验失败（sha256 不匹配），已拒绝打包")
+            }
             val installSh = installSh().toByteArray(Charsets.UTF_8)
-            val real = readRealSo()
+            val real = readRealSo(trampoline)
             val sha256 = sha256Hex(real)
             val fingerprint = Build.FINGERPRINT ?: "unknown"
+            if (fingerprint != EXPECTED_FINGERPRINT) {
+                throw PackError("设备 ROM 与改件不匹配，已拒绝打包（改件仅适用 PJZ110 该指纹）")
+            }
             val symbols = DynsymParser.parse(real)
             if (symbols.isEmpty()) throw PackError("解析系统库符号失败：动态符号为空")
             val name = zipName(fingerprint)
-            val entries = buildEntries(trampoline, real, sha256, fingerprint, symbols, serviceSh, installSh)
+            val entries = buildEntries(trampoline, real, sha256, fingerprint, symbols, serviceSh, installSh, watchcall, watchcallSha)
             if (stageDir != null) stageTree(entries, stageDir)
             val size = publish(context, name) { zip -> writeZip(zip, entries) }
             Lg.i(TAG, "pack ok name=$name size=$size symbols=${symbols.size} sha256=$sha256")
@@ -92,24 +106,32 @@ internal object SfModulePacker {
         return bytes
     }
 
-    private fun readRealSo(): ByteArray {
+    private fun readRealSo(trampoline: ByteArray): ByteArray {
         if (isRealSoOverlaid()) {
             throw PackError("取材路径正被挂载覆盖（调试残留挂载），请先还原挂载再打包")
         }
-        val file = File(REAL_SO_PATH)
-        if (!file.isFile) {
+        val slot = File(REAL_SO_PATH)
+        if (!slot.isFile) {
             throw PackError("非 ColorOS 设备，不支持（特征文件 $REAL_SO_PATH 不存在）")
         }
-        val bytes = try {
-            if (file.length() > REAL_SO_MAX_BYTES) throw PackError("读取系统库失败：文件异常过大")
-            file.readBytes()
-        } catch (e: PackError) {
-            throw e
-        } catch (t: Throwable) {
-            throw PackError("读取系统库失败：${t.message ?: t.javaClass.simpleName}")
+        var bytes = readFileBounded(slot)
+        // 槽上是 trampoline 占位时取材改读同目录 .real 原厂真身
+        if (bytes.isNotEmpty() && sha256Hex(bytes) == sha256Hex(trampoline)) {
+            val real = File(REAL_SO_DOT_PATH)
+            if (!real.isFile) throw PackError("取材路径被 trampoline 占位且未找到真身 .real")
+            bytes = readFileBounded(real)
         }
         if (bytes.isEmpty()) throw PackError("读取系统库失败：文件为空")
         return bytes
+    }
+
+    private fun readFileBounded(file: File): ByteArray {
+        if (file.length() > REAL_SO_MAX_BYTES) throw PackError("读取系统库失败：文件异常过大")
+        return try {
+            file.readBytes()
+        } catch (t: Throwable) {
+            throw PackError("读取系统库失败：${t.message ?: t.javaClass.simpleName}")
+        }
     }
 
     private fun isRealSoOverlaid(): Boolean = try {
@@ -148,6 +170,8 @@ internal object SfModulePacker {
         symbols: List<DynsymParser.Sym>,
         serviceSh: ByteArray,
         installSh: ByteArray,
+        watchcall: ByteArray,
+        watchcallSha: String,
     ): List<Pair<String, ByteArray>> {
         val symbolsTxt = buildString {
             append("# lg-sf-channel symbols v1\n")
@@ -165,6 +189,8 @@ internal object SfModulePacker {
             append("real.so.sha256=").append(sha256).append('\n')
             append("real.so.size=").append(real.size).append('\n')
             append("symbols.count=").append(symbols.size).append('\n')
+            append("watchcall.path=").append(WATCHCALL_TARGET_PATH).append('\n')
+            append("watchcall.sha256=").append(watchcallSha).append('\n')
         }
         return listOf(
             "META-INF/com/google/android/update-binary" to UPDATE_BINARY.toByteArray(Charsets.UTF_8),
@@ -172,6 +198,7 @@ internal object SfModulePacker {
             "module.prop" to moduleProp().toByteArray(Charsets.UTF_8),
             "system/system_ext/lib64/oplusex/libdisplayppex.so" to trampoline,
             "system/system_ext/lib64/oplusex/libdisplayppex.real.so" to real,
+            "system/system_ext/lib64/liboplus_display_watchcall.so" to watchcall,
             "symbols.txt" to symbolsTxt.toByteArray(Charsets.UTF_8),
             "fingerprint.txt" to fingerprintTxt.toByteArray(Charsets.UTF_8),
             "service.sh" to serviceSh,
@@ -198,7 +225,7 @@ internal object SfModulePacker {
         MODDIR=${'$'}{LG_MODDIR:-/data/adb/modules/$MODULE_ID}
         FEATURE=${'$'}{LG_FEATURE_PATH:-$REAL_SO_PATH}
 
-        if [ ! -f "${'$'}SRC/module.prop" ] || [ ! -f "${'$'}SRC/system/system_ext/lib64/oplusex/libdisplayppex.so" ]; then
+        if [ ! -f "${'$'}SRC/module.prop" ] || [ ! -f "${'$'}SRC/system/system_ext/lib64/oplusex/libdisplayppex.so" ] || [ ! -f "${'$'}SRC/system/system_ext/lib64/liboplus_display_watchcall.so" ]; then
           echo "SRC_BAD"
           exit 1
         fi
@@ -376,6 +403,7 @@ internal object SfModulePacker {
         TREE=${'$'}MODDIR/system/system_ext/lib64/oplusex
         TRAMP=${'$'}TREE/libdisplayppex.so
         REAL=${'$'}TREE/libdisplayppex.real.so
+        WCALL=${'$'}{LG_WCALL_PATH:-${'$'}MODDIR/system/system_ext/lib64/liboplus_display_watchcall.so}
         FEATURE=${'$'}{LG_FEATURE_PATH:-/system_ext/lib64/oplusex/libdisplayppex.so}
         lg_log() { log -p w -t LgSfPostFs "$1"; }
 
@@ -383,6 +411,7 @@ internal object SfModulePacker {
           lg_log "非 ColorOS（特征缺失 ${'$'}FEATURE）→ 拒载"
           mv -f "${'$'}TRAMP" "${'$'}TRAMP.bak" 2>/dev/null
           mv -f "${'$'}REAL" "${'$'}REAL.bak" 2>/dev/null
+          mv -f "${'$'}WCALL" "${'$'}WCALL.bak" 2>/dev/null
           exit 0
         fi
 
@@ -412,23 +441,25 @@ internal object SfModulePacker {
         esac
 
         if [ "${'$'}allow" = "1" ]; then
-          for f in "${'$'}TRAMP" "${'$'}REAL"; do
+          for f in "${'$'}TRAMP" "${'$'}REAL" "${'$'}WCALL"; do
             if [ ! -f "${'$'}f" ] && [ -f "${'$'}f.bak" ]; then
               mv -f "${'$'}f.bak" "${'$'}f" && lg_log "树内件自 bak 恢复"
             fi
           done
-          if [ -f "${'$'}MODDIR/module.prop" ] && [ -f "${'$'}TRAMP" ] && [ -f "${'$'}REAL" ]; then
-            lg_log "树校验通过（module.prop+两 so 在位）交 overlay"
+          if [ -f "${'$'}MODDIR/module.prop" ] && [ -f "${'$'}TRAMP" ] && [ -f "${'$'}REAL" ] && [ -f "${'$'}WCALL" ]; then
+            lg_log "树校验通过（module.prop+三 so 在位）交 overlay"
             exit 0
           fi
           mv -f "${'$'}TRAMP" "${'$'}TRAMP.bak" 2>/dev/null
           mv -f "${'$'}REAL" "${'$'}REAL.bak" 2>/dev/null
+          mv -f "${'$'}WCALL" "${'$'}WCALL.bak" 2>/dev/null
           lg_log "树校验失败 → 回滚拒载安全态"
           exit 0
         else
           mv -f "${'$'}TRAMP" "${'$'}TRAMP.bak" 2>/dev/null
           mv -f "${'$'}REAL" "${'$'}REAL.bak" 2>/dev/null
-          lg_log "拒载：树内两 so 下掉，overlay 露原厂"
+          mv -f "${'$'}WCALL" "${'$'}WCALL.bak" 2>/dev/null
+          lg_log "拒载：树内改件下掉，overlay 露原厂"
           exit 0
         fi
     """.trimIndent() + "\n"

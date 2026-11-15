@@ -14,7 +14,13 @@
             android:id="@+id/switchTextContrast"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/settings_text_contrast" />
+            android:text="@string/settings_text_contrast"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
 
         <TextView
             android:id="@+id/textContrastDesc"
@@ -30,7 +36,13 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="@string/settings_heads_up_text_follow" />
+            android:text="@string/settings_heads_up_text_follow"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
 
         <TextView
             android:id="@+id/headsUpTextFollowDesc"
@@ -42,13 +54,19 @@
             android:textColor="?android:attr/textColorSecondary" />
 
         <!-- [spec/60] 文字周期强制刷新间隔滑杆（KEY_TEXT_FORCE_REFRESH_INTERVAL_MS，0~5000ms，默认 500；0=关闭周期刷新） -->
-        <TextView
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="16dp">
+    <TextView
             android:id="@+id/textForceRefreshLabel"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
+            android:layout_weight="1"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
             android:text="@string/settings_text_force_refresh_interval"
             android:textAppearance="?attr/textAppearanceTitleSmall" />
+    <TextView
+            android:id="@+id/textForceRefreshValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+</LinearLayout>
 
         <SeekBar
             android:id="@+id/seekTextForceRefresh"
@@ -56,13 +74,13 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:max="5000"
-            android:progress="500" />
+            android:progress="500"
+                    android:progressDrawable="@drawable/lg_seek_track"
+                    android:splitTrack="false"
+                    android:thumb="@drawable/lg_seek_thumb"
+                    />
 
-        <TextView
-            android:id="@+id/textForceRefreshValue"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="?attr/textAppearanceBodySmall" />
+        
 
         <TextView
             android:id="@+id/textForceRefreshDesc"

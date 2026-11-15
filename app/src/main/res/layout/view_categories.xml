@@ -4,7 +4,7 @@
     android:layout_height="match_parent"
     android:fillViewport="true">
 
-    <!-- 一级大类列表容器（showCategories 动态填充 item_category） -->
+    <!-- 一级大类列表容器（buildCategoryListView 动态填充 item_category） -->
     <LinearLayout
         android:id="@+id/categoryList"
         android:layout_width="match_parent"

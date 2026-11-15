@@ -15,7 +15,13 @@
             android:id="@+id/switchDockGlass"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/settings_dock_glass" />
+            android:text="@string/settings_dock_glass"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
 
         <TextView
             android:id="@+id/dockGlassDesc"
@@ -32,7 +38,13 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="@string/settings_page_indicator_glass" />
+            android:text="@string/settings_page_indicator_glass"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
 
         <TextView
             android:id="@+id/pageIndicatorGlassDesc"
@@ -49,7 +61,13 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="@string/settings_card_glass" />
+            android:text="@string/settings_card_glass"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
 
         <TextView
             android:id="@+id/cardGlassDesc"

@@ -19,8 +19,8 @@ import java.util.concurrent.CopyOnWriteArraySet
  * "${applicationId}.XposedService"），框架在模块进程启动时经 ContentProvider.call(SEND_BINDER)
  * 注入 service binder → [XposedServiceHelper.onBinderReceived] 缓存/分发。
  *
- * 时序：binder 注入是异步的，可能晚于 SettingsActivity.onCreate（真机实测 200ms+），
- * 故 UI 侧不得在 [serviceRef] 为 null 时直接降级 XML；应经 [addServiceStateListener] 等待就绪再写框架存储。
+ * 配置读写模型：本地 XML 为权威（离线可写、立即生效于 UI），框架侧是给 hook 端消费的镜像；
+ * UI 写本地后若框架在线即时推一份，框架绑定时把本地全量同步过去（本地覆盖框架）。
  */
 class App : Application(), XposedServiceHelper.OnServiceListener {
 
@@ -33,24 +33,51 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
         XposedServiceHelper.registerListener(this)
     }
 
-    /** 「运行日志」开关（框架侧优先，框架未就绪时读本地 XML 兜底；读失败默认开，避免静默丢日志）。 */
+    /** 「运行日志」开关（本地优先；本地无键时读框架侧；读失败默认开，避免静默丢日志）。 */
     private fun readEnableLogs(): Boolean {
-        val svc = serviceRef
-        if (svc != null) {
-            return try {
-                Prefs.remote(svc).getBoolean(Prefs.KEY_ENABLE_LOGS, Prefs.DEFAULT_ENABLE_LOGS)
-            } catch (t: Throwable) {
-                true
-            }
+        val local = Prefs.read(this)
+        if (local.contains(Prefs.KEY_ENABLE_LOGS)) {
+            return local.getBoolean(Prefs.KEY_ENABLE_LOGS, Prefs.DEFAULT_ENABLE_LOGS)
         }
-        return Prefs.read(this).getBoolean(Prefs.KEY_ENABLE_LOGS, Prefs.DEFAULT_ENABLE_LOGS)
+        val svc = serviceRef ?: return Prefs.DEFAULT_ENABLE_LOGS
+        return try {
+            Prefs.remote(svc).getBoolean(Prefs.KEY_ENABLE_LOGS, Prefs.DEFAULT_ENABLE_LOGS)
+        } catch (t: Throwable) {
+            true
+        }
     }
 
     override fun onServiceBind(service: XposedService) {
         Lg.i(TAG, "framework service bound: ${service.getFrameworkName()} v${service.getFrameworkVersion()}")
         serviceRef = service
         serviceLost = false
+        syncLocalToFramework(service)
         listeners.forEach { it.onServiceStateChanged(service) }
+    }
+
+    /** 本地配置全量同步到框架侧（本地为权威；hook 状态回传键只在框架侧、本地没有，不被触碰）。 */
+    private fun syncLocalToFramework(service: XposedService) {
+        try {
+            val local = Prefs.read(this)
+            val editor = Prefs.remote(service).edit()
+            var n = 0
+            for ((key, value) in local.all) {
+                when (value) {
+                    is String -> editor.putString(key, value)
+                    is Boolean -> editor.putBoolean(key, value)
+                    is Int -> editor.putInt(key, value)
+                    is Float -> editor.putFloat(key, value)
+                    is Long -> editor.putLong(key, value)
+                    is Set<*> -> @Suppress("UNCHECKED_CAST") editor.putStringSet(key, value as Set<String>)
+                    else -> continue
+                }
+                n++
+            }
+            editor.apply()
+            Lg.i(TAG, "config sync local->framework n=$n")
+        } catch (t: Throwable) {
+            Lg.w(TAG, "config sync failed", t)
+        }
     }
 
     override fun onServiceDied(service: XposedService) {

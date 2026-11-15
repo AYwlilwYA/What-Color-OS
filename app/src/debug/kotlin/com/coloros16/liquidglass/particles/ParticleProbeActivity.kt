@@ -30,7 +30,7 @@ class ParticleProbeActivity:Activity() {
    override fun onDraw(c:Canvas) {
     p.shader=LinearGradient(0f,0f,width.toFloat(),height.toFloat(),Color.rgb(54,185,162),Color.rgb(40,69,144),Shader.TileMode.CLAMP)
     c.drawRoundRect(0f,0f,width.toFloat(),height.toFloat(),30f,30f,p);p.shader=null
-    p.color=Color.WHITE;p.textSize=27f;c.drawText("DreamGlass",30f,55f,p);p.textSize=20f;c.drawText("Notification deleted",30f,95f,p)
+    p.color=Color.WHITE;p.textSize=27f;c.drawText("LiquidGlass",30f,55f,p);p.textSize=20f;c.drawText("Notification deleted",30f,95f,p)
    }
   }
   box.addView(card,FrameLayout.LayoutParams(640,260).apply { leftMargin=60;topMargin=300 })

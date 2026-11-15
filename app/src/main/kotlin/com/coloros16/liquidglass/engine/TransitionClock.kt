@@ -1,0 +1,132 @@
+package com.coloros16.liquidglass.engine
+
+import java.util.concurrent.CopyOnWriteArrayList
+
+/** 进度监听：回调只带基础类型，逐帧通知不产生对象分配。 */
+fun interface ClockListener {
+    fun onClock(
+        edge: TransitionEdge?,
+        source: ClockSource,
+        t: Float,
+        playing: Boolean,
+        revision: Long,
+    )
+}
+
+/**
+ * 可插拔进度源：系统进度泵、预览时间轴、手动滑杆写入同一个 t。
+ * 播放由调用方驱动 [advance]（预览用帧回调，系统源由 hook 直接 [setT]），自身不起线程、不轮询。
+ */
+class TransitionClock(
+    private val nowMs: () -> Long = { System.nanoTime() / 1_000_000L },
+) {
+
+    private val listeners = CopyOnWriteArrayList<ClockListener>()
+
+    private var edge: TransitionEdge? = null
+    private var source: ClockSource = ClockSource.MANUAL
+    private var t: Float = 0f
+    private var playing: Boolean = false
+    private var revision: Long = 0L
+
+    private var playStartMs: Long = 0L
+    private var playFromT: Float = 0f
+    private var playDurationMs: Long = 0L
+
+    @Synchronized
+    fun state(): ClockState = ClockState(edge, source, t, playing, revision)
+
+    /** 订阅进度变化；返回取消订阅。 */
+    fun subscribe(listener: ClockListener): () -> Unit {
+        listeners.add(listener)
+        return { listeners.remove(listener) }
+    }
+
+    /** 写入进度（系统泵或手动）。 */
+    @Synchronized
+    fun setT(edge: TransitionEdge, value: Float, source: ClockSource) {
+        val clamped = clamp01(value)
+        val changed = this.edge != edge || this.t != clamped || this.source != source || playing
+        this.edge = edge
+        this.t = clamped
+        this.source = source
+        this.playing = false
+        if (changed) notifyChanged()
+    }
+
+    /** 手动拖拽定位。 */
+    @Synchronized
+    fun seek(edge: TransitionEdge, value: Float) {
+        setT(edge, value, ClockSource.MANUAL)
+    }
+
+    /** 起播：由调用方按帧调 [advance] 推进。 */
+    @Synchronized
+    fun play(
+        edge: TransitionEdge,
+        durationMs: Long,
+        from: Float = 0f,
+        source: ClockSource = ClockSource.PREVIEW,
+    ) {
+        this.edge = edge
+        this.source = source
+        this.playFromT = clamp01(from)
+        this.t = this.playFromT
+        this.playDurationMs = durationMs.coerceAtLeast(1L)
+        this.playStartMs = nowMs()
+        this.playing = true
+        notifyChanged()
+    }
+
+    @Synchronized
+    fun pause() {
+        if (!playing) return
+        playing = false
+        notifyChanged()
+    }
+
+    /**
+     * 推进播放进度；返回是否仍在播放。
+     * 非播放态直接返回 false，不做任何计算。
+     */
+    @Synchronized
+    fun advance(now: Long = nowMs()): Boolean {
+        if (!playing) return false
+        val elapsed = now - playStartMs
+        val next = if (elapsed <= 0L) playFromT else playFromT + elapsed.toFloat() / playDurationMs
+        if (next >= 1f) {
+            t = 1f
+            playing = false
+            notifyChanged()
+            return false
+        }
+        if (next != t) {
+            t = next
+            notifyChanged()
+        }
+        return true
+    }
+
+    @Synchronized
+    fun reset() {
+        edge = null
+        source = ClockSource.MANUAL
+        t = 0f
+        playing = false
+        notifyChanged()
+    }
+
+    private fun notifyChanged() {
+        revision++
+        val e = edge
+        val s = source
+        val v = t
+        val p = playing
+        val r = revision
+        for (listener in listeners) {
+            listener.onClock(e, s, v, p, r)
+        }
+    }
+
+    private fun clamp01(v: Float): Float = if (v.isNaN()) 0f else v.coerceIn(0f, 1f)
+}

@@ -25,7 +25,13 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="@string/settings_anim_open_enabled" />
+            android:text="@string/settings_anim_open_enabled"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
 
         <TextView
             android:layout_width="match_parent"
@@ -37,7 +43,7 @@
 
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/rowAnimOpen"
-            style="?attr/materialCardViewFilledStyle"
+            style="@style/ShellPlate"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
@@ -77,7 +83,13 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="20dp"
-            android:text="@string/settings_anim_close_enabled" />
+            android:text="@string/settings_anim_close_enabled"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
 
         <TextView
             android:layout_width="match_parent"
@@ -89,7 +101,7 @@
 
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/rowAnimClose"
-            style="?attr/materialCardViewFilledStyle"
+            style="@style/ShellPlate"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
@@ -129,7 +141,13 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="20dp"
-            android:text="@string/settings_anim_break_enabled" />
+            android:text="@string/settings_anim_break_enabled"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                        android:textSize="15sp"
+                        android:textColor="@color/lg_ink_100"
+                        android:minHeight="0dp"
+                    />
 
         <TextView
             android:layout_width="match_parent"
@@ -141,7 +159,7 @@
 
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/rowAnimBreak"
-            style="?attr/materialCardViewFilledStyle"
+            style="@style/ShellPlate"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"

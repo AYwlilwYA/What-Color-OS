@@ -1,7 +1,7 @@
 // SF 系统模块通用装载件：占槽纯转发 + 引擎门禁金丝雀 + 运行时护栏（logcat tag=LG-TRAMPOLINE）
 // 装载层：DT_NEEDED 绝对路径把真身拉进本库依赖链，dlsym 经本句柄直达真身符号；本文件零渲染逻辑、零持久 I/O
-// 跨 boot 装载判定不在本文件：模块 post-fs-data.sh 读模块自家 state（/data/adb/modules/lg_sf_channel/state）决定装/拒载
-// 门禁：引擎首次需要时调 lg_glass_arm_engine（单飞；符号+金丝雀任一失败=本会话永久纯转发）
+// 挂点安装在 engine.c（lg_engine_try_install：maps→reloc→GOT 改写），本文件 lg_on_load 里触发
+// 门禁：引擎首次需要时调 lg_glass_arm_engine（单飞；canary+引擎符号任一失败=本会话永久纯转发）
 // 护栏：引擎错误计数超阈永久熔断；金丝雀 = 编译探针 shader 自检；日志守卫按 key 60s 节流
 #include <dlfcn.h>
 #include <fcntl.h>
@@ -16,7 +16,9 @@
 #include <android/log.h>
 #endif
 
-#define LG_TRAMP_VER "1"
+#include "lginternal.h"
+
+#define LG_TRAMP_VER "2"
 #define TAG "LG-TRAMPOLINE"
 
 #define REAL_PATH "/system_ext/lib64/oplusex/libdisplayppex.real.so"
@@ -34,13 +36,13 @@ static int g_test_sym_ok = 1;
 #endif
 
 /* ---------- 日志（里程碑直打；守卫类按 key 60s 节流） ---------- */
-static long lg_now_ms(void) {
+long lg_now_ms(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (long)ts.tv_sec * 1000L + ts.tv_nsec / 1000000L;
 }
 
-static void lg_logf(const char *fmt, ...) {
+void lg_logf(const char *fmt, ...) {
     char buf[512];
     va_list ap;
     va_start(ap, fmt);
@@ -62,7 +64,7 @@ struct lg_thr_slot {
 };
 static struct lg_thr_slot g_thr[8];
 
-static void lg_log_throttled(const char *key, const char *fmt, ...) {
+void lg_log_throttled(const char *key, const char *fmt, ...) {
     long now = lg_now_ms();
     struct lg_thr_slot *slot = NULL;
     for (int i = 0; i < 8; i++) {
@@ -115,7 +117,7 @@ static struct lg_canary_syms C;
 #define M_STR_C1 "_ZN8SkStringC1EPKc"
 #define M_STR_D1 "_ZN8SkStringD1Ev"
 
-static void sk_unref(void *obj) {
+void sk_unref(void *obj) {
     if (!obj) return;
     int old = __atomic_fetch_sub((int *)((char *)obj + 8), 1, __ATOMIC_ACQ_REL);
     if (old == 1) {
@@ -123,35 +125,6 @@ static void sk_unref(void *obj) {
         void (*dtor)(void *) = (void (*)(void *))((void **)vt)[2];
         dtor(obj);
     }
-}
-
-#define X8CLOB "x0","x1","x2","x3","x4","x5","x6","x7","x8","x9","x10","x11","x12","x13","x14","x15","x16","x17","x30", \
-               "v0","v1","v2","v3","v4","v5","v6","v7","v8","v9","v10","v11","v12","v13","v14","v15", \
-               "v16","v17","v18","v19","v20","v21","v22","v23","v24","v25","v26","v27","v28","v29","v30","v31", \
-               "memory","cc"
-
-static inline __attribute__((always_inline)) void x8_call(void *ret, void *fn,
-                                                          const void **args, int n) {
-    struct {
-        void *fn;
-        void *ret;
-        void *args[8];
-    } s;
-    s.fn = fn;
-    s.ret = ret;
-    for (int i = 0; i < 8; i++) s.args[i] = (args && i < n) ? (void *)args[i] : NULL;
-    __asm__ volatile(
-        "mov x9, %0\n\t"
-        "ldr x10, [x9]\n\t"
-        "ldr x11, [x9, #8]\n\t"
-        "ldp x0, x1, [x9, #16]\n\t"
-        "ldp x2, x3, [x9, #32]\n\t"
-        "ldp x4, x5, [x9, #48]\n\t"
-        "ldp x6, x7, [x9, #64]\n\t"
-        "mov x8, x11\n\t"
-        "blr x10\n\t"
-        ::"r"(&s)
-        : X8CLOB);
 }
 
 static int lg_resolve_engine_syms(void) {
@@ -203,6 +176,10 @@ int lg_glass_arm_engine(void) {
         lg_logf("%s CANARY fail step=%s engine-denied-for-session", TAG, step);
         return 0;
     }
+    if (lg_engine_resolve_syms() != 0) {
+        lg_logf("%s ARMED=0 reason=engine-sym-miss", TAG);
+        return 0;
+    }
     g_arm.store(1);
     lg_logf("%s ARMED ver=" LG_TRAMP_VER, TAG);
     return 1;
@@ -210,6 +187,20 @@ int lg_glass_arm_engine(void) {
 
 int lg_glass_engine_alive(void) {
     return g_arm.load() == 1 && !g_guard_trip.load();
+}
+
+int lg_glass_arm_untried(void) {
+    return g_arm.load() == 0;
+}
+
+/* 护栏立即熔断（单帧超时连续超阈 / SF CPU 超限调用） */
+void lg_guard_trip_now(const char *reason) {
+    if (!g_guard_trip.exchange(1))
+        lg_logf("%s TRIP reason=%s engine-off-for-session", TAG, reason);
+}
+
+int lg_guard_err_count(void) {
+    return g_guard_err.load();
 }
 
 /* 引擎每次失败调用；超阈永久熔断 */
@@ -239,6 +230,9 @@ static void lg_on_load(void) {
     lg_logf("%s ALIVE ver=" LG_TRAMP_VER " pid=%d", TAG, (int)getpid());
     void *real = dlopen(REAL_PATH, RTLD_NOLOAD | RTLD_LAZY);
     lg_logf("%s REAL handle=%p", TAG, real);
+    const char *step = "?";
+    int rc = lg_engine_try_install(&step);
+    lg_logf("%s HOOK install-step=%s rc=%d", TAG, step, rc);
 }
 
 __attribute__((constructor)) static void lg_ctor(void) {

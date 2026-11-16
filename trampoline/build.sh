@@ -60,11 +60,17 @@ readelf -d "$OUT/linkstub.so" | grep -q "SONAME.*\[$REAL_SLOT\]" || {
 }
 
 echo "== 3/4 trampoline.so (aarch64) =="
+"$CC" --target=aarch64-linux-android31 --sysroot="$SYSROOT" \
+  -c -fPIC -O2 -fvisibility=hidden \
+  "$T/engine.c" -o "$OUT/engine.o"
+"$CXX" --target=aarch64-linux-android31 --sysroot="$SYSROOT" \
+  -c -fPIC -O2 -fvisibility=hidden -std=c++17 \
+  "$T/glass_shader.cpp" -o "$OUT/glass_shader.o"
 "$CXX" --target=aarch64-linux-android31 --sysroot="$SYSROOT" \
   -shared -fPIC -O2 -std=c++17 -fvisibility=hidden \
   -Wl,--no-undefined -Wl,-soname,lg_sf_trampoline.so \
   -Wl,--no-as-needed "$OUT/linkstub.so" -Wl,--as-needed \
-  "$T/trampoline.cpp" -llog -ldl \
+  "$T/trampoline.cpp" "$OUT/engine.o" "$OUT/glass_shader.o" -llog -ldl \
   -o "$OUT/trampoline.so"
 
 echo "== 4/4 ELF 断言 + 落位 =="

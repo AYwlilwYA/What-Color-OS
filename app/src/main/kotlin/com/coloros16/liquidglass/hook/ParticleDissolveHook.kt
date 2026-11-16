@@ -90,6 +90,48 @@ object ParticleDissolveHook {
         private val ui = Handler(Looper.getMainLooper())
         private val captures = WeakHashMap<View, Capture>() // UI thread only; at most MAX_ACTIVE.
         private val effects = WeakHashMap<View, Dust>()
+        private var driverOn = false
+        private var lastTickNanos = 0L
+        private var lastPowerCheck = 0L
+        private var powerAllowed = true
+
+        // 所有粒子共用一个帧回调与一次电源检查：避免每个效果各自注册回调、各自 binder 查省电模式。
+        private val frameDriver = object : Choreographer.FrameCallback {
+            override fun doFrame(frameTimeNanos: Long) {
+                if (effects.isEmpty()) { driverOn = false;return }
+                val now = SystemClock.uptimeMillis()
+                if (now-lastPowerCheck >= 200L) {
+                    lastPowerCheck = now
+                    val power = effects.values.first().host.getSystemService(PowerManager::class.java)
+                    powerAllowed = power?.isInteractive == true && !power.isPowerSaveMode && ValueAnimator.areAnimatorsEnabled()
+                }
+                if (!powerAllowed) {
+                    logThrottled("particle-dust-stop", "效果终止：熄屏/省电/动画关闭 effects=${effects.size}")
+                    effects.values.toList().forEach { it.stop() }
+                    driverOn = false
+                    return
+                }
+                // 并发多时降到 24fps，单卡保持原 33fps
+                val gapNs = if (effects.size >= 4) 41_666_667L else 30_000_000L
+                if (frameTimeNanos-lastTickNanos >= gapNs) {
+                    lastTickNanos = frameTimeNanos
+                    effects.values.toList().forEach {
+                        val alive = try { it.tick(now) } catch (error: Throwable) {
+                            logThrottled("particle-dust-error", "帧推进异常，结束该效果：${error.javaClass.simpleName}")
+                            false
+                        }
+                        if (!alive) runCatching { it.stop() }
+                    }
+                }
+                if (effects.isEmpty()) driverOn = false else Choreographer.getInstance().postFrameCallback(this)
+            }
+        }
+
+        private fun driveFrames() {
+            if (driverOn) return
+            driverOn = true;lastTickNanos = 0L
+            Choreographer.getInstance().postFrameCallback(frameDriver)
+        }
         private val shadeCloses = WeakHashMap<View, ShadeClose>()
         private var replayingClose=false
         private var installed = false
@@ -461,6 +503,7 @@ object ParticleDissolveHook {
             }
             effects[view] = dust
             dust.start()
+            driveFrames()
             if (c.hiddenAlpha == null) c.hiddenAlpha = view.alpha
             view.alpha = 0f
             report("handoff","已从滑动位置接管：x=${c.releaseX.toInt()}；原生删除回调继续运行")
@@ -485,85 +528,112 @@ object ParticleDissolveHook {
 
         /** Pure GPU render-to-texture. No getPixels, software Canvas, CPU scaling or blur. */
         private fun snapshot(c: Capture): Bitmap {
-            val scale = minOf(1f, 768f/c.width, 384f/c.height)
+            val scale = minOf(1f, 512f/c.width, 256f/c.height)
             val w = (c.width*scale).toInt().coerceAtLeast(1);val h = (c.height*scale).toInt().coerceAtLeast(1)
-            val reader = ImageReader.newInstance(w,h,PixelFormat.RGBA_8888,1,
-                HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE or HardwareBuffer.USAGE_GPU_COLOR_OUTPUT)
-            val renderer = HardwareRenderer()
-            val node = RenderNode("LiquidGlass particle snapshot")
+            val surface = SnapshotSurface
             try {
-                renderer.isOpaque = false;renderer.setSurface(reader.surface);renderer.setContentRoot(node)
+                val node = surface.acquire(w,h)
                 node.setPosition(0,0,w,h)
                 val canvas = node.beginRecording(w,h)
                 try { canvas.drawColor(Color.TRANSPARENT,BlendMode.CLEAR);canvas.scale(scale,scale);canvas.drawRenderNode(c.node) }
                 finally { node.endRecording() }
-                val status = renderer.createRenderRequest().setWaitForPresent(true).syncAndDraw()
+                val status = surface.draw()
                 check(status and (HardwareRenderer.SYNC_LOST_SURFACE_REWARD_IF_FOUND or
                     HardwareRenderer.SYNC_CONTEXT_IS_STOPPED or HardwareRenderer.SYNC_FRAME_DROPPED) == 0)
-                val image = reader.acquireNextImage() ?: error("Particle image unavailable")
+                val image = surface.acquireNextImage() ?: error("Particle image unavailable")
                 try {
                     val buffer = image.hardwareBuffer ?: error("Particle buffer unavailable")
                     try { return Bitmap.wrapHardwareBuffer(buffer,ColorSpace.get(ColorSpace.Named.SRGB))
                         ?: error("Particle bitmap unavailable") }
                     finally { buffer.close() }
                 } finally { image.close() }
-            } finally { renderer.destroy();reader.close();node.discardDisplayList() }
+            } catch (error: Throwable) {
+                surface.invalidate()
+                throw error
+            }
+        }
+
+        /** 复用 GPU 渲染器与输出面：同尺寸批次（清空多条）不再逐张新建 GL 上下文。 */
+        private object SnapshotSurface {
+            private var width = -1
+            private var height = -1
+            private var reader: ImageReader? = null
+            private var renderer: HardwareRenderer? = null
+            private var node: RenderNode? = null
+
+            fun acquire(w: Int, h: Int): RenderNode {
+                if (reader == null || width != w || height != h) rebuild(w,h)
+                return node!!
+            }
+            private fun rebuild(w: Int, h: Int) {
+                release()
+                val r = ImageReader.newInstance(w,h,PixelFormat.RGBA_8888,1,
+                    HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE or HardwareBuffer.USAGE_GPU_COLOR_OUTPUT)
+                val n = RenderNode("LiquidGlass particle snapshot")
+                val hr = HardwareRenderer()
+                hr.isOpaque = false;hr.setSurface(r.surface);hr.setContentRoot(n)
+                width = w;height = h;reader = r;node = n;renderer = hr
+            }
+            fun draw(): Int = renderer!!.createRenderRequest().setWaitForPresent(true).syncAndDraw()
+            fun acquireNextImage() = reader?.acquireNextImage()
+            fun invalidate() = release()
+            private fun release() {
+                runCatching { renderer?.destroy() }
+                runCatching { reader?.close() }
+                runCatching { node?.discardDisplayList() }
+                renderer = null;reader = null;node = null;width = -1;height = -1
+            }
         }
 
         internal class Dust(private val root: View, bitmap: Bitmap, x: Float, y: Float,
             width: Int, height: Int, density: Float, private val speed: Int, direction:Float=1f,
             private val initialProgress:Float=0f,private val ended: () -> Unit)
-            : Drawable(), Choreographer.FrameCallback, View.OnAttachStateChangeListener {
+            : Drawable(), View.OnAttachStateChangeListener {
             private val shader = RuntimeShader(SHADER)
             private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.shader = this@Dust.shader }
             private val born = SystemClock.uptimeMillis()
             private val duration = durationMs(speed)
             private var stopped = false
-            private val frameClock = Choreographer.getInstance()
-            private val pad = minOf(width*.4f,180f*density)
-            private var lastDraw = 0L
-            private var lastPowerCheck = 0L
-            private var powerAllowed = true
+            // 粒子横向最多飘 0.53×宽（朝 uDirection 一侧）、纵向最多上飘 0.46×高，四边留白按真实位移分配。
+            private val leadPad = width*.55f
+            private val trailPad = width*.06f
+            private val topPad = height*.48f
+            private val bottomPad = height*.10f
+            private val leftPad = if(direction>=0f) trailPad else leadPad
+            private val rightPad = if(direction>=0f) leadPad else trailPad
+            val host: Context get() = root.context
             fun belongsTo(view:View)=root===view
             fun shadeHoldMs(now:Long)=if(stopped)0L else clearAllHoldMs(speed,now-born)
             init {
-                setBounds((x-pad).toInt(),(y-pad).toInt(),(x+width+pad).toInt(),(y+height+pad).toInt())
+                setBounds((x-leftPad).toInt(),(y-topPad).toInt(),(x+width+rightPad).toInt(),(y+height+bottomPad).toInt())
                 val source = BitmapShader(bitmap,Shader.TileMode.CLAMP,Shader.TileMode.CLAMP)
                 source.setFilterMode(BitmapShader.FILTER_MODE_LINEAR)
                 shader.setInputShader("uImage",source)
                 shader.setFloatUniform("uSize",width.toFloat(),height.toFloat())
                 // Child-shader sampling uses explicit coordinates; do not rely on localMatrix.
                 shader.setFloatUniform("uImageScale",bitmap.width.toFloat()/width,bitmap.height.toFloat()/height)
-                shader.setFloatUniform("uPad",pad)
+                shader.setFloatUniform("uPadOrigin",leftPad,topPad)
                 shader.setFloatUniform("uCell",(1.0f*density).coerceAtLeast(1.2f))
                 shader.setFloatUniform("uProgress",initialProgress)
                 shader.setFloatUniform("uDirection",direction)
             }
-            fun start() { root.overlay.add(this);root.addOnAttachStateChangeListener(this);frameClock.postFrameCallback(this) }
+            fun start() { root.overlay.add(this);root.addOnAttachStateChangeListener(this) }
             fun stop() {
                 if (stopped) return
-                stopped = true;frameClock.removeFrameCallback(this)
+                stopped = true
                 root.overlay.remove(this);root.removeOnAttachStateChangeListener(this);ended()
             }
-            override fun doFrame(time: Long) {
-                try {
-                    if (stopped) return
-                    val now = SystemClock.uptimeMillis()
-                    val elapsed = now-born
-                    if (now-lastPowerCheck >= 200L) {
-                        lastPowerCheck=now
-                        val power = root.context.getSystemService(PowerManager::class.java)
-                        powerAllowed=power?.isInteractive == true && !power.isPowerSaveMode && ValueAnimator.areAnimatorsEnabled()
-                    }
-                    if (elapsed >= duration || !root.isShown || root.windowVisibility != View.VISIBLE || !powerAllowed) {
-                        if (elapsed < duration) logThrottled("particle-dust-stop", "效果提前终止 elapsed=${elapsed}ms/${duration}ms shown=${root.isShown} vis=${root.windowVisibility} power=$powerAllowed")
-                        stop();return
-                    }
-                    if (time-lastDraw >= 30_000_000L) {
-                        lastDraw=time;shader.setFloatUniform("uProgress",initialProgress+(1f-initialProgress)*elapsed.toFloat()/duration);invalidateSelf()
-                    }
-                    frameClock.postFrameCallback(this)
-                } catch(error:Throwable) { stop();safe { throw error } }
+            /** 由共享帧驱动推进一帧；返回 false 表示本效果结束。 */
+            fun tick(now: Long): Boolean {
+                if (stopped) return false
+                val elapsed = now-born
+                if (elapsed >= duration || !root.isShown || root.windowVisibility != View.VISIBLE) {
+                    if (elapsed < duration) logThrottled("particle-dust-stop", "效果提前终止 elapsed=${elapsed}ms/${duration}ms shown=${root.isShown} vis=${root.windowVisibility}")
+                    return false
+                }
+                shader.setFloatUniform("uProgress",initialProgress+(1f-initialProgress)*elapsed.toFloat()/duration)
+                invalidateSelf()
+                return true
             }
             override fun draw(canvas: Canvas) {
                 if (stopped) return
@@ -589,7 +659,7 @@ object ParticleDissolveHook {
             uniform float2 uImageScale;
             uniform float uProgress;
             uniform float uCell;
-            uniform float uPad;
+            uniform float2 uPadOrigin;
             uniform float uDirection;
             float hash(float2 p) { return fract(sin(dot(p,float2(127.1,311.7)))*43758.5453); }
             float2 flow(float2 p, float t) {
@@ -600,7 +670,7 @@ object ParticleDissolveHook {
             half4 main(float2 pos) {
                 float t=clamp(uProgress,0.0,1.0);
                 if(t>=0.999)return half4(0.0);
-                float2 p=pos-uPad;
+                float2 p=pos-uPadOrigin;
                 float2 q=p;
                 for(int i=0;i<3;i++)q=p-flow(q,t);
                 float2 id=floor(q/uCell);
@@ -612,8 +682,11 @@ object ParticleDissolveHook {
                 float radius=0.10+0.15*hash(id+71.0);
                 float dotMask=1.0-smoothstep(radius-0.10,radius+0.10,length(grain));
                 float fade=1.0-smoothstep(0.36+0.28*rnd,0.78+0.20*rnd,t);
-                float inside=(q.x>=0.0 && q.y>=0.0 && q.x<uSize.x && q.y<uSize.y)?1.0:0.0;
-                half4 motes=uImage.eval((id+centre)*uCell*uImageScale)*half(dotMask*dust*fade*inside);
+                float2 samplePt=(id+centre)*uCell;
+                half4 motes=half4(0.0);
+                if(samplePt.x>=0.0 && samplePt.y>=0.0 && samplePt.x<uSize.x && samplePt.y<uSize.y) {
+                    motes=uImage.eval(samplePt*uImageScale)*half(dotMask*dust*fade);
+                }
                 half4 solid=half4(0.0);
                 if(p.x>=0.0 && p.y>=0.0 && p.x<uSize.x && p.y<uSize.y) {
                     float localWave=0.24*(1.0-p.y/uSize.y)+0.10*hash(floor(p/uCell));

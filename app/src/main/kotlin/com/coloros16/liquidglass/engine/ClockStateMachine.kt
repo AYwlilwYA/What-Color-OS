@@ -120,6 +120,26 @@ class ClockStateMachine(
         pose.rotationDeg = lerp(from.rotationDeg, to.rotationDeg, e)
     }
 
+    /** 整轨直控：u=0 息屏 / 0.5 锁屏 / 1 桌面，不走缓动，拖动时与手指 1:1。 */
+    fun onTimeline(u: Float) {
+        transitionEdge = null
+        target = null
+        val q = u.coerceIn(0f, 1f)
+        if (q <= 0.5f) {
+            blend(anchorOf(SceneState.AOD), anchorOf(SceneState.LOCK), q / 0.5f)
+        } else {
+            blend(anchorOf(SceneState.LOCK), anchorOf(SceneState.HOME), (q - 0.5f) / 0.5f)
+        }
+    }
+
+    private fun blend(from: ClockAnchor, to: ClockAnchor, f: Float) {
+        pose.centerX = lerp(from.centerX, to.centerX, f)
+        pose.centerY = lerp(from.centerY, to.centerY, f)
+        pose.scale = lerp(from.scale, to.scale, f)
+        pose.alpha = lerp(from.alpha, to.alpha, f)
+        pose.rotationDeg = lerp(from.rotationDeg, to.rotationDeg, f)
+    }
+
     /** 转场结束：若当前态与进度终点不一致，补间收尾到当前态锚点。 */
     fun endTransition(nowMs: Long, animate: Boolean = true) {
         transitionEdge = null

@@ -7,6 +7,15 @@ object SceneTimeline {
     const val LOCK = 0.5f
     const val HOME = 1f
 
+    /** 整轨取样：越过 0.5 即切到下一段，拖动可一路从息屏擦到桌面。 */
+    fun edgeAt(p: Float): TransitionEdge =
+        if (p.coerceIn(0f, 1f) < LOCK) TransitionEdge.AOD_TO_LOCK else TransitionEdge.LOCK_TO_HOME
+
+    fun localT(p: Float): Float {
+        val q = p.coerceIn(0f, 1f)
+        return if (q <= LOCK) q / LOCK else (q - LOCK) / (1f - LOCK)
+    }
+
     fun anchor(state: SceneState): Float = when (state) {
         SceneState.AOD -> AOD
         SceneState.LOCK -> LOCK

@@ -103,6 +103,7 @@ class TransitionEvaluator(
         dstCapabilities: StyleCapabilities,
         out: TransitionParams,
         sceneOut: SceneSample? = null,
+        direct: Boolean = false,
     ) {
         out.reset()
         if (edge.from == edge.to) return
@@ -113,9 +114,9 @@ class TransitionEvaluator(
         out.t = progress
 
         val profile = profileOf(edge)
-        var applied = applyContent(profile.content, progress, screen, srcCapabilities, dstCapabilities, out)
-        applied = applyMask(profile.mask, progress, screen, srcCapabilities, dstCapabilities, out) || applied
-        applied = applyScene(profile.scene, progress, srcCapabilities, dstCapabilities, out, sceneOut) || applied
+        var applied = applyContent(profile.content, progress, screen, srcCapabilities, dstCapabilities, out, direct)
+        applied = applyMask(profile.mask, progress, screen, srcCapabilities, dstCapabilities, out, direct) || applied
+        applied = applyScene(profile.scene, progress, srcCapabilities, dstCapabilities, out, sceneOut, direct) || applied
 
         if (!applied) hardCut(progress, out)
     }
@@ -127,9 +128,10 @@ class TransitionEvaluator(
         srcCapabilities: StyleCapabilities,
         dstCapabilities: StyleCapabilities,
         out: TransitionParams,
+        direct: Boolean = false,
     ): Boolean {
         if (!config.enabled || !srcCapabilities.crossfade || !dstCapabilities.crossfade) return false
-        val e = config.easing.map(t)
+        val e = if (direct) t else config.easing.map(t)
         out.srcAlpha = 1f - e
         out.dstAlpha = e
         val slideX: Float
@@ -155,9 +157,10 @@ class TransitionEvaluator(
         srcCapabilities: StyleCapabilities,
         dstCapabilities: StyleCapabilities,
         out: TransitionParams,
+        direct: Boolean = false,
     ): Boolean {
         if (!config.enabled || !srcCapabilities.mask || !dstCapabilities.mask) return false
-        val e = config.easing.map(t)
+        val e = if (direct) t else config.easing.map(t)
         val cx = config.centerXFraction.coerceIn(0f, 1f) * screen.widthPx
         val cy = config.centerYFraction.coerceIn(0f, 1f) * screen.heightPx
         val endRadius = screen.maxCornerDistance(cx, cy) * config.endRadiusScale
@@ -188,11 +191,12 @@ class TransitionEvaluator(
         dstCapabilities: StyleCapabilities,
         out: TransitionParams,
         sceneOut: SceneSample?,
+        direct: Boolean = false,
     ): Boolean {
         if (!config.enabled || !srcCapabilities.sceneContinuous || !dstCapabilities.sceneContinuous) return false
         val contract = config.contract ?: return false
         val sample = sceneOut ?: return false
-        sample.sample(contract, config.easing.map(t))
+        sample.sample(contract, if (direct) t else config.easing.map(t))
         out.cameraX = sample.cameraX
         out.cameraY = sample.cameraY
         out.cameraScale = sample.cameraScale

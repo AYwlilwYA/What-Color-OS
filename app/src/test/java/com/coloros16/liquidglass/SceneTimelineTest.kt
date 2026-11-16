@@ -76,6 +76,29 @@ class SceneTimelineTest {
     }
 
     @Test
+    fun timelineEdgeSwitchesAtLockAnchor() {
+        assertEquals(TransitionEdge.AOD_TO_LOCK, SceneTimeline.edgeAt(0f))
+        assertEquals(TransitionEdge.AOD_TO_LOCK, SceneTimeline.edgeAt(0.49f))
+        assertEquals(TransitionEdge.LOCK_TO_HOME, SceneTimeline.edgeAt(0.5f))
+        assertEquals(TransitionEdge.LOCK_TO_HOME, SceneTimeline.edgeAt(1f))
+    }
+
+    @Test
+    fun timelineLocalTMapsBothSegments() {
+        assertEquals(0f, SceneTimeline.localT(0f), 1e-6f)
+        assertEquals(0.5f, SceneTimeline.localT(0.25f), 1e-6f)
+        assertEquals(1f, SceneTimeline.localT(0.5f), 1e-6f)
+        assertEquals(0.5f, SceneTimeline.localT(0.75f), 1e-6f)
+        assertEquals(1f, SceneTimeline.localT(1f), 1e-6f)
+    }
+
+    @Test
+    fun timelineLocalTIsClamped() {
+        assertEquals(0f, SceneTimeline.localT(-1f), 1e-6f)
+        assertEquals(1f, SceneTimeline.localT(2f), 1e-6f)
+    }
+
+    @Test
     fun progressIsClamped() {
         assertEquals(0f, u(TransitionEdge.AOD_TO_LOCK, -1f), 1e-6f)
         assertEquals(0.5f, u(TransitionEdge.AOD_TO_LOCK, 2f), 1e-6f)

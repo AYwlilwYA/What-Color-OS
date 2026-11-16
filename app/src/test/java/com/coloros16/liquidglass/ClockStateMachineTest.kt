@@ -15,6 +15,22 @@ class ClockStateMachineTest {
     private fun machine(): ClockStateMachine = ClockStateMachine(easing = Easing.LINEAR)
 
     @Test
+    fun timelineScrubInterpolatesBothSegmentsLinearly() {
+        val m = machine()
+        m.setAnchor(SceneState.AOD, ClockAnchor(centerX = 0f, centerY = 0f, scale = 1f), 0L, follow = false)
+        m.setAnchor(SceneState.LOCK, ClockAnchor(centerX = 0.5f, centerY = 0.5f, scale = 0.5f), 0L, follow = false)
+        m.setAnchor(SceneState.HOME, ClockAnchor(centerX = 1f, centerY = 1f, scale = 0.25f), 0L, follow = false)
+
+        m.onTimeline(0.25f)
+        assertEquals(0.25f, m.pose.centerX, 0.001f)
+        assertEquals(0.75f, m.pose.scale, 0.001f)
+
+        m.onTimeline(0.75f)
+        assertEquals(0.75f, m.pose.centerX, 0.001f)
+        assertEquals(0.375f, m.pose.scale, 0.001f)
+    }
+
+    @Test
     fun stateChangeTweensToTargetAnchor() {
         val m = machine()
         m.setAnchor(SceneState.AOD, ClockAnchor(centerX = 0.5f, centerY = 0.2f), 0L, follow = false)

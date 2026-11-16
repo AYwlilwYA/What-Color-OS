@@ -30,17 +30,17 @@ object AodSceneCatalog {
 
     private val lockInfo = ElementTrack(
         id = "lockInfo",
-        alpha = track(0f to 0f, 0.30f to 0f, 0.42f to 1f, 0.60f to 1f, 0.72f to 0f, 1f to 0f),
+        alpha = track(0f to 0f, 0.30f to 0f, 0.42f to 1f, 0.62f to 1f, 0.70f to 0f, 1f to 0f),
     )
 
     private val homeIcons = ElementTrack(
         id = "homeIcons",
-        alpha = track(0f to 0f, 0.56f to 0f, 0.86f to 1f, 1f to 1f),
+        alpha = track(0f to 0f, 0.64f to 0f, 0.84f to 1f, 1f to 1f),
     )
 
     private val homeDock = ElementTrack(
         id = "homeDock",
-        alpha = track(0f to 0f, 0.66f to 0f, 0.94f to 1f, 1f to 1f),
+        alpha = track(0f to 0f, 0.78f to 0f, 0.95f to 1f, 1f to 1f),
     )
 
     private val contract = SceneContract(

@@ -23,6 +23,7 @@ import com.coloros16.liquidglass.R
 import com.coloros16.liquidglass.config.Prefs
 import com.coloros16.liquidglass.engine.ClockSource
 import com.coloros16.liquidglass.engine.SceneState
+import com.coloros16.liquidglass.engine.SceneTimeline
 import com.coloros16.liquidglass.engine.TransitionClock
 import com.coloros16.liquidglass.engine.TransitionEdge
 import com.coloros16.liquidglass.engine.from
@@ -85,6 +86,35 @@ class AodDisplayController(
     private var playing = false
     private var scrub = false
     private var frameScheduled = false
+    private var scrubP = 0f
+    private var settling = false
+    private var settleFrom = 0f
+    private var settleTo = 0f
+    private var settleStartMs = 0L
+    private var settleScheduled = false
+
+    private val settleCallback = object : Choreographer.FrameCallback {
+        override fun doFrame(frameTimeNanos: Long) {
+            settleScheduled = false
+            if (!settling || !preview.isAttachedToWindow) {
+                settling = false
+                return
+            }
+            val k = ((frameTimeNanos / 1_000_000L - settleStartMs) / 180f).coerceIn(0f, 1f)
+            val eased = 1f - (1f - k) * (1f - k)
+            val p = settleFrom + (settleTo - settleFrom) * eased
+            scrubP = p
+            preview.renderScrub(p)
+            bar.setScrubT(p)
+            if (k >= 1f) {
+                settling = false
+                finishScrub(settleTo)
+            } else {
+                settleScheduled = true
+                Choreographer.getInstance().postFrameCallback(this)
+            }
+        }
+    }
 
     private val frameCallback = object : Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) {
@@ -153,6 +183,11 @@ class AodDisplayController(
         root.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
             override fun onViewAttachedToWindow(v: View) = Unit
             override fun onViewDetachedFromWindow(v: View) {
+                settling = false
+                if (settleScheduled) {
+                    Choreographer.getInstance().removeFrameCallback(settleCallback)
+                    settleScheduled = false
+                }
                 if (playing) {
                     playing = false
                     clock.pause()
@@ -186,8 +221,8 @@ class AodDisplayController(
     }
 
     override fun onTap(index: Int) {
-        if (playing || scrub) {
-            Lg.i(TAG, "tap ignored playing=$playing scrub=$scrub")
+        if (playing || scrub || settling) {
+            Lg.i(TAG, "tap ignored playing=$playing scrub=$scrub settling=$settling")
             return
         }
         val target = SceneState.values().getOrNull(index)
@@ -216,35 +251,70 @@ class AodDisplayController(
             return
         }
         scrub = true
-        val edge = lastEdge
-        val start = if (current == edge.to) 1f else 0f
-        clock.seek(edge, start)
-        bar.setScrub(true, start)
+        scrubP = SceneTimeline.anchor(current)
+        bar.setScrub(true, scrubP)
         badge.visibility = View.VISIBLE
-        badge.text = edgeText(edge, start)
+        badge.text = scrubLabel(scrubP)
         hint.text = context.getString(R.string.settings_aod_scrub_hint)
-        Lg.i(TAG, "scrub start edge=$edge t=$start")
+        Lg.i(TAG, "scrub start p=$scrubP")
     }
 
-    override fun onScrubMove(t: Float) {
-        if (!scrub) return
-        clock.seek(lastEdge, t)
-        badge.text = edgeText(lastEdge, t)
+    override fun onScrubMove(p: Float) {
+        if (!scrub || settling) return
+        scrubP = p.coerceIn(0f, 1f)
+        preview.renderScrub(scrubP)
+        bar.setScrubT(scrubP)
+        bar.setActive(indexOf(nearestState(scrubP)))
+        badge.text = scrubLabel(scrubP)
     }
 
-    override fun onScrubEnd(t: Float) {
+    override fun onScrubEnd(p: Float) {
         if (!scrub) return
+        val target = nearestState(p)
+        val targetP = SceneTimeline.anchor(target)
+        if (kotlin.math.abs(targetP - p) < 0.002f) {
+            scrub = false
+            current = target
+            finishScrub(targetP)
+            return
+        }
+        settling = true
+        settleFrom = p
+        settleTo = targetP
+        settleStartMs = System.nanoTime() / 1_000_000L
+        if (!settleScheduled) {
+            settleScheduled = true
+            Choreographer.getInstance().postFrameCallback(settleCallback)
+        }
+        Lg.i(TAG, "scrub settle p=$p target=$target")
+    }
+
+    /** 收尾：落位到最近态；拖动结束与补间收尾共用。 */
+    private fun finishScrub(targetP: Float) {
+        val target = nearestState(targetP)
         scrub = false
-        val edge = lastEdge
-        val settleTo = t >= 0.5f
-        current = if (settleTo) edge.to else edge.from
-        clock.seek(edge, if (settleTo) 1f else 0f)
+        settling = false
+        current = target
+        preview.render(target, null, 0f)
         bar.setScrub(false, 0f)
-        bar.setActive(indexOf(current))
+        bar.setActive(indexOf(target))
         badge.visibility = View.GONE
         hint.text = defaultHint
-        preview.render(current, null, 0f)
-        Lg.i(TAG, "scrub end t=$t state=$current")
+        Lg.i(TAG, "scrub end p=$targetP state=$target")
+    }
+
+    /** 整轨最近锚点：0.25 / 0.75 为分界，松手吸附。 */
+    private fun nearestState(p: Float): SceneState = when {
+        p < 0.25f -> SceneState.AOD
+        p < 0.75f -> SceneState.LOCK
+        else -> SceneState.HOME
+    }
+
+    /** 徽标文案：整轨位置 → 当前段 + 段内百分比。 */
+    private fun scrubLabel(p: Float): String {
+        val edge = SceneTimeline.edgeAt(p)
+        val t = if (p >= 1f) 1f else SceneTimeline.localT(p)
+        return edgeText(edge, t)
     }
 
     private fun scheduleFrame() {

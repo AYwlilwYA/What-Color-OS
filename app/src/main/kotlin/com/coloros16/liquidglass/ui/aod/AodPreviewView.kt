@@ -61,6 +61,7 @@ class AodPreviewView @JvmOverloads constructor(
     private var edge: TransitionEdge? = null
     private var t: Float = 0f
     private var sceneSpec: AodSceneSpec? = null
+    private var scrubP = -1f
     private val clockMachine = ClockStateMachine(easing = Easing.STANDARD)
     private val sceneSample = SceneSample()
 
@@ -74,10 +75,15 @@ class AodPreviewView @JvmOverloads constructor(
     private val dst = RectF()
     private val src = Rect()
     private var wallpaper: Bitmap? = null
+    private var sceneSky: Bitmap? = null
+    private var sceneSkyLoading = false
     private var uiScale = 1f
     private val path = Path()
 
     private val clockThin = Typeface.create("sans-serif-thin", Typeface.NORMAL)
+    private val vendorClock: Typeface? by lazy {
+        runCatching { Typeface.createFromAsset(context.assets, "aod/clock_thin.ttf") }.getOrNull()
+    }
     private val clockLight = Typeface.create("sans-serif-light", Typeface.NORMAL)
     private val sans = Typeface.create("sans-serif", Typeface.NORMAL)
     private val sansMedium = Typeface.create("sans-serif-medium", Typeface.NORMAL)
@@ -227,6 +233,7 @@ class AodPreviewView @JvmOverloads constructor(
         this.scene = scene
         this.edge = edge
         this.t = t.coerceIn(0f, 1f)
+        this.scrubP = -1f
         if (sceneSpec != null) {
             if (edge == null) {
                 clockMachine.snapTo(scene, 0L)
@@ -234,6 +241,13 @@ class AodPreviewView @JvmOverloads constructor(
                 clockMachine.onTransition(edge, this.t)
             }
         }
+        invalidate()
+    }
+
+    /** 整轨拖动：p=0 息屏 / 0.5 锁屏 / 1 桌面，画面与手指 1:1，不走缓动。 */
+    fun renderScrub(p: Float) {
+        scrubP = p.coerceIn(0f, 1f)
+        if (sceneSpec != null) clockMachine.onTimeline(scrubP)
         invalidate()
     }
 
@@ -253,13 +267,15 @@ class AodPreviewView @JvmOverloads constructor(
             return
         }
 
-        val e = edge
+        val rawEdge = if (scrubP >= 0f) SceneTimeline.edgeAt(scrubP) else edge
+        val rawT = if (scrubP >= 0f) SceneTimeline.localT(scrubP) else t
+        val e = rawEdge
         if (e == null) {
             drawState(canvas, scene, w, h, 1f)
         } else {
             val evalEdge = if (e == TransitionEdge.LOCK_TO_AOD) TransitionEdge.AOD_TO_LOCK else e
-            val evalT = if (e == TransitionEdge.LOCK_TO_AOD) 1f - t else t
-            evaluator.evaluate(evalEdge, evalT, screen, capabilities, capabilities, params)
+            val evalT = if (e == TransitionEdge.LOCK_TO_AOD) 1f - rawT else rawT
+            evaluator.evaluate(evalEdge, evalT, screen, capabilities, capabilities, params, null, scrubP >= 0f)
 
             if (params.srcAlpha > 0.002f) {
                 val layer = canvas.saveLayerAlpha(0f, 0f, w, h, (params.srcAlpha * 255f).toInt())
@@ -442,23 +458,59 @@ class AodPreviewView @JvmOverloads constructor(
     // ---------------------------------------------------------------- 连续场景
 
     private fun drawSceneWorld(canvas: Canvas, w: Float, h: Float, spec: AodSceneSpec) {
-        val u = SceneTimeline.uOf(edge, t, scene)
+        val u = if (scrubP >= 0f) scrubP else SceneTimeline.uOf(edge, t, scene)
         sceneSample.sample(spec.contract, u)
-        drawSceneSky(canvas, w, h, u)
-        drawMilkyWay(canvas, w, h)
-        drawSceneStars(canvas, w, h)
-        drawClouds(canvas, w, h, 0.85f, 0)
+        val sky = sceneSky
+        if (sky != null) {
+            drawBitmapCover(
+                canvas, sky, w, h,
+                1f + (sceneSample.cameraScale - 1f) * 0.8f,
+                (0.5f - sceneSample.cameraX) * w * 0.16f,
+                (0.5f - sceneSample.cameraY) * h * 0.10f,
+            )
+            val dim = 0.62f - 0.34f * u
+            fill.style = Paint.Style.FILL
+            fill.shader = null
+            fill.color = alphaColor(0xFF02040A.toInt(), dim)
+            canvas.drawRect(0f, 0f, w, h, fill)
+        } else {
+            drawSceneSky(canvas, w, h, u)
+            drawMilkyWay(canvas, w, h)
+            drawSceneStars(canvas, w, h)
+            drawClouds(canvas, w, h, 0.85f, 0)
+        }
         val elements = sceneSample.elements
         elements.getOrNull(0)?.let { if (it.alpha > 0.002f) drawSceneMoon(canvas, w, h, it) }
         drawClouds(canvas, w, h, 0.45f, 1)
         drawMountains(canvas, w, h, u)
-        elements.getOrNull(1)?.let { if (it.alpha > 0.002f) drawLockOverlay(canvas, w, h, it.alpha) }
+        elements.getOrNull(1)?.let {
+            if (it.alpha > 0.002f) drawLockOverlay(canvas, w, h, it.alpha, lockShiftDp(u))
+        }
         elements.getOrNull(2)?.let { if (it.alpha > 0.002f) drawSceneHomeIcons(canvas, w, h, it.alpha) }
         elements.getOrNull(3)?.let { if (it.alpha > 0.002f) drawSceneHomeDock(canvas, w, h, it.alpha) }
         drawSceneClock(canvas, w, h, u)
         val chrome = maxOf(elements.getOrNull(1)?.alpha ?: 0f, elements.getOrNull(2)?.alpha ?: 0f)
         if (chrome > 0.002f) drawGestureBar(canvas, w, h, chrome * 0.7f)
         drawVignette(canvas, w, h)
+    }
+
+    private fun drawBitmapCover(
+        canvas: Canvas,
+        bitmap: Bitmap,
+        w: Float,
+        h: Float,
+        zoom: Float,
+        dx: Float,
+        dy: Float,
+    ) {
+        val bw = bitmap.width.toFloat()
+        val bh = bitmap.height.toFloat()
+        val scale = maxOf(w / bw, h / bh) * zoom
+        val dw = bw * scale
+        val dh = bh * scale
+        src.set(0, 0, bitmap.width, bitmap.height)
+        dst.set((w - dw) / 2f + dx, (h - dh) / 2f + dy, (w + dw) / 2f + dx, (h + dh) / 2f + dy)
+        canvas.drawBitmap(bitmap, src, dst, fill)
     }
 
     private fun drawSceneSky(canvas: Canvas, w: Float, h: Float, u: Float) {
@@ -627,9 +679,10 @@ class AodPreviewView @JvmOverloads constructor(
         val save = canvas.save()
         canvas.clipPath(path)
 
-        radial(canvas, cx - radius * 0.28f, cy - radius * 0.06f, radius * 0.58f, 0x26272319, 0x00272319)
-        radial(canvas, cx + radius * 0.22f, cy + radius * 0.32f, radius * 0.50f, 0x22272319, 0x00272319)
-        radial(canvas, cx + radius * 0.32f, cy - radius * 0.24f, radius * 0.42f, 0x1A272319, 0x00272319)
+        radial(canvas, cx - radius * 0.28f, cy - radius * 0.06f, radius * 0.58f, 0x3D2A2519, 0x00272319)
+        radial(canvas, cx + radius * 0.22f, cy + radius * 0.32f, radius * 0.50f, 0x382A2519, 0x00272319)
+        radial(canvas, cx + radius * 0.32f, cy - radius * 0.24f, radius * 0.42f, 0x2B2A2519, 0x00272319)
+        radial(canvas, cx - radius * 0.46f, cy + radius * 0.34f, radius * 0.46f, 0x33262118, 0x00262118)
 
         var i = 0
         while (i < moonMarks.size) {
@@ -641,8 +694,8 @@ class AodPreviewView @JvmOverloads constructor(
             fill.shader = RadialGradient(
                 mx, my, mr * 1.55f,
                 intArrayOf(
-                    Color.argb((ma * 255f).toInt(), 74, 66, 54),
-                    Color.argb((ma * 70f).toInt(), 120, 110, 94),
+                    Color.argb((ma * 255f).toInt(), 68, 60, 49),
+                    Color.argb((ma * 70f).toInt(), 124, 113, 96),
                     0x00786E60,
                 ),
                 floatArrayOf(0f, 0.48f, 1f), Shader.TileMode.CLAMP,
@@ -655,9 +708,17 @@ class AodPreviewView @JvmOverloads constructor(
         radial(canvas, cx - radius * 0.44f, cy - radius * 0.50f, radius * 0.86f, 0x24FFFFFF, 0x00FFFFFF)
 
         fill.shader = LinearGradient(
-            cx - radius, cy - radius, cx + radius, cy + radius,
-            intArrayOf(0x00000000, 0x1F000000, 0x99000000.toInt()),
-            floatArrayOf(0f, 0.48f, 0.94f), Shader.TileMode.CLAMP,
+            cx + radius * 0.95f, cy - radius * 0.75f, cx - radius * 0.85f, cy + radius * 0.95f,
+            intArrayOf(0x00000000, 0x12000000, 0x8F05070C.toInt()),
+            floatArrayOf(0f, 0.42f, 1f), Shader.TileMode.CLAMP,
+        )
+        canvas.drawCircle(cx, cy, radius, fill)
+        fill.shader = null
+
+        fill.shader = RadialGradient(
+            cx + radius * 0.52f, cy + radius * 0.42f, radius * 1.18f,
+            intArrayOf(0xE60A0E16.toInt(), 0xC80A0E16.toInt(), 0x000A0E16),
+            floatArrayOf(0f, 0.62f, 1f), Shader.TileMode.CLAMP,
         )
         canvas.drawCircle(cx, cy, radius, fill)
         fill.shader = null
@@ -693,6 +754,8 @@ class AodPreviewView @JvmOverloads constructor(
 
     private fun drawSceneHomeIcons(canvas: Canvas, w: Float, h: Float, alpha: Float) {
         val layer = canvas.saveLayerAlpha(0f, 0f, w, h, (alpha * 255f).toInt())
+        val scale = 0.97f + 0.03f * alpha.coerceIn(0f, 1f)
+        canvas.scale(scale, scale, w / 2f, h * 0.52f)
         val dockH = h * 0.098f
         val dockTop = h * 0.686f
         drawHomeWeather(canvas, w, h)
@@ -716,7 +779,19 @@ class AodPreviewView @JvmOverloads constructor(
         val cx = pose.centerX * w
         val cy = pose.centerY * h
         val timeColor = mix3(0xFFC9D4E2.toInt(), 0xFFF0F4F8.toInt(), 0xFFF5F8FB.toInt(), u)
+        val layer = if (pose.alpha < 0.999f) {
+            canvas.saveLayerAlpha(0f, 0f, w, h, (pose.alpha.coerceIn(0f, 1f) * 255f).toInt())
+        } else {
+            -1
+        }
+        val rotated = if (pose.rotationDeg != 0f) {
+            canvas.save().also { canvas.rotate(pose.rotationDeg, cx, cy) }
+        } else {
+            -1
+        }
         drawClockBlock(canvas, cx, cy, base, timeColor, 0.62f)
+        if (rotated >= 0) canvas.restoreToCount(rotated)
+        if (layer >= 0) canvas.restoreToCount(layer)
     }
 
     // ---------------------------------------------------------------- 通用部件
@@ -729,13 +804,14 @@ class AodPreviewView @JvmOverloads constructor(
         timeColor: Int,
         dateAlpha: Float,
     ) {
-        text.typeface = clockThin
+        text.typeface = vendorClock ?: clockThin
         text.textSize = base
         text.letterSpacing = -0.018f
         text.textAlign = Paint.Align.CENTER
         text.color = timeColor
         text.alpha = 255
-        canvas.drawText(timeText, cx, cy + base * 0.34f, text)
+        val fm = text.fontMetrics
+        canvas.drawText(timeText, cx, cy - (fm.ascent + fm.descent) / 2f, text)
 
         text.typeface = sansMedium
         text.textSize = base * 0.132f
@@ -746,8 +822,17 @@ class AodPreviewView @JvmOverloads constructor(
         text.alpha = 255
     }
 
-    private fun drawLockOverlay(canvas: Canvas, w: Float, h: Float, alpha: Float) {
+    /** 锁屏信息进出场位移：淡入时从下方 12dp 上来，淡出时向上 24dp 让位桌面。 */
+    private fun lockShiftDp(u: Float): Float = when {
+        u < 0.30f -> dp(12f)
+        u < 0.42f -> dp(12f) * (1f - (u - 0.30f) / 0.12f)
+        u > 0.62f -> -dp(24f) * ((u - 0.62f) / 0.06f).coerceIn(0f, 1f)
+        else -> 0f
+    }
+
+    private fun drawLockOverlay(canvas: Canvas, w: Float, h: Float, alpha: Float, shift: Float = 0f) {
         val layer = canvas.saveLayerAlpha(0f, 0f, w, h, (alpha.coerceIn(0f, 1f) * 255f).toInt())
+        if (shift != 0f) canvas.translate(0f, shift)
 
         val weatherY = h * 0.375f
         val glyphR = dp(9f)
@@ -1109,7 +1194,12 @@ class AodPreviewView @JvmOverloads constructor(
 
     private fun refreshTime() {
         val now = LocalDateTime.now()
-        timeText = String.format("%02d:%02d", now.hour, now.minute)
+        timeText = if (android.text.format.DateFormat.is24HourFormat(context)) {
+            String.format("%02d:%02d", now.hour, now.minute)
+        } else {
+            val hour = now.hour % 12
+            String.format("%d:%02d", if (hour == 0) 12 else hour, now.minute)
+        }
         val weekday = when (now.dayOfWeek.value) {
             1 -> "周一"
             2 -> "周二"
@@ -1131,6 +1221,7 @@ class AodPreviewView @JvmOverloads constructor(
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         requestAppIcons()
+        requestSceneSky()
         refreshTime()
         scheduleMinuteTick()
     }
@@ -1138,6 +1229,22 @@ class AodPreviewView @JvmOverloads constructor(
     override fun onDetachedFromWindow() {
         removeCallbacks(minuteTick)
         super.onDetachedFromWindow()
+    }
+
+    /** 场景底图一次性后台解码，缺资源时回退程序化天空。 */
+    private fun requestSceneSky() {
+        if (sceneSky != null || sceneSkyLoading) return
+        sceneSkyLoading = true
+        Thread({
+            val bitmap = runCatching {
+                context.assets.open("aod/scene_sky.webp").use { android.graphics.BitmapFactory.decodeStream(it) }
+            }.getOrNull()
+            post {
+                sceneSky = bitmap
+                sceneSkyLoading = false
+                invalidate()
+            }
+        }, "aod-scene-sky").start()
     }
 
     /** 图标取系统原厂资源；一次性后台加载，不阻塞首帧。 */

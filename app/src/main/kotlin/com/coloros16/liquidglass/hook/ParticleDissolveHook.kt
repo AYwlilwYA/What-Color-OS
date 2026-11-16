@@ -39,7 +39,7 @@ import java.util.concurrent.TimeUnit
  * No CPU blur, pixel readback, per-particle View, repeating timer or replacement deletion callback.
  */
 object ParticleDissolveHook {
-    const val MAX_ACTIVE = 3
+    const val MAX_ACTIVE = 8
     fun handoffX(capturedX:Float,recordRowTranslation:Float,currentTranslation:Float):Float =
         if(currentTranslation.isFinite() && recordRowTranslation.isFinite())capturedX+currentTranslation-recordRowTranslation else capturedX
     fun handoffProgress(translation:Float,width:Int):Float =

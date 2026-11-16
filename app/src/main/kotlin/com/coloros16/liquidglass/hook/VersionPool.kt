@@ -199,8 +199,10 @@ object Profiles {
 /**
  * 版本池：宿主 versionCode 大版本分段 + 小版本点表查表。
  *
- * 匹配顺序：小版本精确命中 → 小版本 floor（≤ver 最近点，高于表取最大、低于表取最小）
+ * 匹配顺序：小版本精确命中 → **同大版本段内**小版本 floor（≤ver 最近点）
+ * → 该大版本段 profile（段内无更小点，如 16.0.3 低于 16.0.9）→ 全表 floor 兜底（段未登记时）
  * → 点表为空走大版本段 profile（段未中走段级默认，不许空档无主）。
+ * 大版本优先：绝不跨段取旧大版本的点（避免 16.0.3 被降到 15.99.13 判成 C15）。
  * 运行时补丁（架构探测）按宿主单独存，不覆盖静态命中来源。
  */
 object VersionPool {
@@ -306,6 +308,9 @@ object VersionPool {
         hasClockSeconds = false,
     )
 
+    /** 状态栏 versionCode 大版本除数（与 SystemUI 宿主池一致）。 */
+    private const val STATUSBAR_MAJOR_DIVISOR = 10_000L
+
     /** 状态栏小版本点表（差异才加点；未命中走最近点，与宿主池同一语义；升序）。 */
     private val STATUSBAR_POINTS: List<StatusBarMinorPoint> = listOf(
         StatusBarMinorPoint(159913L, STATUSBAR_V1),
@@ -321,7 +326,7 @@ object VersionPool {
         get() = STATUSBAR_POINTS
 
     /**
-     * 状态栏结构查询唯一入口：命中语义与 [query] 一致（精确 → 最近点 → 段默认），
+     * 状态栏结构查询唯一入口：命中语义与 [query] 一致（精确 → 同大版本段内最近点 → 全表兜底），
      * ver < 0（读取失败）取最小已知点并标 [MatchKind.VerUnknown]。
      * 运行时门禁真值以补丁优先（[notePatch] 写 "statusBarLayout"）。
      */
@@ -334,7 +339,12 @@ object VersionPool {
             if (exact != null) {
                 StatusBarDecision(MatchKind.Exact, exact.profile, patch)
             } else {
-                val floor = STATUSBAR_POINTS.lastOrNull { it.versionCode <= ver }
+                val major = (ver / STATUSBAR_MAJOR_DIVISOR).toInt()
+                val segFloor = STATUSBAR_POINTS.lastOrNull {
+                    (it.versionCode / STATUSBAR_MAJOR_DIVISOR).toInt() == major && it.versionCode <= ver
+                }
+                val floor = segFloor
+                    ?: STATUSBAR_POINTS.lastOrNull { it.versionCode <= ver }
                     ?: STATUSBAR_POINTS.first()
                 StatusBarDecision(MatchKind.Nearest, floor.profile, patch)
             }
@@ -412,12 +422,24 @@ object VersionPool {
         spec.minorPoints.find { it.versionCode == ver }?.let {
             return VDecision(major, it.versionCode, MatchKind.Exact, it.profile, patch)
         }
+        // 大版本段优先：先只在同段点内 floor，避免跨段取到旧大版本的点
+        var segFloor: MinorPoint? = null
+        for (p in spec.minorPoints) {
+            if ((p.versionCode / spec.majorDivisor).toInt() == major && p.versionCode <= ver) segFloor = p
+        }
+        segFloor?.let {
+            return VDecision(major, it.versionCode, MatchKind.Nearest, it.profile, patch)
+        }
+        // 段内没有更小点（如 16.0.3 低于 16.0.9）→ 用该大版本的段缺省档
+        spec.segmentProfiles[major]?.let {
+            return VDecision(major, 0L, MatchKind.Segment, it, patch)
+        }
+        // 段未登记（如 15.x 早期）→ 全表 floor 兜底
         if (spec.minorPoints.isNotEmpty()) {
             val floor = spec.minorPoints.lastOrNull { it.versionCode <= ver } ?: spec.minorPoints.first()
             return VDecision(major, floor.versionCode, MatchKind.Nearest, floor.profile, patch)
         }
-        val segment = spec.segmentProfiles[major] ?: spec.defaultProfile
-        return VDecision(major, 0L, MatchKind.Segment, segment, patch)
+        return VDecision(major, 0L, MatchKind.Segment, spec.defaultProfile, patch)
     }
 
     private fun snapshotPatches(pkg: String): Map<String, Any?> {

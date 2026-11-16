@@ -61,11 +61,30 @@ class VersionPoolTest {
     }
 
     @Test
-    fun floorGapUsesNearestKnownPoint() {
+    fun majorSegmentFirstBelowSegmentMinUsesSegmentProfile() {
         val d = VersionPool.query(launcherPkg, 170000000L)
+        assertEquals(MatchKind.Segment, d.match)
+        assertEquals(17, d.major)
+        assertEquals(0L, d.point)
+        assertSame(Profiles.LAUNCHER_17PLUS, d.profile)
+    }
+
+    @Test
+    fun systemui160003StaysInMajor16() {
+        val d = VersionPool.query(VersionPool.PKG_SYSTEMUI, 160003L)
+        assertEquals(16, d.major)
+        assertEquals(MatchKind.Segment, d.match)
+        assertSame(Profiles.SYSTEMUI_16, d.profile)
+        assertSame(PosteffectArch.LEGACY, d.profile.posteffectArch)
+    }
+
+    @Test
+    fun systemuiEarlyC15StillFallsBackToC15Point() {
+        val d = VersionPool.query(VersionPool.PKG_SYSTEMUI, 150000L)
+        assertEquals(15, d.major)
         assertEquals(MatchKind.Nearest, d.match)
-        assertEquals(160060011L, d.point)
-        assertSame(Profiles.LAUNCHER_PRE17, d.profile)
+        assertEquals(159913L, d.point)
+        assertSame(Profiles.SYSTEMUI_15, d.profile)
     }
 
     @Test

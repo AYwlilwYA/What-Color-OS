@@ -483,22 +483,25 @@ class AodPreviewView @JvmOverloads constructor(
             drawMilkyWay(canvas, w, h)
             drawSceneStars(canvas, w, h)
         }
-        fill.style = Paint.Style.FILL
-        fill.shader = null
-        fill.color = alphaColor(0xFF02040A.toInt(), layers.dim)
-        canvas.drawRect(0f, 0f, w, h, fill)
 
         if (realWallpaper == null) {
+            val world = canvas.save()
+            canvas.scale(layers.wallpaperScale, layers.wallpaperScale, w / 2f, h / 2f)
             drawClouds(canvas, w, h, 0.85f, 0)
             drawMountains(canvas, w, h, u)
-
             if (layers.aodAlpha > 0.002f) {
                 val layer = canvas.saveLayerAlpha(0f, 0f, w, h, (layers.aodAlpha * 255f).toInt())
                 sceneSample.elements.getOrNull(0)?.let { drawSceneMoon(canvas, w, h, it) }
                 canvas.restoreToCount(layer)
             }
             drawClouds(canvas, w, h, 0.45f, 1)
+            canvas.restoreToCount(world)
         }
+
+        fill.style = Paint.Style.FILL
+        fill.shader = null
+        fill.color = alphaColor(0xFF02040A.toInt(), layers.dim)
+        canvas.drawRect(0f, 0f, w, h, fill)
 
         if (layers.lockAlpha > 0.002f) {
             val layer = canvas.saveLayerAlpha(0f, 0f, w, h, (layers.lockAlpha * 255f).toInt())

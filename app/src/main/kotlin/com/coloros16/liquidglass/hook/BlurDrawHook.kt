@@ -2,6 +2,7 @@ package com.coloros16.liquidglass.hook
 
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Matrix
 import android.graphics.Color
 import android.graphics.Outline
 import android.graphics.Paint
@@ -12884,6 +12885,7 @@ object BlurDrawHook {
             logThrottled("c15-glass-empty-bounds-$id", Log.DEBUG) { "c15-glass: empty bounds id=$id bounds=$bounds" }
             return false
         }
+        ensurePreAgsCanvasRegion(drawable, canvas, bounds)
         val build = try {
             buildLiquidShader(drawable, bounds)
         } catch (t: Throwable) {
@@ -12919,6 +12921,59 @@ object BlurDrawHook {
             "c15-glass: draw ok id=$id bounds=$bounds view=${screenRegionMap[id]?.hostViewName}"
         }
         return true
+    }
+
+    /**
+     * C15 屏幕区域自登记：C16 的宿主类注册钩子（通知卡 / 磁贴 / 侧滑 …）在这一代大多不存在，
+     * `screenRegionMap` 因此恒 miss、玻璃不出。这里在绘制瞬间用 canvas 矩阵把 drawable 本地矩形
+     * 反推成绝对屏幕矩形，自建条目（宿主 View 不可得 → hostViewRef=null，build 侧走 reconcileRegion）。
+     * 每帧覆盖写：位置随面板下拉动画实时跟手，不依赖创建期的一次性注册。
+     */
+    private fun ensurePreAgsCanvasRegion(drawable: Any, canvas: Canvas, bounds: Rect) {
+        val id = System.identityHashCode(drawable)
+        val matrix = Matrix()
+        try {
+            canvas.getMatrix(matrix)
+        } catch (t: Throwable) {
+            Lg.e(TAG, "c15-map: canvas matrix failed id=$id", t)
+            return
+        }
+        val abs = RectF(0f, 0f, bounds.width().toFloat(), bounds.height().toFloat())
+        matrix.mapRect(abs)
+        if (abs.width() < 1f || abs.height() < 1f || abs.left.isNaN() || abs.top.isNaN()) {
+            logThrottled("c15-map-bad-$id", Log.DEBUG) { "c15-map: skip bad rect id=$id rect=$abs m=$matrix" }
+            return
+        }
+        val corner = preAgsPathCornerRadius(drawable)
+            ?: (minOf(bounds.width(), bounds.height()) * 0.16f)
+        if (screenRegionMap.size > 1024) screenRegionMap.clear()
+        screenRegionMap[id] = RegionEntry(
+            region = abs,
+            autoBounds = Rect(bounds),
+            hostViewName = "preAgsCanvas",
+            cornerRadius = corner,
+            cornerRadiusSource = "preAgsCanvas",
+            sourceTag = "preAgsCanvas",
+        )
+    }
+
+    /** C15 圆角真值：drawable.pathProvider → BaseRoundRectPathProvider.getCornerRadii() 四角最大值。 */
+    private fun preAgsPathCornerRadius(drawable: Any): Float? {
+        val field = mPreAgsPathProviderField ?: return null
+        val getRadii = mPreAgsGetCornerRadii ?: return null
+        val provider = try {
+            field.get(drawable)
+        } catch (t: Throwable) {
+            return null
+        } ?: return null
+        if (!getRadii.declaringClass.isInstance(provider)) return null
+        val radii = try {
+            getRadii.invoke(provider) as? FloatArray
+        } catch (t: Throwable) {
+            null
+        } ?: return null
+        val r = radii.maxOrNull() ?: 0f
+        return r.takeIf { it > 0f }
     }
 
     /**

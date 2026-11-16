@@ -276,6 +276,10 @@ object LauncherHook {
      *  getBuffer null（SF 无 ownerUid=-334 的层）。 */
     /** 整屏抓屏失败冷却毫秒（3 次用尽后暂停，下个内容变化/渲染兜底重试） */
     private const val ELEMENT_CAPTURE_COOLDOWN_MS = 2000L
+    /** 动态壁纸回退抓屏的最小间隔（ms）：壁纸逐帧变化时不能每次模糊刷新都整屏抓屏。 */
+    private const val SNAPSHOT_CAPTURE_MIN_INTERVAL_MS = 200L
+    /** 运动追踪连续无位移帧数上限：达到即停帧回调，由后续宿主登记/位移重新武装。 */
+    private const val MOTION_IDLE_FRAMES = 6
     /** CONIC 角权重默认（本模块未用 CONIC，保留常量占位） */
     @Suppress("unused")
     private const val DEFAULT_CORNER_WEIGHT = (8.0f * 1.1f) / (3.0f * 1.1f + 3.0f)
@@ -615,6 +619,22 @@ object LauncherHook {
     private val elementCaptureQuitAt = ConcurrentHashMap<Int, Long>()
     @Volatile
     private var elementCaptureWorkerRunning = 0
+    /** 上次整屏抓屏入队时刻（动态壁纸抓屏节流用） */
+    @Volatile
+    private var lastSnapshotCaptureAtMs = 0L
+    /** 抓屏频次统计（5s 窗口，用于真机核对背景刷新频率） */
+    @Volatile
+    private var captureRateCount = 0
+    @Volatile
+    private var captureRateWindowStartMs = 0L
+    /** 运动追踪连续无位移帧计数（静止即停帧回调） */
+    @Volatile
+    private var motionIdleFrames = 0
+    /** 材质参数变化重录合并标志（避免连续调参时每帧都全量 invalidate） */
+    @Volatile
+    private var materialInvalidatePosted = false
+    /** 框架 prefs 变更监听（跨进程实现可能不支持，注册失败即只依赖 TTL 重读） */
+    private var materialPrefsListener: android.content.SharedPreferences.OnSharedPreferenceChangeListener? = null
     /** 缓存的 Launcher 根 SurfaceControl（反射 hostView.getRootView().getViewRootImpl().getSurfaceControl()） */
     @Volatile
     private var launcherSfcCache: SurfaceControl? = null
@@ -756,6 +776,8 @@ object LauncherHook {
         mountWallpaperZoomCommand(api, classLoader)
         // [spec/85 补接] 省电模式广播（开 → 即刻门控 + 重录宿主；关 → 下一帧恢复玻璃）
         registerPowerSaveBroadcastReceiver()
+        // 材质参数变更监听（桌面热跟随；不支持时由 1s TTL 重读兜底）
+        registerMaterialPrefsListener()
         // 调试悬浮球（launcher 进程独立实例，与 SystemUI 三窗互不共享运行态）
         DebugOverlay.ensureStarted(
             contextProvider = { launcherAppContext },
@@ -2415,6 +2437,11 @@ object LauncherHook {
             SystemClock.uptimeMillis(),
             WeakReference(hostView),
         )
+        // 位移重新武装运动追踪（静止后帧回调已停，后续位移仍要被观测到）
+        if (previous != null && previous.region != region) {
+            motionIdleFrames = 0
+            kickMotionTracker()
+        }
         if (previous == null) {
             if (screenRegionMap.size > 512) screenRegionMap.clear()
             Lg.i(
@@ -3322,6 +3349,8 @@ object LauncherHook {
      * 内部判定），其余情况 no-op，消除 Launcher 侧持续抓屏耗电。动态壁纸/解码失败回退 captureDisplay 抓屏。
      */
     private fun triggerBackgroundCapture() {
+        // 熄屏/锁屏期桌面不可见，抓屏纯属浪费
+        if (!isLauncherFrameTrackableNow()) return
         if (wallpaperFileSourceEnabled()) {
             refreshWallpaperSourceIfChanged()
             return
@@ -3330,11 +3359,14 @@ object LauncherHook {
     }
 
     /** 入队背景源刷新任务（唯一任务 = SNAPSHOT_ID 整屏快照/壁纸解码；pending 去重防 onBlurReady
-     *  多 drawable 同帧连调重复入队）。失败冷却期内不重入队（3 次失败暂停，下个内容变化/渲染兜底重试）。 */
+     *  多 drawable 同帧连调重复入队）。失败冷却期内不重入队（3 次失败暂停，下个内容变化/渲染兜底重试）。
+     *  动态壁纸按 [SNAPSHOT_CAPTURE_MIN_INTERVAL_MS] 节流：模糊刷新频率远高于玻璃需要的背景刷新率。 */
     private fun enqueueSnapshotCapture() {
         val now = SystemClock.uptimeMillis()
         if (now < (elementCaptureQuitAt[SNAPSHOT_ID] ?: 0L)) return
+        if (now - lastSnapshotCaptureAtMs < SNAPSHOT_CAPTURE_MIN_INTERVAL_MS) return
         if (pendingCaptureIds.add(SNAPSHOT_ID)) {
+            lastSnapshotCaptureAtMs = now
             elementCaptureQueue.add(SNAPSHOT_ID)
             kickElementCaptureWorker()
         }
@@ -3409,6 +3441,19 @@ object LauncherHook {
         }
     }
 
+    /** 抓屏频次统计：每 5s 打一条，真机核对背景刷新节流是否生效。 */
+    private fun noteCaptureRate() {
+        val now = SystemClock.uptimeMillis()
+        if (captureRateWindowStartMs == 0L) captureRateWindowStartMs = now
+        captureRateCount++
+        val elapsed = now - captureRateWindowStartMs
+        if (elapsed < 5000L) return
+        val count = captureRateCount
+        captureRateCount = 0
+        captureRateWindowStartMs = now
+        if (moduleLogEnabled) Lg.i(TAG, "bg-capture-rate: ${count} captures / ${elapsed}ms")
+    }
+
     /** 抓屏 worker：消费队列（唯一任务 = SNAPSHOT_ID 整屏快照/壁纸解码）。 */
     private fun runElementCaptureWorker() {
         try {
@@ -3427,6 +3472,7 @@ object LauncherHook {
                     }
                 } finally {
                     captureInFlightIds.remove(id)
+                    noteCaptureRate()
                 }
                 if (bg != null) {
                     val prev = screenSnapshot
@@ -4041,8 +4087,12 @@ object LauncherHook {
                 fallback
             }
         }
+        val previous = materialParamsCache
         materialParamsCache = result
-        return result
+        return result.also {
+            // 参数真正变化才重录一次宿主：设置页调参后桌面无需等下一次交互才跟随
+            if (previous != null && previous != it) postMaterialInvalidate()
+        }
     }
 
     private fun buildParams(width: Float, height: Float, cornerRadius: Float, elementId: Int = 0): LiquidGlassShader.Params {
@@ -4089,6 +4139,8 @@ object LauncherHook {
                 lightAngleDegrees = pick(Prefs.KEY_LIGHT_ANGLE, m.lightAngleDegrees),
                 parallaxX = pick(Prefs.KEY_PARALLAX_X, m.parallaxX),
                 parallaxY = pick(Prefs.KEY_PARALLAX_Y, m.parallaxY),
+                // 与 SystemUI 同一套精修材质：高光细带随元素尺寸收敛，避免固定宽度带在小元素上过粗
+                surfacePolish = true,
                 edgeStroke = pick(Prefs.KEY_EDGE_STROKE, m.edgeStroke).coerceIn(0f, 1f),
                 edgeStrokeWidth = pick(Prefs.KEY_EDGE_STROKE_WIDTH, m.edgeStrokeWidth).coerceIn(0f, 8f),
             )
@@ -4105,13 +4157,16 @@ object LauncherHook {
         try {
             // [spec/90 #3] 熄屏/锁屏门控：不可见时跳过位置比对，500ms 降频自续代替每帧回调
             if (!isLauncherFrameTrackableNow()) {
+                motionIdleFrames = 0
                 mainHandler().postDelayed({ kickMotionTracker() }, POWER_SAVE_STATE_CACHE_MS)
                 return@FrameCallback
             }
-            trackHostViewMotion()
+            motionIdleFrames = if (trackHostViewMotion()) 0 else motionIdleFrames + 1
         } catch (t: Throwable) {
             Lg.e(TAG, "launcher taskG+: trackHostViewMotion error", t)
         }
+        // 连续静止即停帧回调（不再永久占每帧 VSYNC）：宿主登记/位移会重新武装
+        if (motionIdleFrames >= MOTION_IDLE_FRAMES) return@FrameCallback
         var hasLive = false
         synchronized(this) {
             for (entry in registeredHostViews) {
@@ -4133,6 +4188,7 @@ object LauncherHook {
             if (entry.ref.get() === view) return
         }
         registeredHostViews.add(HostEntry(view))
+        motionIdleFrames = 0
         kickMotionTracker()
     }
 
@@ -4154,10 +4210,12 @@ object LauncherHook {
         }
     }
 
-    /** 逐帧快照比对：位置/尺寸变化的宿主 invalidate() → 重录 → 映射跟随（srcRect 实时折算跟手）。 */
+    /** 逐帧快照比对：位置/尺寸变化的宿主 invalidate() → 重录 → 映射跟随（srcRect 实时折算跟手）。
+     *  返回本帧是否有宿主位移（false 累计到阈值即停帧回调）。 */
     @Synchronized
-    private fun trackHostViewMotion() {
-        if (registeredHostViews.isEmpty()) return
+    private fun trackHostViewMotion(): Boolean {
+        if (registeredHostViews.isEmpty()) return false
+        var moved = false
         val loc = IntArray(2)
         val it = registeredHostViews.iterator()
         while (it.hasNext()) {
@@ -4178,6 +4236,7 @@ object LauncherHook {
                 }
                 if (entry.lastX != loc[0] || entry.lastY != loc[1] || entry.lastW != w || entry.lastH != h) {
                     entry.lastX = loc[0]; entry.lastY = loc[1]; entry.lastW = w; entry.lastH = h
+                    moved = true
                     // 移动/尺寸变化：invalidate 宿主 → 重录 → 映射更新（移动只更新 srcRect 折算，不重抓背景）
                     try {
                         v.invalidate()
@@ -4189,6 +4248,7 @@ object LauncherHook {
                 Lg.e(TAG, "launcher taskG+: track single host failed", t)
             }
         }
+        return moved
     }
 
     @Synchronized
@@ -4214,6 +4274,42 @@ object LauncherHook {
             mainHandler().post { invalidateRegisteredHostViews() }
         } catch (t: Throwable) {
             Lg.e(TAG, "bg-element: postInvalidateRegistered failed", t)
+        }
+    }
+
+    /** 材质参数变化 → 合并成一次主线程全量重录（连续调参只刷一帧）。 */
+    private fun postMaterialInvalidate() {
+        if (materialInvalidatePosted) return
+        materialInvalidatePosted = true
+        try {
+            mainHandler().post {
+                materialInvalidatePosted = false
+                invalidateRegisteredHostViews()
+            }
+        } catch (t: Throwable) {
+            materialInvalidatePosted = false
+            Lg.e(TAG, "material: postMaterialInvalidate failed", t)
+        }
+    }
+
+    /** 框架 prefs 变更监听：支持则调参即刻重录；跨进程不派发时退回 TTL 重读路径，不影响现状。 */
+    private fun registerMaterialPrefsListener() {
+        if (materialPrefsListener != null) return
+        try {
+            val prefs = api?.let { Prefs.read(it) } ?: return
+            val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+                try {
+                    materialParamsCacheTimeMs = 0L
+                    postMaterialInvalidate()
+                } catch (t: Throwable) {
+                    Lg.e(TAG, "material: prefs change handler failed", t)
+                }
+            }
+            prefs.registerOnSharedPreferenceChangeListener(listener)
+            materialPrefsListener = listener
+            Lg.i(TAG, "material-prefs: change listener registered")
+        } catch (t: Throwable) {
+            Lg.w(TAG, "material-prefs: change listener unavailable, fallback to TTL reread", t)
         }
     }
 

@@ -1,5 +1,11 @@
 package com.coloros16.liquidglass.engine
 
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.exp
+import kotlin.math.sin
+import kotlin.math.sqrt
+
 /** 时间曲线：输入输出都在 0..1。 */
 fun interface Easing {
     fun map(t: Float): Float
@@ -10,6 +16,39 @@ fun interface Easing {
         val FAST_OUT_SLOW_IN = CubicBezierEasing(0.4f, 0f, 0.2f, 1f)
         val DECELERATE = CubicBezierEasing(0f, 0f, 0.2f, 1f)
         val ACCELERATE = CubicBezierEasing(0.4f, 0f, 1f, 1f)
+
+        /** 与平台同名插值器一致：余弦式先加速后减速。 */
+        val ACCELERATE_DECELERATE = Easing { t ->
+            ((cos((t.coerceIn(0f, 1f) + 1f) * PI) / 2.0) + 0.5).toFloat()
+        }
+    }
+}
+
+/**
+ * 阻尼弹簧缓动：单自由度简谐解析解，t 为段内归一化进度。
+ * stiffness 沿用系统同名字段，wn = sqrt(stiffness)；dampingRatio < 1 时允许过冲。
+ */
+class SpringEasing(
+    private val stiffness: Float,
+    private val dampingRatio: Float,
+    private val durationMs: Float,
+) : Easing {
+
+    override fun map(t: Float): Float {
+        val q = t.coerceIn(0f, 1f)
+        if (q <= 0f) return 0f
+        if (q >= 1f) return 1f
+        val wn = sqrt(stiffness.toDouble())
+        val zeta = dampingRatio.toDouble().coerceAtLeast(0.01)
+        val seconds = durationMs / 1000.0 * q
+        val value = if (zeta < 0.999) {
+            val wd = wn * sqrt(1.0 - zeta * zeta)
+            val decay = exp(-zeta * wn * seconds)
+            1.0 - decay * (cos(wd * seconds) + (zeta * wn / wd) * sin(wd * seconds))
+        } else {
+            1.0 - exp(-wn * seconds) * (1.0 + wn * seconds)
+        }
+        return value.toFloat().coerceAtLeast(0f)
     }
 }
 

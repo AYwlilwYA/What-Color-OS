@@ -108,11 +108,16 @@ class ClockStateMachine(
 
     /** 有系统进度时：直接按边两端锚点插值，t 由调用方给（系统泵或内部时间轴）。 */
     fun onTransition(edge: TransitionEdge, t: Float) {
+        onTransition(edge, t, easing)
+    }
+
+    /** 指定曲线求值：播放时用各边系统曲线，拖动时传 [Easing.LINEAR]。 */
+    fun onTransition(edge: TransitionEdge, t: Float, curve: Easing) {
         transitionEdge = edge
         target = null
         val from = anchorOf(edge.from)
         val to = anchorOf(edge.to)
-        val e = easing.map(t.coerceIn(0f, 1f))
+        val e = curve.map(t.coerceIn(0f, 1f))
         pose.centerX = lerp(from.centerX, to.centerX, e)
         pose.centerY = lerp(from.centerY, to.centerY, e)
         pose.scale = lerp(from.scale, to.scale, e)

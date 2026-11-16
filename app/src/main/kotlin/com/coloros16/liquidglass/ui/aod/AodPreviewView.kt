@@ -28,6 +28,7 @@ import com.coloros16.liquidglass.engine.SceneState
 import com.coloros16.liquidglass.engine.SceneTimeline
 import com.coloros16.liquidglass.engine.ScreenMetrics
 import com.coloros16.liquidglass.engine.StyleCapabilities
+import com.coloros16.liquidglass.engine.SystemSceneMotion
 import com.coloros16.liquidglass.engine.TransitionEdge
 import com.coloros16.liquidglass.engine.TransitionEvaluator
 import com.coloros16.liquidglass.engine.TransitionParams
@@ -64,6 +65,7 @@ class AodPreviewView @JvmOverloads constructor(
     private var scrubP = -1f
     private val clockMachine = ClockStateMachine(easing = Easing.STANDARD)
     private val sceneSample = SceneSample()
+    private val layers = SystemSceneMotion.Layers()
 
     private val density = resources.displayMetrics.density
     private val scaled = resources.displayMetrics.scaledDensity
@@ -238,7 +240,7 @@ class AodPreviewView @JvmOverloads constructor(
             if (edge == null) {
                 clockMachine.snapTo(scene, 0L)
             } else {
-                clockMachine.onTransition(edge, this.t)
+                clockMachine.onTransition(edge, this.t, SystemSceneMotion.clockCurve(edge))
             }
         }
         invalidate()
@@ -458,40 +460,73 @@ class AodPreviewView @JvmOverloads constructor(
     // ---------------------------------------------------------------- 连续场景
 
     private fun drawSceneWorld(canvas: Canvas, w: Float, h: Float, spec: AodSceneSpec) {
-        val u = if (scrubP >= 0f) scrubP else SceneTimeline.uOf(edge, t, scene)
+        val u = if (scrubP >= 0f) {
+            scrubP
+        } else {
+            SceneTimeline.uOf(edge, t, scene, Easing.LINEAR)
+        }
+        sampleLayers()
         sceneSample.sample(spec.contract, u)
-        val sky = sceneSky
+
+        val realWallpaper = if (useSystemWallpaper) wallpaper else null
+        val sky = realWallpaper ?: sceneSky
         if (sky != null) {
+            val parallax = if (realWallpaper != null) 0f else 1f
             drawBitmapCover(
                 canvas, sky, w, h,
-                1f + (sceneSample.cameraScale - 1f) * 0.8f,
-                (0.5f - sceneSample.cameraX) * w * 0.16f,
-                (0.5f - sceneSample.cameraY) * h * 0.10f,
+                layers.wallpaperScale,
+                (0.5f - sceneSample.cameraX) * w * 0.05f * parallax,
+                (0.5f - sceneSample.cameraY) * h * 0.03f * parallax,
             )
-            val dim = 0.62f - 0.34f * u
-            fill.style = Paint.Style.FILL
-            fill.shader = null
-            fill.color = alphaColor(0xFF02040A.toInt(), dim)
-            canvas.drawRect(0f, 0f, w, h, fill)
         } else {
             drawSceneSky(canvas, w, h, u)
             drawMilkyWay(canvas, w, h)
             drawSceneStars(canvas, w, h)
+        }
+        fill.style = Paint.Style.FILL
+        fill.shader = null
+        fill.color = alphaColor(0xFF02040A.toInt(), layers.dim)
+        canvas.drawRect(0f, 0f, w, h, fill)
+
+        if (realWallpaper == null) {
             drawClouds(canvas, w, h, 0.85f, 0)
+            drawMountains(canvas, w, h, u)
+
+            if (layers.aodAlpha > 0.002f) {
+                val layer = canvas.saveLayerAlpha(0f, 0f, w, h, (layers.aodAlpha * 255f).toInt())
+                sceneSample.elements.getOrNull(0)?.let { drawSceneMoon(canvas, w, h, it) }
+                canvas.restoreToCount(layer)
+            }
+            drawClouds(canvas, w, h, 0.45f, 1)
         }
-        val elements = sceneSample.elements
-        elements.getOrNull(0)?.let { if (it.alpha > 0.002f) drawSceneMoon(canvas, w, h, it) }
-        drawClouds(canvas, w, h, 0.45f, 1)
-        drawMountains(canvas, w, h, u)
-        elements.getOrNull(1)?.let {
-            if (it.alpha > 0.002f) drawLockOverlay(canvas, w, h, it.alpha, lockShiftDp(u))
+
+        if (layers.lockAlpha > 0.002f) {
+            val layer = canvas.saveLayerAlpha(0f, 0f, w, h, (layers.lockAlpha * 255f).toInt())
+            canvas.scale(layers.lockScale, layers.lockScale, w / 2f, h * 0.40f)
+            drawLockOverlay(canvas, w, h, 1f, lockShiftDp(u))
+            canvas.restoreToCount(layer)
         }
-        elements.getOrNull(2)?.let { if (it.alpha > 0.002f) drawSceneHomeIcons(canvas, w, h, it.alpha) }
-        elements.getOrNull(3)?.let { if (it.alpha > 0.002f) drawSceneHomeDock(canvas, w, h, it.alpha) }
+
+        if (layers.homeAlpha > 0.002f) {
+            val layer = canvas.saveLayerAlpha(0f, 0f, w, h, (layers.homeAlpha * 255f).toInt())
+            canvas.scale(layers.homeScale, layers.homeScale, w / 2f, h * 0.52f)
+            drawSceneHomeIcons(canvas, w, h, 1f)
+            drawSceneHomeDock(canvas, w, h, 1f)
+            canvas.restoreToCount(layer)
+        }
+
         drawSceneClock(canvas, w, h, u)
-        val chrome = maxOf(elements.getOrNull(1)?.alpha ?: 0f, elements.getOrNull(2)?.alpha ?: 0f)
+        val chrome = maxOf(layers.lockAlpha, layers.homeAlpha)
         if (chrome > 0.002f) drawGestureBar(canvas, w, h, chrome * 0.7f)
         drawVignette(canvas, w, h)
+    }
+
+    private fun sampleLayers() {
+        when {
+            scrubP >= 0f -> SystemSceneMotion.sampleTimeline(scrubP, layers)
+            edge != null -> SystemSceneMotion.sample(edge!!, t, layers)
+            else -> SystemSceneMotion.sampleStatic(scene, layers)
+        }
     }
 
     private fun drawBitmapCover(
@@ -753,7 +788,11 @@ class AodPreviewView @JvmOverloads constructor(
     }
 
     private fun drawSceneHomeIcons(canvas: Canvas, w: Float, h: Float, alpha: Float) {
-        val layer = canvas.saveLayerAlpha(0f, 0f, w, h, (alpha * 255f).toInt())
+        val layer = if (alpha < 0.999f) {
+            canvas.saveLayerAlpha(0f, 0f, w, h, (alpha * 255f).toInt())
+        } else {
+            canvas.save()
+        }
         val scale = 0.97f + 0.03f * alpha.coerceIn(0f, 1f)
         canvas.scale(scale, scale, w / 2f, h * 0.52f)
         val dockH = h * 0.098f
@@ -765,7 +804,11 @@ class AodPreviewView @JvmOverloads constructor(
     }
 
     private fun drawSceneHomeDock(canvas: Canvas, w: Float, h: Float, alpha: Float) {
-        val layer = canvas.saveLayerAlpha(0f, 0f, w, h, (alpha * 255f).toInt())
+        val layer = if (alpha < 0.999f) {
+            canvas.saveLayerAlpha(0f, 0f, w, h, (alpha * 255f).toInt())
+        } else {
+            canvas.save()
+        }
         val dockH = h * 0.098f
         drawDock(canvas, w, h * 0.686f, dockH)
         canvas.restoreToCount(layer)
@@ -775,7 +818,7 @@ class AodPreviewView @JvmOverloads constructor(
     private fun drawSceneClock(canvas: Canvas, w: Float, h: Float, u: Float) {
         val pose = clockMachine.pose
         if (!pose.visible) return
-        val base = h * 0.145f * pose.scale
+        val base = h * 0.145f * pose.scale * layers.aodClockScale
         val cx = pose.centerX * w
         val cy = pose.centerY * h
         val timeColor = mix3(0xFFC9D4E2.toInt(), 0xFFF0F4F8.toInt(), 0xFFF5F8FB.toInt(), u)

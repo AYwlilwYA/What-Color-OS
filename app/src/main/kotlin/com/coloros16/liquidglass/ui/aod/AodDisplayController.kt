@@ -24,6 +24,7 @@ import com.coloros16.liquidglass.config.Prefs
 import com.coloros16.liquidglass.engine.ClockSource
 import com.coloros16.liquidglass.engine.SceneState
 import com.coloros16.liquidglass.engine.SceneTimeline
+import com.coloros16.liquidglass.engine.SystemSceneMotion
 import com.coloros16.liquidglass.engine.TransitionClock
 import com.coloros16.liquidglass.engine.TransitionEdge
 import com.coloros16.liquidglass.engine.from
@@ -48,7 +49,6 @@ class AodDisplayController(
 
     private companion object {
         const val TAG = "LgAodUi"
-        const val DURATION_MS = 500L
     }
 
     private val density = context.resources.displayMetrics.density
@@ -240,7 +240,7 @@ class AodDisplayController(
         bar.setActive(index)
         playing = true
         bar.setInteractive(false)
-        clock.play(edge, DURATION_MS, 0f, ClockSource.PREVIEW)
+        clock.play(edge, SystemSceneMotion.durationOf(edge), 0f, ClockSource.PREVIEW)
         scheduleFrame()
         Lg.i(TAG, "play edge=$edge target=$target")
     }

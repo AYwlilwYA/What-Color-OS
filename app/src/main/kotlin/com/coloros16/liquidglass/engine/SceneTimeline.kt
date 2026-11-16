@@ -11,9 +11,10 @@ object SceneTimeline {
     fun edgeAt(p: Float): TransitionEdge =
         if (p.coerceIn(0f, 1f) < LOCK) TransitionEdge.AOD_TO_LOCK else TransitionEdge.LOCK_TO_HOME
 
+    /** 整轨进度 → 段内进度；与 [edgeAt] 同界，0.5 处落在第二段起点。 */
     fun localT(p: Float): Float {
         val q = p.coerceIn(0f, 1f)
-        return if (q <= LOCK) q / LOCK else (q - LOCK) / (1f - LOCK)
+        return if (q < LOCK) q / LOCK else (q - LOCK) / (1f - LOCK)
     }
 
     fun anchor(state: SceneState): Float = when (state) {

@@ -28,28 +28,12 @@ object AodSceneCatalog {
         scale = track(0f to 0.60f, U_LOCK to 0.40f, 1f to 0.30f),
     )
 
-    private val lockInfo = ElementTrack(
-        id = "lockInfo",
-        alpha = track(0f to 0f, 0.30f to 0f, 0.42f to 1f, 0.62f to 1f, 0.70f to 0f, 1f to 0f),
-    )
-
-    private val homeIcons = ElementTrack(
-        id = "homeIcons",
-        alpha = track(0f to 0f, 0.64f to 0f, 0.84f to 1f, 1f to 1f),
-    )
-
-    private val homeDock = ElementTrack(
-        id = "homeDock",
-        alpha = track(0f to 0f, 0.78f to 0f, 0.95f to 1f, 1f to 1f),
-    )
-
     private val contract = SceneContract(
         id = "aod.scene.starmoon",
         cameraX = track(0f to 0.60f, U_LOCK to 0.545f, 1f to 0.50f),
         cameraY = track(0f to 0.56f, U_LOCK to 0.47f, 1f to 0.38f),
-        cameraScale = track(0f to 1.12f, U_LOCK to 1.06f, 1f to 1.0f),
         light = track(0f to 0.25f, U_LOCK to 0.60f, 1f to 1.0f),
-        elements = listOf(moon, lockInfo, homeIcons, homeDock),
+        elements = listOf(moon),
     )
 
     private val clockAnchors = mapOf(

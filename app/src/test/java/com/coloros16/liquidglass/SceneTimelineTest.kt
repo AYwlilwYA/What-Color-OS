@@ -87,7 +87,7 @@ class SceneTimelineTest {
     fun timelineLocalTMapsBothSegments() {
         assertEquals(0f, SceneTimeline.localT(0f), 1e-6f)
         assertEquals(0.5f, SceneTimeline.localT(0.25f), 1e-6f)
-        assertEquals(1f, SceneTimeline.localT(0.5f), 1e-6f)
+        assertEquals(0f, SceneTimeline.localT(0.5f), 1e-6f)
         assertEquals(0.5f, SceneTimeline.localT(0.75f), 1e-6f)
         assertEquals(1f, SceneTimeline.localT(1f), 1e-6f)
     }

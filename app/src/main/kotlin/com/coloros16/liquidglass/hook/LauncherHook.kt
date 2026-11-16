@@ -276,8 +276,6 @@ object LauncherHook {
      *  getBuffer null（SF 无 ownerUid=-334 的层）。 */
     /** 整屏抓屏失败冷却毫秒（3 次用尽后暂停，下个内容变化/渲染兜底重试） */
     private const val ELEMENT_CAPTURE_COOLDOWN_MS = 2000L
-    /** 动态壁纸回退抓屏的最小间隔（ms）：壁纸逐帧变化时不能每次模糊刷新都整屏抓屏。 */
-    private const val SNAPSHOT_CAPTURE_MIN_INTERVAL_MS = 200L
     /** 运动追踪连续无位移帧数上限：达到即停帧回调，由后续宿主登记/位移重新武装。 */
     private const val MOTION_IDLE_FRAMES = 6
     /** CONIC 角权重默认（本模块未用 CONIC，保留常量占位） */
@@ -619,9 +617,21 @@ object LauncherHook {
     private val elementCaptureQuitAt = ConcurrentHashMap<Int, Long>()
     @Volatile
     private var elementCaptureWorkerRunning = 0
-    /** 上次整屏抓屏入队时刻（动态壁纸抓屏节流用） */
+    /** 上次整屏抓屏入队时刻（桌面抓屏节流用） */
     @Volatile
     private var lastSnapshotCaptureAtMs = 0L
+    /** 桌面抓屏节流（亮屏 / 锁屏息屏各自一条，1s TTL 缓存） */
+    @Volatile
+    private var launcherCaptureIntervalMs = Prefs.DEFAULT_LAUNCHER_BG_CAPTURE_MIN_INTERVAL_MS
+    @Volatile
+    private var launcherCaptureLockedIntervalMs = Prefs.DEFAULT_LAUNCHER_BG_CAPTURE_MIN_INTERVAL_LOCKED_MS
+    @Volatile
+    private var launcherCaptureIntervalCachedAtMs = 0L
+    /** 高光增强开关缓存（500ms TTL） */
+    @Volatile
+    private var highlightEnhanceValue = Prefs.DEFAULT_HIGHLIGHT_ENHANCE
+    @Volatile
+    private var highlightEnhanceCachedAtMs = 0L
     /** 抓屏频次统计（5s 窗口，用于真机核对背景刷新频率） */
     @Volatile
     private var captureRateCount = 0
@@ -3349,8 +3359,6 @@ object LauncherHook {
      * 内部判定），其余情况 no-op，消除 Launcher 侧持续抓屏耗电。动态壁纸/解码失败回退 captureDisplay 抓屏。
      */
     private fun triggerBackgroundCapture() {
-        // 熄屏/锁屏期桌面不可见，抓屏纯属浪费
-        if (!isLauncherFrameTrackableNow()) return
         if (wallpaperFileSourceEnabled()) {
             refreshWallpaperSourceIfChanged()
             return
@@ -3360,17 +3368,52 @@ object LauncherHook {
 
     /** 入队背景源刷新任务（唯一任务 = SNAPSHOT_ID 整屏快照/壁纸解码；pending 去重防 onBlurReady
      *  多 drawable 同帧连调重复入队）。失败冷却期内不重入队（3 次失败暂停，下个内容变化/渲染兜底重试）。
-     *  动态壁纸按 [SNAPSHOT_CAPTURE_MIN_INTERVAL_MS] 节流：模糊刷新频率远高于玻璃需要的背景刷新率。 */
+     *  节流间隔走桌面独立配置键（亮屏 / 锁屏息屏两条，默认均为 0 = 不节流）。 */
     private fun enqueueSnapshotCapture() {
         val now = SystemClock.uptimeMillis()
         if (now < (elementCaptureQuitAt[SNAPSHOT_ID] ?: 0L)) return
-        if (now - lastSnapshotCaptureAtMs < SNAPSHOT_CAPTURE_MIN_INTERVAL_MS) return
+        val minInterval = launcherCaptureMinIntervalMs()
+        if (minInterval > 0 && now - lastSnapshotCaptureAtMs < minInterval) return
         if (pendingCaptureIds.add(SNAPSHOT_ID)) {
             lastSnapshotCaptureAtMs = now
             elementCaptureQueue.add(SNAPSHOT_ID)
             kickElementCaptureWorker()
         }
     }
+
+    /** 桌面抓屏最小间隔：亮屏桌面与锁屏/息屏分别配置，1s TTL 缓存（热路径零 IPC）。 */
+    private fun launcherCaptureMinIntervalMs(): Int {
+        val now = SystemClock.uptimeMillis()
+        if (now - launcherCaptureIntervalCachedAtMs < 1000L) {
+            return if (isLockedOrScreenOff()) launcherCaptureLockedIntervalMs else launcherCaptureIntervalMs
+        }
+        val locked = isLockedOrScreenOff()
+        val prefs = try {
+            api?.let { Prefs.read(it) }
+        } catch (t: Throwable) {
+            Lg.w(TAG, "launcher capture interval: prefs read failed", t); null
+        }
+        launcherCaptureIntervalMs = if (prefs == null) {
+            Prefs.DEFAULT_LAUNCHER_BG_CAPTURE_MIN_INTERVAL_MS
+        } else {
+            Prefs.readIntCompat(
+                prefs, Prefs.KEY_LAUNCHER_BG_CAPTURE_MIN_INTERVAL_MS, Prefs.DEFAULT_LAUNCHER_BG_CAPTURE_MIN_INTERVAL_MS
+            ).coerceAtLeast(0)
+        }
+        launcherCaptureLockedIntervalMs = if (prefs == null) {
+            Prefs.DEFAULT_LAUNCHER_BG_CAPTURE_MIN_INTERVAL_LOCKED_MS
+        } else {
+            Prefs.readIntCompat(
+                prefs, Prefs.KEY_LAUNCHER_BG_CAPTURE_MIN_INTERVAL_LOCKED_MS,
+                Prefs.DEFAULT_LAUNCHER_BG_CAPTURE_MIN_INTERVAL_LOCKED_MS
+            ).coerceAtLeast(0)
+        }
+        launcherCaptureIntervalCachedAtMs = now
+        return if (locked) launcherCaptureLockedIntervalMs else launcherCaptureIntervalMs
+    }
+
+    /** 锁屏 / 熄屏判定（复用可见性门控的 500ms TTL 缓存）。 */
+    private fun isLockedOrScreenOff(): Boolean = !isLauncherFrameTrackableNow()
 
     /**
      * [doc/spec/52] 壁纸文件解码背景源的门控：内容变化信号进来，判断是否需要真正重解码。
@@ -4095,6 +4138,21 @@ object LauncherHook {
         }
     }
 
+    /** 高光增强开关（KEY_HIGHLIGHT_ENHANCE，500ms TTL）：开 = 所有玻璃元素统一精修细高光带。 */
+    private fun highlightEnhanceEnabled(): Boolean {
+        val now = SystemClock.uptimeMillis()
+        if (now - highlightEnhanceCachedAtMs < 500L) return highlightEnhanceValue
+        highlightEnhanceValue = try {
+            api?.let { Prefs.read(it).getBoolean(Prefs.KEY_HIGHLIGHT_ENHANCE, Prefs.DEFAULT_HIGHLIGHT_ENHANCE) }
+                ?: Prefs.DEFAULT_HIGHLIGHT_ENHANCE
+        } catch (t: Throwable) {
+            Lg.w(TAG, "prefs read highlight_enhance failed, default true", t)
+            Prefs.DEFAULT_HIGHLIGHT_ENHANCE
+        }
+        highlightEnhanceCachedAtMs = now
+        return highlightEnhanceValue
+    }
+
     private fun buildParams(width: Float, height: Float, cornerRadius: Float, elementId: Int = 0): LiquidGlassShader.Params {
         // def 兼作 prefs 不可用时的兜底：blurRadius 须带上配置默认值（否则退回 Params 默认 0f = 清晰透镜）
         val def = LiquidGlassShader.Params(
@@ -4139,8 +4197,8 @@ object LauncherHook {
                 lightAngleDegrees = pick(Prefs.KEY_LIGHT_ANGLE, m.lightAngleDegrees),
                 parallaxX = pick(Prefs.KEY_PARALLAX_X, m.parallaxX),
                 parallaxY = pick(Prefs.KEY_PARALLAX_Y, m.parallaxY),
-                // 与 SystemUI 同一套精修材质：高光细带随元素尺寸收敛，避免固定宽度带在小元素上过粗
-                surfacePolish = true,
+                // 高光增强：开 = 细高光带随元素尺寸收敛，关 = 按 highlight_width 的固定宽带
+                surfacePolish = highlightEnhanceEnabled(),
                 edgeStroke = pick(Prefs.KEY_EDGE_STROKE, m.edgeStroke).coerceIn(0f, 1f),
                 edgeStrokeWidth = pick(Prefs.KEY_EDGE_STROKE_WIDTH, m.edgeStrokeWidth).coerceIn(0f, 8f),
             )

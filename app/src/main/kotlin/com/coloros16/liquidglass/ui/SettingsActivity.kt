@@ -926,6 +926,7 @@ class SettingsActivity : AppCompatActivity() {
         preview.highlightWidth = prefFloat(Prefs.KEY_HIGHLIGHT_WIDTH, Prefs.DEFAULT_HIGHLIGHT_WIDTH)
         preview.highlightFloor = prefFloat(Prefs.KEY_HIGHLIGHT_FLOOR, Prefs.DEFAULT_HIGHLIGHT_FLOOR)
         preview.highlightInnerAtt = prefFloat(Prefs.KEY_HIGHLIGHT_INNER_ATT, Prefs.DEFAULT_HIGHLIGHT_INNER_ATT)
+        preview.surfacePolish = prefBoolean(Prefs.KEY_HIGHLIGHT_ENHANCE, Prefs.DEFAULT_HIGHLIGHT_ENHANCE)
         preview.innerGlow = prefFloat(Prefs.KEY_INNER_GLOW, Prefs.DEFAULT_INNER_GLOW)
         preview.edgeStroke = prefFloat(Prefs.KEY_EDGE_STROKE, Prefs.DEFAULT_EDGE_STROKE)
         preview.edgeStrokeWidth = prefFloat(Prefs.KEY_EDGE_STROKE_WIDTH, Prefs.DEFAULT_EDGE_STROKE_WIDTH)
@@ -2119,6 +2120,16 @@ class SettingsActivity : AppCompatActivity() {
             onChanged = { v -> preview?.let { it.highlightFloor = v; it.refresh() } },
         )
         // highlightInnerAtt：0~100 → 0~1（默认 0=现状）。内侧高光向玻璃深处再衰减。
+        val switchHighlightEnhance = view.findViewById<Switch>(R.id.switchHighlightEnhance)
+        val highlightEnhanceListener = CompoundButton.OnCheckedChangeListener { _, checked ->
+            writePrefBoolean(Prefs.KEY_HIGHLIGHT_ENHANCE, checked)
+            preview?.let { it.surfacePolish = checked; it.refresh() }
+        }
+        switchHighlightEnhance.setOnCheckedChangeListener(highlightEnhanceListener)
+        refreshBooleanSwitch(
+            switchHighlightEnhance, highlightEnhanceListener,
+            Prefs.KEY_HIGHLIGHT_ENHANCE, Prefs.DEFAULT_HIGHLIGHT_ENHANCE
+        )
         bindFloatSeekBar(
             seek = view.findViewById(R.id.seekHighlightInnerAtt), valueText = view.findViewById(R.id.highlightInnerAttValue),
             key = Prefs.KEY_HIGHLIGHT_INNER_ATT, default = Prefs.DEFAULT_HIGHLIGHT_INNER_ATT,
@@ -2726,6 +2737,24 @@ class SettingsActivity : AppCompatActivity() {
             key = Prefs.KEY_BG_PERIODIC_CAPTURE_INTERVAL_MS, default = Prefs.DEFAULT_BG_PERIODIC_CAPTURE_INTERVAL_MS,
             max = 4900, step = 1, offset = Prefs.BG_PERIODIC_CAPTURE_INTERVAL_MIN_MS,
             format = { ms -> getString(R.string.settings_periodic_capture_interval_value, ms) },
+        )
+
+        // 桌面抓屏最小间隔（亮屏桌面 / 锁屏息屏各自一条，0 = 不节流）
+        bindIntSeekBarStep(
+            seek = view.findViewById(R.id.seekLauncherCaptureInterval),
+            valueText = view.findViewById(R.id.launcherCaptureIntervalValue),
+            key = Prefs.KEY_LAUNCHER_BG_CAPTURE_MIN_INTERVAL_MS,
+            default = Prefs.DEFAULT_LAUNCHER_BG_CAPTURE_MIN_INTERVAL_MS,
+            max = 50, step = 20, offset = 0,
+            format = { ms -> getString(R.string.settings_launcher_capture_interval_value, ms) },
+        )
+        bindIntSeekBarStep(
+            seek = view.findViewById(R.id.seekLauncherCaptureIntervalLocked),
+            valueText = view.findViewById(R.id.launcherCaptureIntervalLockedValue),
+            key = Prefs.KEY_LAUNCHER_BG_CAPTURE_MIN_INTERVAL_LOCKED_MS,
+            default = Prefs.DEFAULT_LAUNCHER_BG_CAPTURE_MIN_INTERVAL_LOCKED_MS,
+            max = 50, step = 20, offset = 0,
+            format = { ms -> getString(R.string.settings_launcher_capture_interval_locked_value, ms) },
         )
 
         // 降采样档位 spinner（0.25/0.5/0.75/1.0，默认 0.5）
@@ -4551,6 +4580,7 @@ class LiquidGlassPreviewView @JvmOverloads constructor(
     var highlightWidth = Prefs.DEFAULT_HIGHLIGHT_WIDTH
     var highlightFloor = Prefs.DEFAULT_HIGHLIGHT_FLOOR
     var highlightInnerAtt = Prefs.DEFAULT_HIGHLIGHT_INNER_ATT
+    var surfacePolish = Prefs.DEFAULT_HIGHLIGHT_ENHANCE
     var innerGlow = Prefs.DEFAULT_INNER_GLOW
     var edgeStroke = Prefs.DEFAULT_EDGE_STROKE
     var edgeStrokeWidth = Prefs.DEFAULT_EDGE_STROKE_WIDTH
@@ -4653,7 +4683,7 @@ class LiquidGlassPreviewView @JvmOverloads constructor(
             lightAngleDegrees = lightAngle,
             parallaxX = 0f,
             parallaxY = 0f,
-            surfacePolish = true,
+            surfacePolish = surfacePolish,
             edgeStroke = edgeStroke,
             edgeStrokeWidth = edgeStrokeWidth,
         )

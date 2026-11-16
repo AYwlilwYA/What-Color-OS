@@ -105,6 +105,10 @@ object Prefs {
      *  必然经过与光源垂直处 → 原实现该处高光精确归零（弧线约 60% 跨度消失）。保底后弧线保留
      *  基础亮度、不再断开；0 = 完全回退旧行为。详见 doc/spec/67。 */
     const val KEY_HIGHLIGHT_FLOOR = "highlight_floor"
+    /** 高光增强（默认开）：开 = 所有玻璃元素改用精修细高光带（宽度随元素短边收敛）；
+     *  关 = 回退按 highlight_width 的固定宽带。改动 ≤1s 生效（hook 端 TTL 缓存）。 */
+    const val KEY_HIGHLIGHT_ENHANCE = "highlight_enhance"
+    const val DEFAULT_HIGHLIGHT_ENHANCE = true
     /** [2026-10-13] 内侧高光衰减（0~1，默认 0=现状）：band 内半向玻璃深处再衰减，1=只剩贴边亮线。 */
     const val KEY_HIGHLIGHT_INNER_ATT = "highlight_inner_att"
     const val DEFAULT_HIGHLIGHT_INNER_ATT = 0f
@@ -284,6 +288,17 @@ object Prefs {
     const val KEY_BG_CAPTURE_RETRY_ENABLED = "bg_capture_retry_enabled"
     /** 抓屏失败重试总开关默认值（false = 失败即等下次事件，不重试） */
     const val DEFAULT_BG_CAPTURE_RETRY_ENABLED = false
+
+    /** 桌面（Launcher）变化触发抓屏的最小间隔毫秒，与 SystemUI 的 [KEY_BG_CAPTURE_MIN_INTERVAL_MS]
+     *  各自独立配置。0=不节流（跟随系统模糊刷新实时重抓）。改动 ≤1s 生效。 */
+    const val KEY_LAUNCHER_BG_CAPTURE_MIN_INTERVAL_MS = "launcher_bg_capture_min_interval_ms"
+    /** 桌面抓屏最小间隔默认值（0 = 不节流，保持背景实时） */
+    const val DEFAULT_LAUNCHER_BG_CAPTURE_MIN_INTERVAL_MS = 0
+
+    /** 锁屏 / 息屏状态下的桌面抓屏最小间隔毫秒（单独配置，不影响亮屏桌面）。0=不节流。 */
+    const val KEY_LAUNCHER_BG_CAPTURE_MIN_INTERVAL_LOCKED_MS = "launcher_bg_capture_min_interval_locked_ms"
+    /** 锁屏 / 息屏桌面抓屏最小间隔默认值（0 = 不节流） */
+    const val DEFAULT_LAUNCHER_BG_CAPTURE_MIN_INTERVAL_LOCKED_MS = 0
 
     // C. 追踪器（spec/16 状态机 + 降频）
     // [2026-09-17] 三个追踪器间隔键（tracker_min/idle_interval_frames、tracker_idle_after_frames）

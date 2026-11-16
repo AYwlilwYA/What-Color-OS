@@ -224,6 +224,8 @@
     <string name="settings_highlight_inner_att">内侧高光衰减</string>
     <string name="settings_highlight_inner_att_value">%1$d%%</string>
     <string name="settings_highlight_inner_att_desc">控制高光向玻璃内部衰减的程度。0 为默认；越大，内侧高光越暗、内侧光越贴边。</string>
+    <string name="settings_highlight_enhance">高光增强</string>
+    <string name="settings_highlight_enhance_desc">开启后所有玻璃改用更细的高光带，宽度随元素大小收敛；关闭则按高光宽度参数画固定宽带。</string>
     <string name="settings_inner_glow">内侧光</string>
     <string name="settings_inner_glow_value">%1$d%%</string>
     <string name="settings_inner_glow_desc">玻璃边缘向中心散发的柔光。0 表示关闭。</string>
@@ -259,6 +261,13 @@
     <string name="settings_periodic_capture_interval">最大抓屏间隔</string>
     <string name="settings_periodic_capture_interval_value">%1$d ms</string>
     <string name="settings_periodic_capture_interval_desc">没有内容变化时的兜底抓屏间隔，默认 500 毫秒，仅变化抓屏模式显示。</string>
+    <string name="settings_launcher_capture_interval">桌面抓屏最小间隔</string>
+    <string name="settings_launcher_capture_interval_value">%1$d ms</string>
+    <string name="settings_launcher_capture_interval_desc">桌面背景重新抓取的最短间隔，0 表示不限制（跟随系统模糊刷新实时刷新）。</string>
+    <string name="settings_launcher_capture_interval_locked">锁屏 / 息屏时桌面抓屏间隔</string>
+    <string name="settings_launcher_capture_interval_locked_value">%1$d ms</string>
+    <string name="settings_launcher_capture_interval_locked_desc">锁屏与息屏状态下单独生效的桌面抓屏间隔，0 表示不限制；不影响亮屏桌面。</string>
+
     <string name="settings_section_capture_retry">抓屏开关</string>
     <string name="settings_capture_retry_enabled">失败重试</string>
     <string name="settings_capture_retry_enabled_desc">背景抓屏失败后自动重试，固定 320 毫秒一次、最多 3 次。</string>

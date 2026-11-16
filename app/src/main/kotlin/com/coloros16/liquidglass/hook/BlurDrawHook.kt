@@ -14993,23 +14993,28 @@ object BlurDrawHook {
     /** 注册期精修判定审计表（宿主类名 → 首次结论，只记一次） */
     private val polishVerdictSeenHosts = ConcurrentHashMap<String, Boolean>()
 
-    /** 精修判定结果按 elementId 缓存 500ms，热路径免每帧父链上溯 */
-    private fun polishedVerdictFor(elementId: Int): Boolean {
-        val nowMs = SystemClock.uptimeMillis()
-        val cached = polishVerdictCache[elementId]
-        // 一旦判定为精修即保持：重排/复用瞬间父链断开不会把高光带打回宽钝形态再切回
-        if (cached != null && (cached.value || nowMs - cached.atMs < POLISH_VERDICT_TTL_MS)) return cached.value
-        val entry = screenRegionMap[elementId]
-        val host = entry?.hostViewRef?.get()
-        // 注册期已有结论直接用；取不到宿主（重排/复用中间态）→ 沿用上次判定，不让宽高光先上屏
-        val value = entry?.polished ?: if (host != null) {
-            MaterialPolishPolicy.usePolishedMaterial(host)
-        } else {
-            cached?.value ?: false
+    /** 精修判定：高光增强全局开关（KEY_HIGHLIGHT_ENHANCE，500ms TTL），开则所有元素统一细高光带。 */
+    private fun polishedVerdictFor(elementId: Int): Boolean = highlightEnhanceEnabled()
+
+    /** 高光增强开关缓存（500ms TTL，热路径零 IPC）。 */
+    @Volatile
+    private var highlightEnhanceValue = Prefs.DEFAULT_HIGHLIGHT_ENHANCE
+
+    @Volatile
+    private var highlightEnhanceCachedAtMs = 0L
+
+    private fun highlightEnhanceEnabled(): Boolean {
+        val now = SystemClock.uptimeMillis()
+        if (now - highlightEnhanceCachedAtMs < 500L) return highlightEnhanceValue
+        highlightEnhanceValue = try {
+            api?.let { Prefs.read(it).getBoolean(Prefs.KEY_HIGHLIGHT_ENHANCE, Prefs.DEFAULT_HIGHLIGHT_ENHANCE) }
+                ?: Prefs.DEFAULT_HIGHLIGHT_ENHANCE
+        } catch (t: Throwable) {
+            Lg.w(TAG, "prefs read highlight_enhance failed, default true", t)
+            Prefs.DEFAULT_HIGHLIGHT_ENHANCE
         }
-        if (polishVerdictCache.size > 512) polishVerdictCache.clear()
-        polishVerdictCache[elementId] = PolishVerdict(nowMs, value)
-        return value
+        highlightEnhanceCachedAtMs = now
+        return highlightEnhanceValue
     }
 
     private fun buildParams(

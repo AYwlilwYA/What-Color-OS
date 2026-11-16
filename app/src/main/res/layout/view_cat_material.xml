@@ -557,6 +557,18 @@
             android:textAppearance="?attr/textAppearanceBodySmall"
             android:textColor="?android:attr/textColorSecondary" />
 
+        <com.coloros16.liquidglass.ui.LgSwitch android:id="@+id/switchHighlightEnhance" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_highlight_enhance" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100" android:minHeight="0dp"
+            android:layout_marginTop="16dp" />
+
+        <TextView
+            android:id="@+id/highlightEnhanceDesc"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="@string/settings_highlight_enhance_desc"
+            android:textAppearance="?attr/textAppearanceBodySmall"
+            android:textColor="?android:attr/textColorSecondary" />
+
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:layout_marginTop="16dp">
     <TextView
             android:id="@+id/innerGlowLabel"

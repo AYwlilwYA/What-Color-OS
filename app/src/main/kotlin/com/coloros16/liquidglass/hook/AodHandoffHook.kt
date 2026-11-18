@@ -190,6 +190,34 @@ object AodHandoffHook {
     }
 
     /**
+     * 热重载停机点：清装载标志与全部缓存/取值反射，让新类能重新装载。
+     *
+     * 不清 installed 会让新类的 install 走重复装载分支直接 return，整条进度泵停在旧类上。
+     */
+    fun shutdownForHotReload() {
+        installed = false
+        bridge = null
+        currentEdge = null
+        fromGetter = null
+        toGetter = null
+        stepFromGetter = null
+        stepToGetter = null
+        stepValueGetter = null
+        stepStateGetter = null
+        throttleAt.clear()
+        gateReadAt = 0L
+        revealReadAt = 0L
+        lastProgress = Float.NaN
+        lastState = "?"
+        lastStartToken = -1L
+        Lg.i(
+            TAG,
+            "handoff-hotreload-shutdown start=${startHits.get()} upd=${updateHits.get()} " +
+                "emit=${emitHits.get()}",
+        )
+    }
+
+    /**
      * 挂状态变更汇聚点：所有转场状态都经它，含逐帧 RUNNING 进度。
      *
      * 有动画时进度由帧回调直接送这里，不经手动推进方法；

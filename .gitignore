@@ -60,6 +60,7 @@ __pycache__/
 /app/src/main/assets/effect/meizu/
 # 本机取证脚本（含设备序列号/个人工具路径）
 /scripts/capture-coldstart-log.ps1
+/scripts/aod-cycle.ps1
 # 会话临时产物
 /.impeccable/
 /.tmp/

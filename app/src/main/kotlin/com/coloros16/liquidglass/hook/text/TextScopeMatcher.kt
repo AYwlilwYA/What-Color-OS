@@ -42,10 +42,15 @@ object TextScopeMatcher {
      */
     fun glassRegionHostAt(screenX: Int, screenY: Int, textView: View?): String? {
         val sb = statusBarBottom()
-        if (sb > 0 && screenY < sb) return null
+        if (sb > 0 && screenY < sb) {
+            logNoRegion(screenX, screenY, textView, "状态栏条带排除 sb=$sb")
+            return null
+        }
+        var rectHits = 0
         for (entry in BlurDrawHook.screenRegionMap.values) {
             val r = entry.region
             if (screenX < r.left || screenX > r.right || screenY < r.top || screenY > r.bottom) continue
+            rectHits++
             val host = entry.hostViewRef?.get()
             if (textView != null && host != null && !isDescendantOf(textView, host)) {
                 logMissOnce(entry.hostViewName, textView)
@@ -53,7 +58,40 @@ object TextScopeMatcher {
             }
             return entry.hostViewName
         }
+        logNoRegion(screenX, screenY, textView, if (rectHits == 0) "无矩形命中" else "矩形命中但归属全不符")
         return null
+    }
+
+    private var regionDumpAt = 0L
+
+    /**
+     * 未命中原因诊断：区分「状态栏排除 / 无矩形命中 / 归属不符」，
+     * 并每 10s 附一次区域全量快照（数量 + 各矩形 + 宿主名），用于判定是登记缺失还是坐标错位。
+     */
+    private fun logNoRegion(x: Int, y: Int, textView: View?, why: String) {
+        val tv = textView?.javaClass?.simpleName ?: "?"
+        val key = "noregion|$why|$tv"
+        val now = android.os.SystemClock.uptimeMillis()
+        val last = missLogged[key]
+        if (last == null || now - last >= 10_000L) {
+            missLogged[key] = now
+            Lg.i(TAG, "text-scope miss $why tv=$tv x=$x y=$y regions=${BlurDrawHook.screenRegionMap.size}")
+        }
+        if (now - regionDumpAt < 10_000L) return
+        regionDumpAt = now
+        val sb = StringBuilder("text-scope dump n=${BlurDrawHook.screenRegionMap.size} probe=$x,$y")
+        var i = 0
+        for (entry in BlurDrawHook.screenRegionMap.values) {
+            if (i++ >= 12) {
+                sb.append(" …")
+                break
+            }
+            val r = entry.region
+            sb.append(" | ${entry.hostViewName}[${r.left.toInt()},${r.top.toInt()},${r.right.toInt()},${r.bottom.toInt()}]")
+            val h = entry.hostViewRef?.get()
+            sb.append(if (h == null) "(host=null)" else "(host=${h.javaClass.simpleName})")
+        }
+        Lg.i(TAG, sb.toString())
     }
 
     /** textView 是否在 host 子树内（含自身）；父链上溯，深度上限防病态树。 */

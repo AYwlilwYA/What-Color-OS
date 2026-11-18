@@ -882,6 +882,7 @@ static void lg_region_worker(int site, void *a0, void *a1, unsigned a2,
 static void resolve_rgen_offsets(const char *exe, unsigned long rx_s, unsigned long rx_e,
                                  unsigned long bias) {
     if (g_rgen_resolved) return;
+    lg_elfsym_set_diag(lg_logf);
     int hit = 0;
     for (int i = 0; i < LG_RGEN_N; i++) {
         unsigned long va = 0;

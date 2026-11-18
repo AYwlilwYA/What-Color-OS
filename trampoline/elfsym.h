@@ -17,6 +17,11 @@ int lg_elfsym_find_many(const char *path, const char *const *names,
 // 最近一次查询的来源标记（诊断用）：0=未查 1=symtab 2=dynsym 3=debugdata
 int lg_elfsym_last_source(void);
 
+// 诊断输出钩子：由引擎注入日志函数；未注入时静默
+typedef void (*lg_elfsym_diag_fn)(const char *fmt, ...);
+void lg_elfsym_set_diag(lg_elfsym_diag_fn fn);
+void lg_elfsym_diag(const char *fmt, ...);
+
 #ifdef LG_HOST_TEST
 // 单测注入：宿主侧用自带解压实现替换设备 liblzma 路径
 typedef int (*lg_xz_decode_fn)(const unsigned char *src, size_t src_n,

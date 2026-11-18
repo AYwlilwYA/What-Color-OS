@@ -118,6 +118,11 @@ class XposedEntry : XposedModule() {
         } catch (t: Throwable) {
             Lg.w(TAG, "hot-reload: aod stage shutdown failed", t)
         }
+        try {
+            AodHandoffHook.shutdownForHotReload()
+        } catch (t: Throwable) {
+            Lg.w(TAG, "hot-reload: aod handoff shutdown failed", t)
+        }
         return true
     }
 

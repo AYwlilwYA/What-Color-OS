@@ -3,7 +3,9 @@
 // 解压走设备 liblzma：标准 lzma_stream_buffer_decode 或 7-Zip 变体 XzUnpacker_* 两套 API 任一
 #include <dlfcn.h>
 #include <fcntl.h>
+#include <stdarg.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -20,8 +22,21 @@
 #define DBG_IN_CAP (8u * 1024u * 1024u)
 
 static int g_last_source;
+static lg_elfsym_diag_fn g_diag;
 
 int lg_elfsym_last_source(void) { return g_last_source; }
+
+void lg_elfsym_set_diag(lg_elfsym_diag_fn fn) { g_diag = fn; }
+
+void lg_elfsym_diag(const char *fmt, ...) {
+    if (!g_diag) return;
+    char buf[192];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    g_diag("%s", buf);
+}
 
 struct elf_view {
     const unsigned char *b;
@@ -137,7 +152,9 @@ static int xz_standard(const unsigned char *src, size_t sn,
     return 0;
 }
 
-// 7-Zip 变体：XzUnpacker_Construct(void *p, ISzAllocPtr) / _Code(...) / _IsStreamWasFinished / _Free
+// 7-Zip 变体（设备 liblzma 实为 7-Zip 派生，无标准 lzma_* 导出）
+// XzUnpacker_CodeFull(p, src, &srcLen, dst, &dstLen, finishMode, &status)
+//   反汇编实证：内部把 x1→x8、x2  deref→x9 存进 p+904/+912，再尾调 XzUnpacker_Code
 // ISzAlloc = { void *(*Alloc)(ISzAllocPtr, size_t); void (*Free)(ISzAllocPtr, void *); }
 struct sz_alloc {
     void *(*alloc)(const struct sz_alloc *, size_t);
@@ -154,53 +171,42 @@ static void sz_free_impl(const struct sz_alloc *p, void *q) {
     free(q);
 }
 
+// CXzUnpacker 实测字段最高偏移 920（CodeFull 写 p+920），给 2KB 冗余
+#define XZ_OBJ_SIZE 2048
+
 static int xz_7zip(const unsigned char *src, size_t sn,
                    unsigned char *dst, size_t cap, size_t *out_n) {
     typedef void (*ctor_t)(void *, const struct sz_alloc *);
     typedef void (*dtor_t)(void *, const struct sz_alloc *);
-    // Code(void *p, const Byte *src, SizeT *srcLen, Byte *dest, SizeT *destLen,
-    //      ECoderFinishMode finishMode, ECoderStatus *status) —— 另有多一个 srcFinished 参数的变体
-    typedef int (*code8_t)(void *, const unsigned char *, size_t *, unsigned char *, size_t *,
-                           int, int *, int *);
-    typedef int (*code7_t)(void *, const unsigned char *, size_t *, unsigned char *, size_t *,
-                           int, int *);
+    typedef int (*full_t)(void *, const unsigned char *, size_t *, unsigned char *, size_t *,
+                          int, int *);
     typedef int (*done_t)(const void *);
 
     ctor_t ctor = (ctor_t)dlsym(RTLD_DEFAULT, "XzUnpacker_Construct");
-    code8_t code8 = (code8_t)dlsym(RTLD_DEFAULT, "XzUnpacker_Code");
+    full_t full = (full_t)dlsym(RTLD_DEFAULT, "XzUnpacker_CodeFull");
     done_t done = (done_t)dlsym(RTLD_DEFAULT, "XzUnpacker_IsStreamWasFinished");
     dtor_t dtor = (dtor_t)dlsym(RTLD_DEFAULT, "XzUnpacker_Free");
-    if (!ctor || !code8 || !done || !dtor) return -1;
+    if (!ctor || !full || !done || !dtor) return -1;
 
     struct sz_alloc al = {sz_alloc_impl, sz_free_impl};
-    // CXzUnpacker 实测 sizeof 约 0x140；给足冗余并清零，越界风险由富余空间吸收
-    unsigned char obj[1024];
-    memset(obj, 0, sizeof(obj));
+    unsigned char *obj = (unsigned char *)calloc(1, XZ_OBJ_SIZE);
+    if (!obj) return -1;
     ctor(obj, &al);
-    size_t in_left = sn, out_left = cap;
-    int status = 0, src_finished = 0;
-    // 先按 8 参变体调（多传一个 &srcFinished）；ABI 上多余实参被忽略，7 参变体同样安全
-    code8_t c8 = code8;
-    int rc = c8(obj, src, &in_left, dst, &out_left, 1 /* CODER_FINISH_END */, &status, &src_finished);
-    size_t produced = cap - out_left;
-    if (rc != 0 /* SZ_OK */ || !done(obj)) {
-        // 回退 7 参形态重试一次（对象已被消耗，重新构造）
-        dtor(obj, &al);
-        memset(obj, 0, sizeof(obj));
-        ctor(obj, &al);
-        in_left = sn;
-        out_left = cap;
-        status = 0;
-        code7_t c7 = (code7_t)code8;
-        rc = c7(obj, src, &in_left, dst, &out_left, 1, &status);
-        produced = cap - out_left;
-        int ok = (rc == 0 && done(obj));
-        dtor(obj, &al);
-        if (!ok) return -1;
-        *out_n = produced;
-        return 0;
-    }
+    size_t in_size = sn, out_size = cap;
+    int status = 0;
+    // 参数序反汇编实证（CodeFull 把 x6→x7、x5→w6、x1→x8、x1置零、w5=1 后尾调 Code）：
+    //   CodeFull(p, src, &srcLen, dst, &dstLen, finishMode, &status)
+    //   Code    (p, src, &srcLen, dst, &dstLen, srcFinished, finishMode, &status)
+    // Code 入口把 *srcLen/*dstLen 清零 → 回填「本次处理量」，故 produced 直接取 out_size
+    int rc = full(obj, src, &in_size, dst, &out_size, 0, &status);
+    size_t produced = out_size;
+    int finished = done(obj);
     dtor(obj, &al);
+    free(obj);
+    if (rc != 0 || !finished || produced < 64 || produced > cap) {
+        lg_elfsym_diag("7z rc=%d st=%d fin=%d out=%zu in=%zu", rc, status, finished, produced, in_size);
+        return -1;
+    }
     *out_n = produced;
     return 0;
 }
@@ -215,6 +221,16 @@ static int xz_decode(const unsigned char *src, size_t sn,
     return xz_7zip(src, sn, dst, cap, out_n);
 }
 
+// 解压能力自检日志：区分「无解码 API」与「有 API 但解码失败」
+static void xz_diag_once(void) {
+    static int done;
+    if (done) return;
+    done = 1;
+    int std_api = dlsym(RTLD_DEFAULT, "lzma_stream_buffer_decode") != NULL;
+    int z7_api = dlsym(RTLD_DEFAULT, "XzUnpacker_Code") != NULL;
+    lg_elfsym_diag("xz-api std=%d 7z=%d", std_api, z7_api);
+}
+
 // .gnu_debugdata：xz 压缩的独立 ELF（只含 .symtab/.strtab/.shstrtab）
 static int debugdata_lookup(const struct elf_view *v, const char *want, unsigned long *va_out) {
     const unsigned char *sec = NULL;
@@ -225,17 +241,35 @@ static int debugdata_lookup(const struct elf_view *v, const char *want, unsigned
             break;
         }
     }
-    if (!sec) return -1;
+    if (!sec) {
+        lg_elfsym_diag("dbgdata 节缺失");
+        return -1;
+    }
     uint64_t off = sh_u64(sec, 24), size = sh_u64(sec, 32);
-    if (!size || size > DBG_IN_CAP || off + size > v->n) return -1;
+    if (!size || size > DBG_IN_CAP || off + size > v->n) {
+        lg_elfsym_diag("dbgdata 尺寸异常 size=%llu", (unsigned long long)size);
+        return -1;
+    }
+    xz_diag_once();
     unsigned char *out = (unsigned char *)malloc(DBG_OUT_CAP);
-    if (!out) return -1;
+    if (!out) {
+        lg_elfsym_diag("dbgdata 输出缓冲分配失败");
+        return -1;
+    }
     size_t produced = 0;
     int rc = -1;
-    if (xz_decode(v->b + off, (size_t)size, out, DBG_OUT_CAP, &produced) == 0 && produced >= 64) {
+    if (xz_decode(v->b + off, (size_t)size, out, DBG_OUT_CAP, &produced) != 0) {
+        lg_elfsym_diag("dbgdata 解压失败 in=%llu", (unsigned long long)size);
+    } else if (produced < 64) {
+        lg_elfsym_diag("dbgdata 解压产物过小 out=%zu", produced);
+    } else {
         struct elf_view dv;
-        if (view_open(out, produced, &dv) == 0)
+        if (view_open(out, produced, &dv) != 0)
+            lg_elfsym_diag("dbgdata 产物非 ELF out=%zu", produced);
+        else {
             rc = scan_type(&dv, SH_SYMTAB, want, va_out);
+            if (rc != 0) lg_elfsym_diag("dbgdata 内未命中符号 out=%zu", produced);
+        }
     }
     free(out);
     return rc;

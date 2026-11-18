@@ -8720,21 +8720,7 @@ object BlurDrawHook {
             // 真机字段名混淆 → 特征启发式：int 且 0<值<=measuredWidth，跨帧变化者优先）；
             // 次选 foreground bounds 宽（动画期插件每帧重设 bounds）；都拿不到回落 measured（静态）。
             val animW = readCapsuleAnimWidth(capsule, cvW)
-            val baseW = if (animW in 1..cvW) animW else cvW
-            val sx = capsule.scaleX
-            val sy = capsule.scaleY
-            if (baseW != lastCapsuleDiagW || sx != lastCapsuleDiagSx) {
-                lastCapsuleDiagW = baseW
-                lastCapsuleDiagSx = sx
-                logThrottled("seedling-width", Log.INFO, 200L) {
-                    "seedling-card: width cv=$cvW anim=$animW base=$baseW sx=$sx sy=$sy cls=${capsule.javaClass.name}"
-                }
-            }
-            // 插件动画期（宽度/缩放变化）容器不逐帧 dispatchDraw → 武装帧回调主动重录（静止自停）
-            if (animW in 1..cvW || sx != 1f || sy != 1f) armCapsuleFramePump(containerView)
-            // 视觉宽=布局/动画宽×scaleX（插件弹性动画可能走缩放通道）
-            val drawW = (baseW * sx).toInt().coerceAtLeast(1)
-            val drawH = (cvH * sy).toInt().coerceAtLeast(1)
+            val drawW = if (animW in 1..cvW) animW else cvW
             // ★ **不能用 CapsuleView.getLocationOnScreen()**：真机实测返回 (720,80) = 屏幕中心
             //   （玻璃画在岛中心，用户反馈"岛偏了"）。原因在插件里——`CapsuleContainer.q()`
             //   计算居中位置时 CapsuleView 尚未测量（measuredWidth=0 → (1440-0)/2=720），

@@ -87,6 +87,7 @@ import com.coloros16.liquidglass.ui.aod.AodEditController
 import com.coloros16.liquidglass.ui.aod.AodMenuController
 import com.coloros16.liquidglass.ui.aod.AodSettingsController
 import com.coloros16.liquidglass.ui.aod.AodSettingsPages
+import com.coloros16.liquidglass.ui.sponsor.SponsorCloud
 import com.coloros16.liquidglass.update.UpdateChecker
 import com.coloros16.liquidglass.wallpaper.Lg2DWallpaperService
 import com.coloros16.liquidglass.wallpaper.Lg3DWallpaperService
@@ -348,11 +349,11 @@ class SettingsActivity : AppCompatActivity() {
     /** 当前所在栏。 */
     private var currentTab = NavColumn.HOME
 
-    /** 已赞助名单条目：首字母 / 名字 / 头像资源名（空=用首字母圆底）。 */
-    private data class Sponsor(val initial: String, val name: String, val avatar: String)
-
     /** 已赞助名单内存缓存（null=未拉取过；失败不缓存，下次进主页重试）。 */
-    private var sponsorCache: List<Sponsor>? = null
+    private var sponsorCache: List<SponsorCloud.Row>? = null
+
+    /** 已拉到的云端头像（键=名单第三段原值；子线程写入，主线程只读）。 */
+    private val sponsorAvatars = ConcurrentHashMap<String, Bitmap>()
 
     private fun stack(): MutableList<String> = stacks.getValue(currentTab)
 
@@ -774,12 +775,12 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
-    /** 已赞助名单：GitHub raw 拉取（首字母|名字），拉到才显示，空/失败隐藏。 */
+    /** 已赞助名单：云端拉取（首字母|名字|头像），拉到才显示，空/失败隐藏。 */
     private fun loadSponsors(view: View) {
         val head = view.findViewById<View>(R.id.homeSponsorsHead)
         val card = view.findViewById<View>(R.id.homeSponsorsCard)
         val list = view.findViewById<LinearLayout>(R.id.homeSponsorsList)
-        fun render(rows: List<Sponsor>) {
+        fun render(rows: List<SponsorCloud.Row>) {
             if (!view.isAttachedToWindow) return
             if (rows.isEmpty()) {
                 head.visibility = View.GONE
@@ -796,53 +797,67 @@ class SettingsActivity : AppCompatActivity() {
                 initialView.text = row.initial
                 initialView.setBackgroundResource(colors[i % colors.size])
                 val avatarView = col.findViewById<ImageView>(R.id.sponsorAvatar)
-                val res = if (row.avatar.isEmpty()) 0 else resources.getIdentifier(
-                    row.avatar, "drawable", packageName
-                )
-                if (res != 0) {
-                    avatarView.setImageResource(res)
-                    avatarView.visibility = View.VISIBLE
-                    initialView.visibility = View.GONE
+                val bmp = sponsorAvatars[row.avatar]
+                val res = if (bmp != null || row.avatar.isEmpty()) {
+                    0
+                } else {
+                    resources.getIdentifier(row.avatar, "drawable", packageName)
+                }
+                when {
+                    bmp != null && !bmp.isRecycled -> {
+                        avatarView.setImageBitmap(bmp)
+                        avatarView.visibility = View.VISIBLE
+                        initialView.visibility = View.GONE
+                    }
+                    res != 0 -> {
+                        avatarView.setImageResource(res)
+                        avatarView.visibility = View.VISIBLE
+                        initialView.visibility = View.GONE
+                    }
                 }
                 col.findViewById<TextView>(R.id.sponsorName).text = row.name
                 list.addView(col)
             }
             head.visibility = View.VISIBLE
             card.visibility = View.VISIBLE
-            Lg.i(TAG_NAV, "sponsors rendered n=${rows.size}")
+            Lg.i(TAG_NAV, "sponsors rendered n=${rows.size} avatars=${sponsorAvatars.size}")
         }
-        sponsorCache?.let { render(it); return }
+        sponsorCache?.let {
+            render(it)
+            fetchSponsorAvatars(it, view) { render(it) }
+            return
+        }
         Thread {
-            val rows = fetchSponsors()
+            val rows = SponsorCloud.fetch(SPONSORS_URL)
             if (rows != null) sponsorCache = rows
             runOnUiThread { render(rows ?: emptyList()) }
+            if (!rows.isNullOrEmpty()) {
+                fetchSponsorAvatars(rows, view) { runOnUiThread { render(rows) } }
+            }
         }.start()
     }
 
-    /** 拉 GitHub raw 名单；null=网络失败（不缓存，下次进主页重试）。
-     *  行格式：首字母|名字 或 首字母|名字|头像资源名（第三段可省）。 */
-    private fun fetchSponsors(): List<Sponsor>? = try {
-        val conn = URL(SPONSORS_URL).openConnection() as HttpURLConnection
-        conn.connectTimeout = 5000
-        conn.readTimeout = 5000
-        conn.inputStream.bufferedReader().use { r ->
-            r.readLines().mapNotNull { line ->
-                val t = line.trim()
-                if (t.isEmpty() || t.startsWith("#")) {
-                    null
-                } else {
-                    val p = t.split('|')
-                    if (p.size >= 2 && p[0].trim().isNotEmpty()) {
-                        Sponsor(p[0].trim(), p[1].trim(), p.getOrNull(2)?.trim().orEmpty())
-                    } else {
-                        null
-                    }
+    /** 后台逐个拉云端头像，每拉到一张回调一次刷新；纯资源名不走网络。 */
+    private fun fetchSponsorAvatars(
+        rows: List<SponsorCloud.Row>,
+        view: View,
+        onOne: () -> Unit,
+    ) {
+        val pending = rows.map { it.avatar }.filter {
+            it.isNotEmpty() && !sponsorAvatars.containsKey(it) &&
+                (it.startsWith("https://") || it.contains('.'))
+        }.distinct()
+        if (pending.isEmpty()) return
+        Thread {
+            pending.forEach { ref ->
+                if (!view.isAttachedToWindow) return@Thread
+                val bmp = SponsorCloud.loadAvatar(applicationContext, SPONSORS_URL, ref)
+                if (bmp != null) {
+                    sponsorAvatars[ref] = bmp
+                    onOne()
                 }
             }
-        }.also { Lg.i(TAG_NAV, "sponsors fetched n=${it.size}") }
-    } catch (t: Throwable) {
-        Lg.w(TAG_NAV, "sponsors fetch failed", t)
-        null
+        }.start()
     }
 
     /** 功能页：搜索框 + 六大功能分类，按中文名/说明/关键词过滤。 */
@@ -5433,7 +5448,7 @@ class SettingsActivity : AppCompatActivity() {
         private const val QQ_GROUP_NUMBER = "1102985644"
         private const val QQ_PACKAGE = "com.tencent.mobileqq"
         private const val SPONSORS_URL =
-            "https://raw.githubusercontent.com/AYwlilwYA/What-Color-OS/main/sponsors.txt"
+            "https://gitlab.com/AYwlilwYA/what-color-os-assets/-/raw/main/sponsors.txt"
         private const val AUTHOR_NAME = "AYwlilwYA"
     }
 }

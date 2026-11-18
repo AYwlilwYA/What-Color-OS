@@ -166,7 +166,11 @@ class XposedEntry : XposedModule() {
             }
         }
         Lg.i(TAG, "hot-reload: old hooks unhooked=$unhooked/$pkg, reinstalling into $pkg")
-        doInstall(pkg, cl)
+        try {
+            doInstall(pkg, cl)
+        } catch (t: Throwable) {
+            Lg.e(TAG, "hot-reload: reinstall threw ${t.javaClass.name}: ${t.message}", t)
+        }
         Lg.i(TAG, "hot-reload: reinstall done for $pkg, version=$MODULE_VERSION")
     }
 
@@ -307,31 +311,48 @@ class XposedEntry : XposedModule() {
         }
     }
 
+    /**
+     * 逐个装载：每项独立兜异常，一项失败只降级该项并打栈，不连坐后面的项。
+     *
+     * 顺序直调时任一项抛异常会静默中断整条链（框架侧吞栈），后续功能全部装不上。
+     */
+    private fun installStep(name: String, body: () -> Unit) {
+        try {
+            body()
+        } catch (t: Throwable) {
+            Lg.e(TAG, "install-step-fail $name ${t.javaClass.name}: ${t.message}", t)
+        }
+    }
+
     private fun installHooks(classLoader: ClassLoader) {
         // 仅 SystemUI 进程：Hook B 绘制替换 / Hook C 场景过滤（占位实现；类名/方法名来自旧版反编译，待新版核对）。
         // Hook A（BlurService 端原图注入）已随 [2026-08-13 用户决定] 全移除——系统模糊管线原样，
         // 玻璃源 = SystemUI 端每元素背景源（BlurDrawHook 内 captureDisplay）。
-        BlurDrawHook.install(this, classLoader)
+        installStep("BlurDrawHook") { BlurDrawHook.install(this, classLoader) }
         // 锁屏玻璃（时钟/卡片/圆钮）：PR #3 DreamGlass 方案，RenderEffect 合成期挂载
-        KeyguardGlassHook.install(this, classLoader)
+        installStep("KeyguardGlassHook") { KeyguardGlassHook.install(this, classLoader) }
         // [spec/81 2026-09-17 停用] 锁屏时钟玻璃化：真机品红二分实证 `View.draw` hook 未命中
         // 时钟数字 View（数字仍是系统原样），接管本身没发生 → 保持停用，设置页入口已移除。
         // LockScreenClockHook.install(this, classLoader)
-        SceneFilter.install(this, classLoader)
+        installStep("SceneFilter") { SceneFilter.install(this, classLoader) }
         // 状态栏：显隐 / 边距 / 排序 / 三合一（内部按功能逐项门控）
-        StatusBarHook.install(this, classLoader)
+        installStep("StatusBarHook") { StatusBarHook.install(this, classLoader) }
         // alive 息屏衔接进度泵（空壳计数器，验证链）
-        AodHandoffHook.install(this, classLoader)
+        installStep("AodHandoffHook") { AodHandoffHook.install(this, classLoader) }
         // 桌面时钟锚点接收（锁屏→桌面平移的 HOME 锚点来源）
-        DesktopClockAnchorBridge.install(this, classLoader)
+        installStep("DesktopClockAnchorBridge") { DesktopClockAnchorBridge.install(this, classLoader) }
         // 状态栏时钟矩形（HOME 锚点第二优先级，进程内直取）
-        StatusBarClockAnchorHook.install(this, classLoader)
+        installStep("StatusBarClockAnchorHook") { StatusBarClockAnchorHook.install(this, classLoader) }
         // 锁屏时钟高度基准（HOME 锚点缩放的分子分母）
-        LockClockHeightHook.install(this, classLoader)
+        installStep("LockClockHeightHook") { LockClockHeightHook.install(this, classLoader) }
         // 三态转场舞台：把自绘遮罩层挂进 AOD 根布局，消费求值桥输出
-        com.coloros16.liquidglass.hook.aod.AodStageHook.install(this, classLoader)
+        installStep("AodStageHook") {
+            com.coloros16.liquidglass.hook.aod.AodStageHook.install(this, classLoader)
+        }
         // 锁屏↔桌面边沿：系统无统一进度泵，用锁屏显隐/退场动画起内部时间轴
-        com.coloros16.liquidglass.hook.aod.KeyguardEdgeHook.install(this, classLoader)
+        installStep("KeyguardEdgeHook") {
+            com.coloros16.liquidglass.hook.aod.KeyguardEdgeHook.install(this, classLoader)
+        }
         // [spec/82] ⛔ 曾有 display-root 通道探针挂在这里，**已删除** —— 见 DisplayRootChannel 头部说明：
         // 它在屏幕暗/AOD 时会连续 120 秒每 5 秒抓一次整屏，与 UI 合成抢 SF，
         // 造成「进桌面卡顿」「SystemUI 重启后异常」。通道本身已验证通过，不再需要常驻探针。

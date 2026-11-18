@@ -27,12 +27,12 @@
                     
                 </LinearLayout>
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
-                    <Switch android:id="@+id/switchCornerAdaptive" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_corner_adaptive" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                    <com.coloros16.liquidglass.ui.LgSwitch android:id="@+id/switchCornerAdaptive" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_corner_adaptive" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
                     />
                     <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_corner_adaptive_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
                 </LinearLayout>
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
-                    <Switch android:id="@+id/switchCornerFollowParent" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_corner_follow_parent" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                    <com.coloros16.liquidglass.ui.LgSwitch android:id="@+id/switchCornerFollowParent" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_corner_follow_parent" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
                     />
                     <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_corner_follow_parent_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
                 </LinearLayout>

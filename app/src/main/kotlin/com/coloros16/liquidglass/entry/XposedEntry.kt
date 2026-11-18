@@ -6,12 +6,17 @@ import com.coloros16.liquidglass.hook.AodHandoffHook
 import com.coloros16.liquidglass.hook.AppGlassHook
 import com.coloros16.liquidglass.hook.BlurDrawHook
 import com.coloros16.liquidglass.hook.DemoGlassHook
+import com.coloros16.liquidglass.hook.DesktopClockAnchorBridge
+import com.coloros16.liquidglass.hook.DesktopClockAnchorHook
 import com.coloros16.liquidglass.hook.LauncherAnimHook
 import com.coloros16.liquidglass.hook.LauncherHook
 import com.coloros16.liquidglass.hook.LgNativeProbe
 import com.coloros16.liquidglass.hook.LauncherTiltHook
+import com.coloros16.liquidglass.hook.KeyguardGlassHook
+import com.coloros16.liquidglass.hook.LockClockHeightHook
 import com.coloros16.liquidglass.hook.LockScreenClockHook
 import com.coloros16.liquidglass.hook.SceneFilter
+import com.coloros16.liquidglass.hook.StatusBarClockAnchorHook
 import com.coloros16.liquidglass.hook.StatusBarHook
 import com.coloros16.liquidglass.hook.SystemUiLifecycle
 import com.coloros16.liquidglass.hook.TiltPath
@@ -108,6 +113,11 @@ class XposedEntry : XposedModule() {
         } catch (t: Throwable) {
             Lg.w(TAG, "hot-reload: shutdown step failed", t)
         }
+        try {
+            com.coloros16.liquidglass.hook.aod.AodStageHook.shutdownForHotReload()
+        } catch (t: Throwable) {
+            Lg.w(TAG, "hot-reload: aod stage shutdown failed", t)
+        }
         return true
     }
 
@@ -170,6 +180,9 @@ class XposedEntry : XposedModule() {
         }
         // 热重载后新类静态为空，重装一次文件日志门控
         installLogGate()
+        if (packageName == PACKAGE_SYSTEMUI && crashGuardBlocks(this)) {
+            return
+        }
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             Lg.w(TAG, "device SDK=${Build.VERSION.SDK_INT} < 29(Q), skip install")
             return
@@ -205,6 +218,7 @@ class XposedEntry : XposedModule() {
                     if (profile.launcherAnimHook) LauncherAnimHook.install(this, classLoader)
                     LauncherTiltHook.install(this, classLoader)
                 }
+                DesktopClockAnchorHook.install(this, classLoader)
             }
             // 第三方 App（相册/计算器/智能侧边栏/速览）：A/B 族模糊挂载点登记（组件清单 + 预设按组件命中）。
             // 渲染腿尚未接通（进程内无抓屏权限拿不到背景源），背景仍由系统模糊渲染，见 AppGlassHook 头注。
@@ -244,11 +258,62 @@ class XposedEntry : XposedModule() {
         }
     }
 
+    /**
+     * 循环崩守卫：窗口内到达安装点的不同 SystemUI pid 达到阈值 → 强制关总开关并跳过本次安装。
+     * 账本用 commit 落盘（进程随时会崩，apply 异步写可能丢）；读写失败一律 fail-open 不拦安装。
+     */
+    private fun crashGuardBlocks(module: XposedEntry): Boolean {
+        val windowMs = 2 * 60_000L
+        val threshold = 4
+        return try {
+            val prefs = Prefs.read(module)
+            val now = System.currentTimeMillis()
+            val pid = android.os.Process.myPid()
+            val entries = (prefs.getString(Prefs.KEY_CRASH_GUARD_PIDS, "") ?: "")
+                .split(';')
+                .mapNotNull { part ->
+                    val bits = part.split(',')
+                    val ts = bits.getOrNull(0)?.toLongOrNull()
+                    val p = bits.getOrNull(1)?.toIntOrNull()
+                    if (ts != null && p != null && now - ts in 0L until windowMs) p to ts else null
+                }
+            val byPid = HashMap<Int, Long>()
+            for ((p, ts) in entries) byPid[p] = maxOf(byPid[p] ?: 0L, ts)
+            byPid[pid] = now
+            if (byPid.size >= threshold) {
+                prefs.edit()
+                    .putBoolean(Prefs.KEY_MASTER, false)
+                    .putString(Prefs.KEY_CRASH_GUARD_PIDS, "")
+                    .commit()
+                Lg.e(
+                    TAG,
+                    "crash-guard: ${byPid.size} distinct systemui pids within ${windowMs / 60_000}min " +
+                        "pids=${byPid.keys.sorted()}, master forced OFF",
+                )
+                true
+            } else {
+                prefs.edit()
+                    .putString(
+                        Prefs.KEY_CRASH_GUARD_PIDS,
+                        byPid.entries.joinToString(";") { "${it.value},${it.key}" },
+                    )
+                    .commit()
+                Lg.e(TAG, "crash-guard pid=$pid window=${byPid.size}/$threshold")
+                false
+            }
+        } catch (t: Throwable) {
+            Lg.e(TAG, "crash-guard failed ${t.javaClass.simpleName}: ${t.message}, continue install")
+            false
+        }
+    }
+
     private fun installHooks(classLoader: ClassLoader) {
         // 仅 SystemUI 进程：Hook B 绘制替换 / Hook C 场景过滤（占位实现；类名/方法名来自旧版反编译，待新版核对）。
         // Hook A（BlurService 端原图注入）已随 [2026-08-13 用户决定] 全移除——系统模糊管线原样，
         // 玻璃源 = SystemUI 端每元素背景源（BlurDrawHook 内 captureDisplay）。
         BlurDrawHook.install(this, classLoader)
+        // 锁屏玻璃（时钟/卡片/圆钮）：PR #3 DreamGlass 方案，RenderEffect 合成期挂载
+        KeyguardGlassHook.install(this, classLoader)
         // [spec/81 2026-09-17 停用] 锁屏时钟玻璃化：真机品红二分实证 `View.draw` hook 未命中
         // 时钟数字 View（数字仍是系统原样），接管本身没发生 → 保持停用，设置页入口已移除。
         // LockScreenClockHook.install(this, classLoader)
@@ -257,6 +322,16 @@ class XposedEntry : XposedModule() {
         StatusBarHook.install(this, classLoader)
         // alive 息屏衔接进度泵（空壳计数器，验证链）
         AodHandoffHook.install(this, classLoader)
+        // 桌面时钟锚点接收（锁屏→桌面平移的 HOME 锚点来源）
+        DesktopClockAnchorBridge.install(this, classLoader)
+        // 状态栏时钟矩形（HOME 锚点第二优先级，进程内直取）
+        StatusBarClockAnchorHook.install(this, classLoader)
+        // 锁屏时钟高度基准（HOME 锚点缩放的分子分母）
+        LockClockHeightHook.install(this, classLoader)
+        // 三态转场舞台：把自绘遮罩层挂进 AOD 根布局，消费求值桥输出
+        com.coloros16.liquidglass.hook.aod.AodStageHook.install(this, classLoader)
+        // 锁屏↔桌面边沿：系统无统一进度泵，用锁屏显隐/退场动画起内部时间轴
+        com.coloros16.liquidglass.hook.aod.KeyguardEdgeHook.install(this, classLoader)
         // [spec/82] ⛔ 曾有 display-root 通道探针挂在这里，**已删除** —— 见 DisplayRootChannel 头部说明：
         // 它在屏幕暗/AOD 时会连续 120 秒每 5 秒抓一次整屏，与 UI 合成抢 SF，
         // 造成「进桌面卡顿」「SystemUI 重启后异常」。通道本身已验证通过，不再需要常驻探针。

@@ -1,0 +1,295 @@
+{
+  "size": 192,
+  "viewport": 150.0,
+  "corner": 25.0,
+  "icons": [
+    {
+      "key": "phone",
+      "label": "电话",
+      "file": "phone.png",
+      "gradient": [
+        "#4ADE80",
+        "#16A34A"
+      ],
+      "size": 192,
+      "maskViewport": 150.0,
+      "maskCorner": 25.0
+    },
+    {
+      "key": "messages",
+      "label": "信息",
+      "file": "messages.png",
+      "gradient": [
+        "#5BD98A",
+        "#22A356"
+      ],
+      "size": 192,
+      "maskViewport": 150.0,
+      "maskCorner": 25.0
+    },
+    {
+      "key": "browser",
+      "label": "浏览器",
+      "file": "browser.png",
+      "gradient": [
+        "#7FC0FF",
+        "#2F76E0"
+      ],
+      "size": 192,
+      "maskViewport": 150.0,
+      "maskCorner": 25.0
+    },
+    {
+      "key": "camera",
+      "label": "相机",
+      "file": "camera.png",
+      "gradient": [
+        "#6B7480",
+        "#2B313A"
+      ],
+      "size": 192,
+      "maskViewport": 150.0,
+      "maskCorner": 25.0
+    },
+    {
+      "key": "gallery",
+      "label": "相册",
+      "file": "gallery.png",
+      "gradient": [
+        "#FF9A6B",
+        "#F2545B"
+      ],
+      "size": 192,
+      "maskViewport": 150.0,
+      "maskCorner": 25.0
+    },
+    {
+      "key": "weather",
+      "label": "天气",
+      "file": "weather.png",
+      "gradient": [
+        "#63BEFF",
+        "#2C7EE6"
+      ],
+      "size": 192,
+      "maskViewport": 150.0,
+      "maskCorner": 25.0
+    },
+    {
+      "key": "notes",
+      "label": "便签",
+      "file": "notes.png",
+      "gradient": [
+        "#FFD65C",
+        "#EFA71C"
+      ],
+      "size": 192,
+      "maskViewport": 150.0,
+      "maskCorner": 25.0
+    },
+    {
+      "key": "clock",
+      "label": "时钟",
+      "file": "clock.png",
+      "gradient": [
+        "#5C6470",
+        "#242A32"
+      ],
+      "size": 192,
+      "maskViewport": 150.0,
+      "maskCorner": 25.0
+    },
+    {
+      "key": "calculator",
+      "label": "计算器",
+      "file": "calculator.png",
+      "gradient": [
+        "#5F6773",
+        "#2A3038"
+      ],
+      "size": 192,
+      "maskViewport": 150.0,
+      "maskCorner": 25.0
+    },
+    {
+      "key": "files",
+      "label": "文件",
+      "file": "files.png",
+      "gradient": [
+        "#6FC5FF",
+        "#2E82E0"
+      ],
+      "size": 192,
+      "maskViewport": 150.0,
+      "maskCorner": 25.0
+    },
+    {
+      "key": "recorder",
+      "label": "录音",
+      "file": "recorder.png",
+      "gradient": [
+        "#F2646E",
+        "#C9333F"
+      ],
+      "size": 192,
+      "maskViewport": 150.0,
+      "maskCorner": 25.0
+    },
+    {
+      "key": "settings",
+      "label": "设置",
+      "file": "settings.png",
+      "gradient": [
+        "#7A8492",
+        "#3A424C"
+      ],
+      "size": 192,
+      "maskViewport": 150.0,
+      "maskCorner": 25.0
+    },
+    {
+      "key": "music",
+      "label": "音乐",
+      "file": "music.png",
+      "gradient": [
+        "#FF7BA9",
+        "#E23E77"
+      ],
+      "size": 192,
+      "maskViewport": 150.0,
+      "maskCorner": 25.0
+    },
+    {
+      "key": "video",
+      "label": "视频",
+      "file": "video.png",
+      "gradient": [
+        "#FF8FB8",
+        "#DE5288"
+      ],
+      "size": 192,
+      "maskViewport": 150.0,
+      "maskCorner": 25.0
+    },
+    {
+      "key": "store",
+      "label": "商店",
+      "file": "store.png",
+      "gradient": [
+        "#FFA45C",
+        "#EE641F"
+      ],
+      "size": 192,
+      "maskViewport": 150.0,
+      "maskCorner": 25.0
+    },
+    {
+      "key": "mail",
+      "label": "邮件",
+      "file": "mail.png",
+      "gradient": [
+        "#6FA8FF",
+        "#3060D8"
+      ],
+      "size": 192,
+      "maskViewport": 150.0,
+      "maskCorner": 25.0
+    },
+    {
+      "key": "calendar",
+      "label": "日历",
+      "file": "calendar.png",
+      "gradient": [
+        "#FFFFFF",
+        "#EDF1F6"
+      ],
+      "size": 192,
+      "maskViewport": 150.0,
+      "maskCorner": 25.0
+    },
+    {
+      "key": "wallet",
+      "label": "钱包",
+      "file": "wallet.png",
+      "gradient": [
+        "#5FD3B4",
+        "#1F9C7C"
+      ],
+      "size": 192,
+      "maskViewport": 150.0,
+      "maskCorner": 25.0
+    },
+    {
+      "key": "health",
+      "label": "健康",
+      "file": "health.png",
+      "gradient": [
+        "#FF7C8A",
+        "#E23E52"
+      ],
+      "size": 192,
+      "maskViewport": 150.0,
+      "maskCorner": 25.0
+    },
+    {
+      "key": "maps",
+      "label": "地图",
+      "file": "maps.png",
+      "gradient": [
+        "#7ED9A8",
+        "#2FA36B"
+      ],
+      "size": 192,
+      "maskViewport": 150.0,
+      "maskCorner": 25.0
+    },
+    {
+      "key": "social",
+      "label": "动态",
+      "file": "social.png",
+      "gradient": [
+        "#FFC94D",
+        "#F09A12"
+      ],
+      "size": 192,
+      "maskViewport": 150.0,
+      "maskCorner": 25.0
+    },
+    {
+      "key": "chat",
+      "label": "消息",
+      "file": "chat.png",
+      "gradient": [
+        "#4FD873",
+        "#1E9E4A"
+      ],
+      "size": 192,
+      "maskViewport": 150.0,
+      "maskCorner": 25.0
+    },
+    {
+      "key": "zen",
+      "label": "禅定",
+      "file": "zen.png",
+      "gradient": [
+        "#6FA0FF",
+        "#3055D6"
+      ],
+      "size": 192,
+      "maskViewport": 150.0,
+      "maskCorner": 25.0
+    },
+    {
+      "key": "tools",
+      "label": "工具",
+      "file": "tools.png",
+      "gradient": [
+        "#8B94A2",
+        "#454D58"
+      ],
+      "size": 192,
+      "maskViewport": 150.0,
+      "maskCorner": 25.0
+    }
+  ]
+}

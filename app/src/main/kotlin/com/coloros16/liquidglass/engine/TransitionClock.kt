@@ -21,6 +21,9 @@ class TransitionClock(
     private val nowMs: () -> Long = { System.nanoTime() / 1_000_000L },
 ) {
 
+    /** 时钟时间源：起播与推进必须用同一基准，混用会让进度恒为 0。 */
+    fun now(): Long = nowMs()
+
     private val listeners = CopyOnWriteArrayList<ClockListener>()
 
     private var edge: TransitionEdge? = null
@@ -32,6 +35,7 @@ class TransitionClock(
     private var playStartMs: Long = 0L
     private var playFromT: Float = 0f
     private var playDurationMs: Long = 0L
+    private var playDelayMs: Long = 0L
 
     @Synchronized
     fun state(): ClockState = ClockState(edge, source, t, playing, revision)
@@ -60,19 +64,26 @@ class TransitionClock(
         setT(edge, value, ClockSource.MANUAL)
     }
 
-    /** 起播：由调用方按帧调 [advance] 推进。 */
+    /**
+     * 起播：由调用方按帧调 [advance] 推进。
+     *
+     * [startDelayMs] 是起手停顿：这段时间内进度停在 [from] 不动，之后才按 [durationMs] 归一化。
+     * 停顿不占时长，各通道 fraction 不受稀释。
+     */
     @Synchronized
     fun play(
         edge: TransitionEdge,
         durationMs: Long,
         from: Float = 0f,
         source: ClockSource = ClockSource.PREVIEW,
+        startDelayMs: Long = 0L,
     ) {
         this.edge = edge
         this.source = source
         this.playFromT = clamp01(from)
         this.t = this.playFromT
         this.playDurationMs = durationMs.coerceAtLeast(1L)
+        this.playDelayMs = startDelayMs.coerceAtLeast(0L)
         this.playStartMs = nowMs()
         this.playing = true
         notifyChanged()
@@ -92,7 +103,7 @@ class TransitionClock(
     @Synchronized
     fun advance(now: Long = nowMs()): Boolean {
         if (!playing) return false
-        val elapsed = now - playStartMs
+        val elapsed = now - playStartMs - playDelayMs
         val next = if (elapsed <= 0L) playFromT else playFromT + elapsed.toFloat() / playDurationMs
         if (next >= 1f) {
             t = 1f

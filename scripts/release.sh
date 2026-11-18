@@ -18,10 +18,10 @@
 set -euo pipefail
 
 # ---------------------------------------------------------------- 配置
-REPO="AYwlilwYA/ColorOS16-LiquidGlass"
+REPO="AYwlilwYA/What-Color-OS"
 MAIN_BRANCH="main"
-APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
-GRADLE_TASK=":app:assembleDebug"
+APK_PATH="app/build/outputs/apk/release/app-release.apk"
+GRADLE_TASK=":app:assembleRelease"
 
 # ---------------------------------------------------------------- 参数
 VERSION="${1:-}"
@@ -119,7 +119,7 @@ APK_SIZE="$(du -h "$APK_PATH" | cut -f1)"
 info "产物: $APK_PATH ($APK_SIZE)"
 
 # 发布时使用带版本号的文件名
-APK_NAME="ColorOS16-LiquidGlass-${VERSION}.apk"
+APK_NAME="What-Color-OS-${VERSION}.apk"
 
 if [ "$DRY_RUN" -eq 1 ]; then
     info "dry-run：以下步骤未执行"

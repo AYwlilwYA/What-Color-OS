@@ -11,7 +11,7 @@
         android:padding="16dp">
 
         <!-- [doc/spec/66] 桌面 Dock 栏液态玻璃化（默认关；TTL 500ms 重读 Prefs，改动无需重启桌面） -->
-        <Switch
+        <com.coloros16.liquidglass.ui.LgSwitch
             android:id="@+id/switchDockGlass"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -33,7 +33,7 @@
             android:textColor="?android:attr/textColorSecondary" />
 
         <!-- 桌面「问小布」入口液态玻璃化（默认关；TTL 500ms 重读 Prefs，改动无需重启桌面） -->
-        <Switch
+        <com.coloros16.liquidglass.ui.LgSwitch
             android:id="@+id/switchPageIndicatorGlass"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -56,7 +56,7 @@
             android:textColor="?android:attr/textColorSecondary" />
 
         <!-- 桌面卡片 / 分组卡片 / 小组件液态玻璃化（默认关；TTL 500ms 重读，改动无需重启桌面） -->
-        <Switch
+        <com.coloros16.liquidglass.ui.LgSwitch
             android:id="@+id/switchCardGlass"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

@@ -9,7 +9,7 @@ import com.coloros16.liquidglass.hook.spec.EngineLog
  */
 object CaptureEngine {
 
-    private var onBackground: ((Boolean) -> Unit)? = null
+    private var onBackground: ((Boolean, Boolean) -> Unit)? = null
     private var onMainThread: (() -> Unit)? = null
     private var onFirstFrame: ((() -> Boolean, String, Boolean, Boolean, Boolean) -> Unit)? = null
     private var onHeadsUpContinuous: (() -> Unit)? = null
@@ -18,7 +18,7 @@ object CaptureEngine {
     private var onBannerContinuous: ((Boolean) -> Unit)? = null
 
     fun attach(
-        background: (contentChange: Boolean) -> Unit,
+        background: (contentChange: Boolean, force: Boolean) -> Unit,
         mainThread: () -> Unit,
         firstFrame: (
             burstStop: () -> Boolean,
@@ -41,9 +41,10 @@ object CaptureEngine {
         onBannerContinuous = bannerContinuous
     }
 
-    fun triggerBackgroundCapture(contentChange: Boolean = true) {
-        EngineLog.log("CaptureEngine", "triggerBackground contentChange=$contentChange")
-        onBackground?.invoke(contentChange)
+    /** force=true 为事件驱动一次性补抓（壁纸变更/源失效），静态模式下也放行；周期与常规触发传 false。 */
+    fun triggerBackgroundCapture(contentChange: Boolean = true, force: Boolean = false) {
+        EngineLog.log("CaptureEngine", "triggerBackground contentChange=$contentChange force=$force")
+        onBackground?.invoke(contentChange, force)
     }
 
     fun triggerBackgroundCaptureOnMainThread() {

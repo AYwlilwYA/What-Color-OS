@@ -1,9 +1,9 @@
 static const char kGlassTpl[] = R"LGS(
-// 阶段2 SF 内玻璃 SkSL 模板（printf 占位：bx by bw bh br，几何可从配置文件改）
+// 阶段2 SF 内玻璃 SkSL 模板（几何=每帧 region，uniform 下发）
 // 母本 = LiquidGlassShader.kt AGSL_SOURCE main 管线（C9 band 在位版本）
 // 裁剪口径：metaball/CONIC/tilt/mask 矩形剥除；色散/内糊为 uniform 门控可选（默认 0=关）
 //   掩码≡本体 → dInVis=-sdRaw、单次 shapeAlpha；采样恒恒等映射（无 srcCoord/越界早退）
-// uniform = uBackdrop + 六质感浮点（声明序 = conf 尾段 rf ds hg ag vb ib，角度弧度在注入侧换算）
+// uniform = uBackdrop + 六质感浮点 + uRegionSize + uCorner（声明序 = 注入侧 ubuf 9 float）
 
 uniform shader uBackdrop;
 
@@ -14,6 +14,8 @@ uniform float uHighlight;         // 边缘高光强度
 uniform float uLightAngle;        // 光源方向（弧度）
 uniform float uVibrancy;          // 饱和度增益（1=不变）
 uniform float uBlurRadius;        // 内部模糊半径 px（0=清晰透镜）
+uniform float2 uRegionSize;       // region 尺寸（画布=region 局部，几何居中）
+uniform float uCorner;            // 圆角 px
 
 // ---------- 材质常量（非五参数项保持烘死） ----------
 const float DEPTH = 1.0;              // 椭圆穹顶分量开
@@ -24,13 +26,6 @@ const float HL_INNER_ATT = 0.0;       // 内侧衰减
 const float INNER_GLOW = 0.0;         // 内侧辉光
 const float MASK_ALPHA = 0.0;         // 遮罩压暗（0=不压暗）
 const float3 MASK_COLOR = float3(0.0, 0.0, 0.0);
-
-// ---------- 几何（printf 占位：bx by bw bh br） ----------
-const float BX = %.1f;
-const float BY = %.1f;
-const float BW = %.1f;
-const float BH = %.1f;
-const float BR = %.1f;
 
 // ---------- SDF（母本逐行） ----------
 float sdRoundedRect(float2 coord, float2 halfSize, float radius) {
@@ -145,11 +140,11 @@ float4 spectralDispersion(float2 refractedCoord, float2 dispersedCoord) {
 
 // ---------- main（母本管线，裁剪后） ----------
 half4 main(float2 coord) {
-    float2 halfSize = float2(BW, BH) * 0.5;
-    float2 bodyCenter = float2(BX, BY) + halfSize;
-    float radius = BR;
+    float2 halfSize = uRegionSize * 0.5;
+    float2 bodyCenter = halfSize;
+    float radius = uCorner;
     float gradRadius = min(radius * 1.5, min(halfSize.x, halfSize.y));
-    float refH = max(0.5 * min(BW, BH), 1.0); // spec/95：折射区高 = 短边一半
+    float refH = max(0.5 * min(uRegionSize.x, uRegionSize.y), 1.0); // spec/95：折射区高 = 短边一半
 
     float2 centeredCoord = coord - bodyCenter;
     float sdRaw = sdRoundedRect(centeredCoord, halfSize, radius);

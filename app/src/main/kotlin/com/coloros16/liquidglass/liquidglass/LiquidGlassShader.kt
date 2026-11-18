@@ -115,6 +115,11 @@ object LiquidGlassShader {
         uniform float uClipBypassMask;  // 1=跳过 glass *= smoothstep(0,-2,sdMask)（遮罩裁切）
         uniform float uClipBypassShape; // 1=跳过 glass *= shapeAlpha（形状裁切）
 
+        // ---------- 点按位置发光（engine/PressGlow 包络驱动） ----------
+        uniform float uPressGlow;       // 发光强度 0~1（0=关=逐像素恒等）
+        uniform float2 uPressCenter;    // 触点中心（元素局部 px，与 coord 同空间）
+        uniform float uPressRadius;     // 光斑半径 px
+
         // ---------- SDF 圆角矩形 ----------
         // 元素局部 coord → bitmap 像素坐标（uViewport=元素尺寸；不依赖 BitmapShader localMatrix，
         // AGSL shader.eval 忽略 localMatrix，直接以 coord 为像素索引，故采样坐标须手动折算）
@@ -858,6 +863,15 @@ object LiquidGlassShader {
             float edgeT = 1.0 - smoothstep(0.0, max(uEdgeStrokeWidth, 0.01), dInVis);
             glass.rgb *= 1.0 - uEdgeStroke * edgeT;
 
+            // 点按位置发光：触点高斯光斑，在剩余预乘 alpha 空间加性提亮（不出形状、不过曝）；
+            // uPressGlow=0 整段跳过 = 逐像素恒等
+            if (uPressGlow > 0.001) {
+                float pd = distance(coord, uPressCenter) / max(uPressRadius, 1.0);
+                float spot = exp(-pd * pd * 2.4) * uPressGlow;
+                float3 room = max(float3(glass.a) - glass.rgb, float3(0.0));
+                glass.rgb += room * spot * 0.85;
+            }
+
             // [临时诊断 高光] 逐像素可视化（需 uDebugHighlight>0.5）。
             // R = hl（方向因子）、G = band（带包络）、B = sdfGrad.x 映射到 [0,1]（梯度方向）。
             // 读图法：黄/橙=两者都强（直边）；纯绿=有带无方向（圆角弧线，即本 bug 现场）；
@@ -1186,6 +1200,8 @@ object LiquidGlassShader {
         }
         // uSourceSize 无条件下发（与 uMetaball* 同款「防残留」契约）：(0,0)=只判负方向
         shader.setFloatUniform("uSourceSize", sourceSizeX, sourceSizeY)
+        // 点按发光：无条件下发（防残留契约，同 uTilt）；强度 0 = 逐像素恒等
+        setPressGlowUniforms(shader, 0f, 0f, 0f, 1f)
     }
 
     /**
@@ -1256,6 +1272,16 @@ object LiquidGlassShader {
         if (maskRect == null) {
             shader.setFloatUniform("uMaskRect", 0f, 0f, max(viewport.width(), 1f), max(viewport.height(), 1f))
         }
+    }
+
+    /**
+     * 点按发光专用下发：三个 uniform 一次设齐，全量/增量/直绘路径统一走这里，
+     * 强度 0 也下发（防 shader 缓存复用时残留上一元素的光斑）。
+     */
+    fun setPressGlowUniforms(shader: RuntimeShader, intensity: Float, centerX: Float, centerY: Float, radiusPx: Float) {
+        shader.setFloatUniform("uPressGlow", intensity.coerceIn(0f, 1f))
+        shader.setFloatUniform("uPressCenter", centerX, centerY)
+        shader.setFloatUniform("uPressRadius", max(radiusPx, 1f))
     }
 
     /** ARGB int → AGSL straight rgba float4（与 ColorOS BlurParam.toFloatArray 的 /255.0 一致）。 */

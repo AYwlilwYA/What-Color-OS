@@ -10,7 +10,7 @@
         <com.google.android.material.card.MaterialCardView style="@style/ShellPlate" android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="14dp">
             <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:divider="@drawable/bg_seam_line_inset" android:dividerHeight="1dp" android:showDividers="middle">
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
-                    <Switch android:id="@+id/glassSwitch" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_glass_enable" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                    <com.coloros16.liquidglass.ui.LgSwitch android:id="@+id/glassSwitch" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_glass_enable" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
                     />
                     <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_glass_enable_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
                 </LinearLayout>
@@ -37,7 +37,6 @@
         </LinearLayout>
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:background="@drawable/bg_plate" android:divider="@drawable/bg_seam_line_inset" android:dividerHeight="1dp" android:orientation="vertical" android:showDividers="middle">
             <include android:id="@+id/presetAppearanceRow" layout="@layout/item_row" android:layout_width="match_parent" android:layout_height="wrap_content" />
-            <include android:id="@+id/presetBatteryRow" layout="@layout/item_row" android:layout_width="match_parent" android:layout_height="wrap_content" />
             <include android:id="@+id/presetCustomRow" layout="@layout/item_row" android:layout_width="match_parent" android:layout_height="wrap_content" />
         </LinearLayout>
         <TextView style="@style/ShellHint" android:text="@string/settings_glass_preset_hint" />
@@ -67,31 +66,32 @@
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:background="@drawable/bg_plate" android:divider="@drawable/bg_seam_line_inset" android:dividerHeight="1dp" android:orientation="vertical" android:showDividers="middle">
             <include android:id="@+id/glassObjSystemRow" layout="@layout/item_row" android:layout_width="match_parent" android:layout_height="wrap_content" />
             <include android:id="@+id/glassObjDesktopRow" layout="@layout/item_row" android:layout_width="match_parent" android:layout_height="wrap_content" />
+            <include android:id="@+id/glassObjLockscreenRow" layout="@layout/item_row" android:layout_width="match_parent" android:layout_height="wrap_content" />
         </LinearLayout>
         <com.google.android.material.card.MaterialCardView style="@style/ShellPlate" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" app:cardCornerRadius="14dp">
             <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:divider="@drawable/bg_seam_line_inset" android:dividerHeight="1dp" android:showDividers="middle">
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
-                    <Switch android:id="@+id/switchGalleryGlass" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_gallery_glass" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                    <com.coloros16.liquidglass.ui.LgSwitch android:id="@+id/switchGalleryGlass" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_gallery_glass" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
                     />
                     <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_gallery_glass_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
                 </LinearLayout>
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
-                    <Switch android:id="@+id/switchAssistantScreenGlass" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_assistant_screen_glass" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                    <com.coloros16.liquidglass.ui.LgSwitch android:id="@+id/switchAssistantScreenGlass" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_assistant_screen_glass" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
                     />
                     <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_assistant_screen_glass_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
                 </LinearLayout>
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
-                    <Switch android:id="@+id/switchQuickSearchGlass" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_quick_search_glass" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                    <com.coloros16.liquidglass.ui.LgSwitch android:id="@+id/switchQuickSearchGlass" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_quick_search_glass" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
                     />
                     <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_quick_search_glass_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
                 </LinearLayout>
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
-                    <Switch android:id="@+id/switchCalculatorGlass" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_calculator_glass" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                    <com.coloros16.liquidglass.ui.LgSwitch android:id="@+id/switchCalculatorGlass" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_calculator_glass" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
                     />
                     <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_calculator_glass_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
                 </LinearLayout>
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
-                    <Switch android:id="@+id/switchSmartSidebarGlass" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_smart_sidebar_glass" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                    <com.coloros16.liquidglass.ui.LgSwitch android:id="@+id/switchSmartSidebarGlass" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_smart_sidebar_glass" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
                     />
                     <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_smart_sidebar_glass_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
                 </LinearLayout>
@@ -112,17 +112,17 @@
         <com.google.android.material.card.MaterialCardView style="@style/ShellPlate" android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="14dp">
             <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:divider="@drawable/bg_seam_line_inset" android:dividerHeight="1dp" android:showDividers="middle">
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
-                    <Switch android:id="@+id/switchSeedlingCardGlass" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_fluid_card_glass" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                    <com.coloros16.liquidglass.ui.LgSwitch android:id="@+id/switchSeedlingCardGlass" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_fluid_card_glass" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
                     />
                     <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_fluid_card_glass_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
                 </LinearLayout>
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
-                    <Switch android:id="@+id/switchSeedlingCapsuleGlass" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_fluid_capsule_glass" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                    <com.coloros16.liquidglass.ui.LgSwitch android:id="@+id/switchSeedlingCapsuleGlass" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_fluid_capsule_glass" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
                     />
                     <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_fluid_capsule_glass_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
                 </LinearLayout>
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
-                    <Switch android:id="@+id/switchSeedlingForceTransparentBg" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_fluid_no_original_color" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                    <com.coloros16.liquidglass.ui.LgSwitch android:id="@+id/switchSeedlingForceTransparentBg" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_fluid_no_original_color" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
                     />
                     <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_fluid_no_original_color_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
                 </LinearLayout>
@@ -136,29 +136,49 @@
         <com.google.android.material.card.MaterialCardView style="@style/ShellPlate" android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="14dp">
             <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:divider="@drawable/bg_seam_line_inset" android:dividerHeight="1dp" android:showDividers="middle">
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
-                    <Switch android:id="@+id/switchMask" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_mask" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                    <com.coloros16.liquidglass.ui.LgSwitch android:id="@+id/switchMask" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_mask" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100" android:minHeight="0dp"
                     />
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_mask_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
                 </LinearLayout>
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
-                    <Switch android:id="@+id/switchTextForceWhite" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_text_force_white" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                    <com.coloros16.liquidglass.ui.LgSwitch android:id="@+id/switchTextForceWhite" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_text_force_white" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100" android:minHeight="0dp"
                     />
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_text_force_white_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
                 </LinearLayout>
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
-                    <Switch android:id="@+id/switchTextContrast" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_text_contrast" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                    <com.coloros16.liquidglass.ui.LgSwitch android:id="@+id/switchTextContrast" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_text_contrast" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100" android:minHeight="0dp"
                     />
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_text_contrast_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
                 </LinearLayout>
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
-                    <Switch android:id="@+id/switchHeadsUpTextFollow" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_heads_up_text_follow" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                    <com.coloros16.liquidglass.ui.LgSwitch android:id="@+id/switchHeadsUpTextFollow" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_heads_up_text_follow" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100" android:minHeight="0dp"
                     />
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_heads_up_text_follow_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
                 </LinearLayout>
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
                     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal">
-    <TextView android:layout_width="0dp"
-            android:layout_weight="1" android:layout_height="wrap_content" android:text="@string/settings_mask_alpha" android:textAppearance="?attr/textAppearanceTitleSmall" />
-    <TextView android:id="@+id/maskAlphaValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp" android:layout_width="wrap_content" android:layout_height="wrap_content" />
-</LinearLayout>
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/settings_mask_alpha"
+                        android:textAppearance="?attr/textAppearanceTitleSmall" />
+                    <TextView
+                        android:id="@+id/maskAlphaValue"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="monospace"
+                        android:letterSpacing="0.04"
+                        android:textColor="@color/lg_blued_ink"
+                        android:textSize="13sp" />
+                </LinearLayout>
                     <SeekBar android:id="@+id/seekMaskAlpha" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:max="100" android:progress="35" android:progressDrawable="@drawable/lg_seek_track" android:splitTrack="false" android:thumb="@drawable/lg_seek_thumb" />
                     
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
+                    <com.coloros16.liquidglass.ui.LgSwitch android:id="@+id/switchMaskDimFollow" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_mask_dim_follow" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100" android:minHeight="0dp"
+                    />
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_mask_dim_follow_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
                 </LinearLayout>
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
                     <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/settings_mask_text_color" android:textAppearance="?attr/textAppearanceTitleSmall" />
@@ -166,10 +186,21 @@
                 </LinearLayout>
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
                     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal">
-    <TextView android:layout_width="0dp"
-            android:layout_weight="1" android:layout_height="wrap_content" android:text="@string/settings_text_force_refresh_interval" android:textAppearance="?attr/textAppearanceTitleSmall" />
-    <TextView android:id="@+id/textForceRefreshValue" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp" android:layout_width="wrap_content" android:layout_height="wrap_content" />
-</LinearLayout>
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/settings_text_force_refresh_interval"
+                        android:textAppearance="?attr/textAppearanceTitleSmall" />
+                    <TextView
+                        android:id="@+id/textForceRefreshValue"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="monospace"
+                        android:letterSpacing="0.04"
+                        android:textColor="@color/lg_blued_ink"
+                        android:textSize="13sp" />
+                </LinearLayout>
                     <SeekBar android:id="@+id/seekTextForceRefresh" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:max="5000" android:progress="500" android:progressDrawable="@drawable/lg_seek_track" android:splitTrack="false" android:thumb="@drawable/lg_seek_thumb" />
                     
                 </LinearLayout>

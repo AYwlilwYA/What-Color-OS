@@ -114,6 +114,7 @@
             android:textSize="11sp" />
 
         <LinearLayout
+            android:id="@+id/aodDockBar"
             android:layout_width="match_parent"
             android:layout_height="80dp"
             android:layout_marginTop="6dp"
@@ -121,94 +122,6 @@
             android:gravity="center_vertical"
             android:orientation="horizontal"
             android:paddingStart="10dp"
-            android:paddingEnd="10dp">
-
-            <LinearLayout
-                android:id="@+id/aodDockWallpaper"
-                android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_weight="1"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:clickable="true"
-                android:focusable="true"
-                android:gravity="center"
-                android:orientation="vertical">
-
-                <ImageView
-                    android:layout_width="40dp"
-                    android:layout_height="40dp"
-                    android:background="@drawable/bg_aod_dock"
-                    android:contentDescription="@string/settings_aod_wallpaper"
-                    android:padding="10dp"
-                    android:src="@drawable/ic_row_image"
-                    android:tint="#F2FFFFFF" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="5dp"
-                    android:text="@string/settings_aod_wallpaper"
-                    android:textColor="#B8FFFFFF"
-                    android:textSize="11sp" />
-            </LinearLayout>
-
-            <LinearLayout
-                android:id="@+id/aodDockStyle"
-                android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_weight="1"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:clickable="true"
-                android:focusable="true"
-                android:gravity="center"
-                android:orientation="vertical">
-
-                <ImageView
-                    android:layout_width="40dp"
-                    android:layout_height="40dp"
-                    android:background="@drawable/bg_aod_dock"
-                    android:contentDescription="@string/settings_aod_style"
-                    android:padding="10dp"
-                    android:src="@drawable/ic_row_palette"
-                    android:tint="#F2FFFFFF" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="5dp"
-                    android:text="@string/settings_aod_style"
-                    android:textColor="#B8FFFFFF"
-                    android:textSize="11sp" />
-            </LinearLayout>
-
-            <LinearLayout
-                android:id="@+id/aodDockEffects"
-                android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_weight="1"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:clickable="true"
-                android:focusable="true"
-                android:gravity="center"
-                android:orientation="vertical">
-
-                <ImageView
-                    android:layout_width="40dp"
-                    android:layout_height="40dp"
-                    android:background="@drawable/bg_aod_dock"
-                    android:contentDescription="@string/settings_aod_effects"
-                    android:padding="10dp"
-                    android:src="@drawable/ic_row_config"
-                    android:tint="#F2FFFFFF" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="5dp"
-                    android:text="@string/settings_aod_effects"
-                    android:textColor="#B8FFFFFF"
-                    android:textSize="11sp" />
-            </LinearLayout>
-        </LinearLayout>
+            android:paddingEnd="10dp" />
     </LinearLayout>
 </FrameLayout>

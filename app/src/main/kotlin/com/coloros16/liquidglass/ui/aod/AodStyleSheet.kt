@@ -294,6 +294,10 @@ class AodStyleThumbView @JvmOverloads constructor(
     private val rect = RectF()
     private val path = Path()
     private val clip = Path()
+    private val bitmapPaint = Paint(Paint.FILTER_BITMAP_FLAG)
+    private val thumbCache = HashMap<String, android.graphics.Bitmap?>()
+    private val srcRect = android.graphics.Rect()
+    private val dstRect = RectF()
 
     override fun onDraw(canvas: Canvas) {
         val w = width.toFloat()
@@ -305,6 +309,14 @@ class AodStyleThumbView @JvmOverloads constructor(
         canvas.clipPath(clip)
         fill.style = Paint.Style.FILL
         fill.shader = null
+
+        if (drawOfficialThumb(canvas, w, h)) {
+            canvas.restoreToCount(save)
+            stroke.color = 0x1FFFFFFF
+            stroke.strokeWidth = dp(1f)
+            canvas.drawRoundRect(r(dp(0.5f), dp(0.5f), w - dp(0.5f), h - dp(0.5f)), dp(8f), dp(8f), stroke)
+            return
+        }
 
         when (style.id) {
             AodStyleCatalog.ID_FULLSCREEN -> {
@@ -445,6 +457,35 @@ class AodStyleThumbView @JvmOverloads constructor(
         stroke.color = 0x1AFFFFFF
         canvas.drawRoundRect(r(0.5f, 0.5f, w - 0.5f, h - 0.5f), dp(8f), dp(8f), stroke)
         canvas.restoreToCount(save)
+    }
+
+    /** 官方样式底图优先（alive 编辑器缩略图），缺素材回退程序化示意。 */
+    private fun drawOfficialThumb(canvas: Canvas, w: Float, h: Float): Boolean {
+        val name = when (style.id) {
+            AodStyleCatalog.ID_FULLSCREEN -> "fullscreen"
+            AodStyleCatalog.ID_SAIL -> "set_sail"
+            AodStyleCatalog.ID_LEAVE_LIGHT -> "leave_light"
+            AodStyleCatalog.ID_STARMOON -> "moon_and_star"
+            AodStyleCatalog.ID_DOOR -> "light_start"
+            AodStyleCatalog.ID_MOUNTAIN -> "mountain"
+            AodStyleCatalog.ID_GALAXY -> "galaxy"
+            else -> return false
+        }
+        val bitmap = thumbCache.getOrPut(name) {
+            runCatching {
+                context.assets.open("aod/style_thumbs/$name.png").use {
+                    android.graphics.BitmapFactory.decodeStream(it)
+                }
+            }.getOrNull()
+        } ?: return false
+        if (bitmap.isRecycled) return false
+        srcRect.set(0, 0, bitmap.width, bitmap.height)
+        val scale = maxOf(w / bitmap.width, h / bitmap.height)
+        val dw = bitmap.width * scale
+        val dh = bitmap.height * scale
+        dstRect.set((w - dw) / 2f, (h - dh) / 2f, (w + dw) / 2f, (h + dh) / 2f)
+        canvas.drawBitmap(bitmap, srcRect, dstRect, bitmapPaint)
+        return true
     }
 
     private fun radial(canvas: Canvas, cx: Float, cy: Float, radius: Float, center: Int, edge: Int) {

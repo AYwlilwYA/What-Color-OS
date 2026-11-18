@@ -14,18 +14,30 @@ import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
+import android.os.SystemClock
 import android.util.AttributeSet
+import android.view.Choreographer
+import android.view.MotionEvent
 import android.view.View
 import com.coloros16.liquidglass.R
+import com.coloros16.liquidglass.config.Prefs
+import com.coloros16.liquidglass.engine.AodClockEntry
+import com.coloros16.liquidglass.engine.AodDrift
+import com.coloros16.liquidglass.engine.ClockAnchor
 import com.coloros16.liquidglass.engine.ClockStateMachine
 import com.coloros16.liquidglass.engine.ContentLayerConfig
 import com.coloros16.liquidglass.engine.Easing
 import com.coloros16.liquidglass.engine.ElementPose
+import com.coloros16.liquidglass.engine.MaskGeometry
 import com.coloros16.liquidglass.engine.MaskLayerConfig
+import com.coloros16.liquidglass.engine.MaskShape
+import com.coloros16.liquidglass.engine.PhotoStyle
+import com.coloros16.liquidglass.engine.PhotoStyleMotion
 import com.coloros16.liquidglass.engine.SceneLayerConfig
 import com.coloros16.liquidglass.engine.SceneSample
 import com.coloros16.liquidglass.engine.SceneState
 import com.coloros16.liquidglass.engine.SceneTimeline
+import com.coloros16.liquidglass.engine.SailLensMotion
 import com.coloros16.liquidglass.engine.ScreenMetrics
 import com.coloros16.liquidglass.engine.StyleCapabilities
 import com.coloros16.liquidglass.engine.SystemSceneMotion
@@ -34,7 +46,12 @@ import com.coloros16.liquidglass.engine.TransitionEvaluator
 import com.coloros16.liquidglass.engine.TransitionParams
 import com.coloros16.liquidglass.engine.TransitionProfile
 import com.coloros16.liquidglass.engine.from
+import com.coloros16.liquidglass.engine.effect.EffectCatalog
+import com.coloros16.liquidglass.engine.effect.EffectTextureCatalog
+import com.coloros16.liquidglass.engine.home.HomeGeometry
+import com.coloros16.liquidglass.engine.home.HomeLayout
 import com.coloros16.liquidglass.engine.to
+import com.coloros16.liquidglass.log.Lg
 import java.time.LocalDateTime
 import java.util.Random
 import kotlin.math.min
@@ -55,13 +72,112 @@ class AodPreviewView @JvmOverloads constructor(
     var useSystemWallpaper: Boolean = false
         set(value) {
             field = value
+            syncLensSource()
             invalidate()
         }
+
+    /** 锁屏壁纸效果 id：有原版贴图的走法线折射，模糊/景深走各自管线。 */
+    var lockWallpaperEffect: String = EffectCatalog.LOCK_WP_NONE
+        set(value) {
+            if (field == value) return
+            field = value
+            effectLayerKey = ""
+            invalidate()
+        }
+
+    /** 锁屏特殊效果 id：景深走移轴带模糊。 */
+    var lockSpecialEffect: String = EffectCatalog.LOCK_SP_NONE
+        set(value) {
+            if (field == value) return
+            field = value
+            effectLayerKey = ""
+            invalidate()
+        }
+
+    /** 锁屏壁纸效果强度 0–1：魅族玻璃折射幅度。 */
+    var lockWallpaperIntensity: Float = 0.6f
+        set(value) {
+            if (field == value) return
+            field = value
+            effectLayerKey = ""
+            invalidate()
+        }
+
+    /** 相框模式：双照片相框（留光），相框照片叠在壁纸上。 */
+    var framePair: Boolean = true
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
+        }
+
+    /** 相框前景照片；null 时相框模式回退单照片。 */
+    var framePhoto: Bitmap? = null
+        set(value) {
+            if (field === value) return
+            field = value
+            invalidate()
+        }
+
+    /** 照片类样式（星月/轻启/山脉/银河）的用户照片；null 时用默认壁纸/天空。 */
+    var stylePhoto: Bitmap? = null
+        set(value) {
+            if (field === value) return
+            field = value
+            syncLensSource()
+            invalidate()
+        }
+
+    /** 取景参数：中心 x/y（0–1）、大小（0.05–1）、角度（±45°）。 */
+    var frameCropX: Float = 0.5f
+    var frameCropY: Float = 0.5f
+    var frameCropSize: Float = 1f
+    var frameCropAngle: Float = 0f
+
+    /** 息屏动态总闸：关=旋转/混色/倾斜全部冻结。 */
+    var allowAodDynamic: Boolean = false
+        set(value) {
+            if (field == value) return
+            field = value
+            syncMotionTick()
+            invalidate()
+        }
+
+    /** 启航混色幅度 0–100。 */
+    var aodColorMix: Float = 60f
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
+        }
+
+    /** 启航旋转速度（度/秒），0=停转。 */
+    var aodRotateSpeed: Float = 12f
+        set(value) {
+            if (field == value) return
+            field = value
+            syncMotionTick()
+            invalidate()
+        }
+
+    /** 照片倾斜幅度（度），息屏期正弦摆动。 */
+    var aodPhotoTilt: Float = 6f
+        set(value) {
+            if (field == value) return
+            field = value
+            syncMotionTick()
+            invalidate()
+        }
+
+    private var effectLayer: Bitmap? = null
+    private var effectLayerKey: String = ""
+    private var effectLoading = false
 
     private var scene: SceneState = SceneState.AOD
     private var edge: TransitionEdge? = null
     private var t: Float = 0f
     private var sceneSpec: AodSceneSpec? = null
+    private var styleId: String = Prefs.DEFAULT_ALIVE_AOD_STYLE_ID
     private var scrubP = -1f
     private val clockMachine = ClockStateMachine(easing = Easing.STANDARD)
     private val sceneSample = SceneSample()
@@ -72,6 +188,7 @@ class AodPreviewView @JvmOverloads constructor(
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.style = Paint.Style.STROKE }
     private val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
+    private val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val circle = Path()
     private val rect = RectF()
     private val dst = RectF()
@@ -81,6 +198,64 @@ class AodPreviewView @JvmOverloads constructor(
     private var sceneSkyLoading = false
     private var uiScale = 1f
     private val path = Path()
+
+    private val lensRenderer = AodLensRenderer(context)
+    private val lensPose = SailLensMotion.Pose()
+    private val sailFade = SailLensMotion.Fade()
+    private var lensAngleDeg = 0f
+    private var lensLastNanos = 0L
+    private var lensScheduled = false
+    private var lensSpinning = false
+    private var aodLayerAlpha = 1f
+    private var contentGate = 1f
+    private val photoRenderer = PhotoSceneRenderer(context)
+    private val photoMotion = PhotoStyleMotion.Values()
+    private var photoStyle: PhotoStyle? = null
+    private var photoSequence: PhotoFrameSequence? = null
+    private var photoFrame: Bitmap? = null
+    private val phoneRect = RectF()
+    private val phonePath = Path()
+    private val editDelegate = AodPreviewEditDelegate(this)
+
+    init {
+        isClickable = true
+    }
+    private val framePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+
+    private val aodMotion = com.coloros16.liquidglass.engine.effect.AodMotionState()
+
+    private val lensTick = object : Choreographer.FrameCallback {
+        override fun doFrame(frameTimeNanos: Long) {
+            lensScheduled = false
+            if (!isAttachedToWindow) {
+                lensSpinning = false
+                return
+            }
+            val last = lensLastNanos
+            lensLastNanos = frameTimeNanos
+            if (last != 0L) {
+                val speed = if (edge == null && scene == SceneState.AOD && allowAodDynamic) {
+                    (aodRotateSpeed / SailLensMotion.SPIN_DEG_PER_SEC).coerceIn(0f, 2f)
+                } else {
+                    0f
+                }
+                lensAngleDeg = SailLensMotion.spin(
+                    lensAngleDeg,
+                    (frameTimeNanos - last) / 1_000_000_000f,
+                    speed,
+                )
+            }
+            if (lensSpinning || motionAnimating()) {
+                invalidate()
+                scheduleLensTick()
+            }
+        }
+    }
+
+    /** 息屏动态帧泵按需武装：总闸开且（启航转/混色或照片摆）才逐帧，静止零回调。 */
+    private fun syncMotionTick() {
+        if (motionAnimating()) scheduleLensTick() else if (!lensSpinning) stopLensTick()
+    }
 
     private val clockThin = Typeface.create("sans-serif-thin", Typeface.NORMAL)
     private val vendorClock: Typeface? by lazy {
@@ -126,35 +301,15 @@ class AodPreviewView @JvmOverloads constructor(
     private val params = TransitionParams()
     private var screen = ScreenMetrics(1f, 1f, density)
 
-    private data class PreviewApp(
-        val label: String,
-        val pkg: String,
-        val top: Int,
-        val bottom: Int,
-    )
+    private val previewApps = HomeIconSource.all
+    private val homePages = 2
 
-    private val previewApps = listOf(
-        PreviewApp("消息", "com.tencent.mm", 0xFF43D06E.toInt(), 0xFF1E9E4A.toInt()),
-        PreviewApp("视频", "tv.danmaku.bili", 0xFFF58FBF.toInt(), 0xFFDD5E8C.toInt()),
-        PreviewApp("购物", "com.taobao.taobao", 0xFFFFA45C.toInt(), 0xFFEE641F.toInt()),
-        PreviewApp("动态", "com.sina.weibo", 0xFFFFD15C.toInt(), 0xFFF0A61C.toInt()),
-        PreviewApp("相机", "com.oplus.camera", 0xFF5A6472.toInt(), 0xFF262B33.toInt()),
-        PreviewApp("天气", "com.coloros.weather2", 0xFF5FBCFF.toInt(), 0xFF2C7EE6.toInt()),
-        PreviewApp("便签", "com.coloros.note", 0xFFFFD35C.toInt(), 0xFFEDAF1C.toInt()),
-        PreviewApp("禅定", "com.coloros.relax", 0xFF5A9BFF.toInt(), 0xFF2C62D6.toInt()),
-        PreviewApp("计算", "com.coloros.calculator", 0xFF5A6472.toInt(), 0xFF262B33.toInt()),
-        PreviewApp("文件", "com.coloros.filemanager", 0xFF5FBCFF.toInt(), 0xFF2C7EE6.toInt()),
-        PreviewApp("录音", "com.coloros.recorder", 0xFF4A5058.toInt(), 0xFFD8575F.toInt()),
-        PreviewApp("设置", "com.coloros.settings", 0xFF6A7480.toInt(), 0xFF333A42.toInt()),
-        PreviewApp("电话", "com.android.contacts", 0xFF4ADE80.toInt(), 0xFF22A34C.toInt()),
-        PreviewApp("信息", "com.android.mms", 0xFF7ED0A8.toInt(), 0xFF2EA063.toInt()),
-        PreviewApp("浏览器", "com.heytap.browser", 0xFF8CC2FF.toInt(), 0xFF3F86E8.toInt()),
-        PreviewApp("相机", "com.oplus.camera", 0xFF5A6472.toInt(), 0xFF262B33.toInt()),
-    )
-
-    private val appIcons: Array<Drawable?> = arrayOfNulls(previewApps.size)
-    private val appLabels: Array<String?> = arrayOfNulls(previewApps.size)
+    private var homeIcons: List<HomeIcon> = emptyList()
     private var iconsRequested = false
+    private var homeGeometry: HomeGeometry? = null
+    private var homeGeometryKey: String = ""
+    private val iconBitmapCache = HashMap<Int, Pair<Drawable, Bitmap>>()
+    private val labelMetrics = Paint.FontMetrics()
 
     private val stars = FloatArray(96 * 4)
     private val moonMarks = FloatArray(38 * 4)
@@ -203,13 +358,48 @@ class AodPreviewView @JvmOverloads constructor(
     }
 
     private fun applyStyle(value: AodStyle) {
+        clockTailEdge = null
+        styleId = value.id
         sceneSpec = AodSceneCatalog.forStyle(value.id)
         applyProfiles(value)
+        syncPhotoStyle(value.id)
+        syncLensSource()
+        lensSpinning = false
+        syncMotionTick()
         val spec = sceneSpec ?: return
         for ((state, anchor) in spec.clockAnchors) {
             clockMachine.setAnchor(state, anchor, 0L, follow = false)
         }
+        clockMachine.setAnchor(SceneState.HOME, homeClockAnchor(), 0L, follow = false)
         clockMachine.snapTo(scene, 0L)
+    }
+
+    /** 桌面时钟终点：真机锚点（桌面小部件>状态栏）优先，预览兜底飞顶栏状态栏位。 */
+    private fun homeClockAnchor(): ClockAnchor {
+        val real = com.coloros16.liquidglass.hook.DesktopClockAnchorBridge.anchorOrNull()
+        if (real != null) return real
+        return ClockAnchor(centerX = 0.13f, centerY = 0.021f, scale = 0.16f, alpha = 1f)
+    }
+
+    /** 照片类样式切换时重建帧序列与内容纹理；其它样式释放。 */
+    private fun syncPhotoStyle(styleId: String) {
+        val photo = AodSceneCatalog.photoOf(styleId)
+        if (photo == null) {
+            photoSequence?.close()
+            photoSequence = null
+            photoStyle = null
+            photoFrame = null
+            return
+        }
+        if (photoStyle?.id == photo.id && photoSequence != null) return
+        photoSequence?.close()
+        photoStyle = photo
+        photoFrame = null
+        val sequence = PhotoFrameSequence(context.assets, photo) {
+            post { if (photoStyle?.id == photo.id) invalidate() }
+        }
+        sequence.prefetch(intArrayOf(photo.frames, 0, 1, 2, 3))
+        photoSequence = sequence
     }
 
     private fun applyProfiles(value: AodStyle) {
@@ -227,15 +417,49 @@ class AodPreviewView @JvmOverloads constructor(
     /** 设置系统壁纸底图（接管壁纸时的背景）。 */
     fun setWallpaper(bitmap: Bitmap?) {
         wallpaper = bitmap
+        syncLensSource()
         invalidate()
     }
 
-    /** 刷新当前态 / 边 / 进度。 */
+    private fun lensSource(): Bitmap? {
+        val real = if (useSystemWallpaper) wallpaper else null
+        return stylePhoto ?: real ?: sceneSky ?: wallpaper
+    }
+
+    private fun syncLensSource() {
+        lensRenderer.setSource(lensSource(), PREVIEW_ASPECT)
+        val photo = photoStyle ?: return
+        photoRenderer.setSource(lensSource(), PREVIEW_ASPECT, photo.blur)
+    }
+
+    /** 内联编辑委托：布局配置与回调由预览控制器接线。 */
+    val edit: AodPreviewEditDelegate get() = editDelegate
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (editDelegate.onTouchEvent(event)) return true
+        return super.onTouchEvent(event)
+    }
+
+    /** 刷新当前态 / 边 + 进度。 */
     fun render(scene: SceneState, edge: TransitionEdge?, t: Float) {
+        val prevEdge = this.edge
         this.scene = scene
         this.edge = edge
         this.t = t.coerceIn(0f, 1f)
         this.scrubP = -1f
+        editDelegate.state = scene
+        if (edge != null) {
+            editDelegate.cancelTouch()
+            clockTailEdge = null
+        } else if (prevEdge != null && AodClockEntry.entering(prevEdge) && scene == SceneState.AOD) {
+            val edgeMs = AodSceneCatalog.durationOf(styleId, prevEdge)
+            if (AodClockEntry.tailMs(edgeMs) > 0L) {
+                clockTailEdge = prevEdge
+                clockTailEdgeMs = edgeMs
+                clockTailStartMs = SystemClock.uptimeMillis()
+                scheduleClockTail()
+            }
+        }
         if (sceneSpec != null) {
             if (edge == null) {
                 clockMachine.snapTo(scene, 0L)
@@ -249,6 +473,7 @@ class AodPreviewView @JvmOverloads constructor(
     /** 整轨拖动：p=0 息屏 / 0.5 锁屏 / 1 桌面，画面与手指 1:1，不走缓动。 */
     fun renderScrub(p: Float) {
         scrubP = p.coerceIn(0f, 1f)
+        clockTailEdge = null
         if (sceneSpec != null) clockMachine.onTimeline(scrubP)
         invalidate()
     }
@@ -263,49 +488,170 @@ class AodPreviewView @JvmOverloads constructor(
         fill.color = Color.BLACK
         canvas.drawRect(0f, 0f, w, h, fill)
 
+        val sideInset = 16f * density
+        val topInset = 96f * density
+        val bottomInset = 212f * density
+        val availW = (w - sideInset * 2f).coerceAtLeast(1f)
+        val availH = (h - topInset - bottomInset).coerceAtLeast(1f)
+        var pw = availH * PREVIEW_ASPECT
+        var ph = availH
+        if (pw > availW) {
+            pw = availW
+            ph = pw / PREVIEW_ASPECT
+        }
+        if (pw < 2f || ph < 2f) return
+        val px = (w - pw) / 2f
+        val py = topInset + (availH - ph) / 2f
+        phoneRect.set(px, py, px + pw, py + ph)
+        val corner = 18f * density
+
+        fill.shader = RadialGradient(
+            w / 2f, py + ph * 0.5f, maxOf(pw, ph) * 0.68f,
+            intArrayOf(0x1E2A3A4E, 0x00000000),
+            floatArrayOf(0f, 1f), Shader.TileMode.CLAMP,
+        )
+        canvas.drawRect(0f, 0f, w, h, fill)
+        fill.shader = null
+
+        phonePath.reset()
+        phonePath.addRoundRect(phoneRect, corner, corner, Path.Direction.CW)
+        val clip = canvas.save()
+        canvas.clipPath(phonePath)
+        canvas.translate(px, py)
+        screen = ScreenMetrics(pw, ph, density)
+        uiScale = min(pw / (360f * density), ph / (800f * density)).coerceAtLeast(0.1f)
+
+        lensSpinning = false
         val spec = sceneSpec
         if (spec != null) {
-            drawSceneWorld(canvas, w, h, spec)
-            return
-        }
-
-        val rawEdge = if (scrubP >= 0f) SceneTimeline.edgeAt(scrubP) else edge
-        val rawT = if (scrubP >= 0f) SceneTimeline.localT(scrubP) else t
-        val e = rawEdge
-        if (e == null) {
-            drawState(canvas, scene, w, h, 1f)
+            drawSceneWorld(canvas, pw, ph, spec)
         } else {
-            val evalEdge = if (e == TransitionEdge.LOCK_TO_AOD) TransitionEdge.AOD_TO_LOCK else e
-            val evalT = if (e == TransitionEdge.LOCK_TO_AOD) 1f - rawT else rawT
-            evaluator.evaluate(evalEdge, evalT, screen, capabilities, capabilities, params, null, scrubP >= 0f)
+            val rawEdge = if (scrubP >= 0f) SceneTimeline.edgeAt(scrubP) else edge
+            val rawT = if (scrubP >= 0f) SceneTimeline.localT(scrubP) else t
+            val e = rawEdge
+            if (e == null) {
+                drawWallpaperOnce(canvas, pw, ph, sceneDim(scene))
+                drawState(canvas, scene, pw, ph, 1f)
+                if (sceneSpec != null) drawSceneClock(canvas, pw, ph)
+            } else {
+                evaluator.evaluate(e, rawT, screen, capabilities, capabilities, params, null, scrubP >= 0f)
+                SystemSceneMotion.sample(e, rawT, layers, direct = scrubP >= 0f)
+                drawWallpaperOnce(canvas, pw, ph, layers.dim)
 
-            if (params.srcAlpha > 0.002f) {
-                val layer = canvas.saveLayerAlpha(0f, 0f, w, h, (params.srcAlpha * 255f).toInt())
-                canvas.translate(params.srcDx, params.srcDy)
-                canvas.scale(params.srcScale, params.srcScale, w / 2f, h / 2f)
-                drawState(canvas, evalEdge.from, w, h, 1f)
-                canvas.restoreToCount(layer)
-            }
+                if (params.srcAlpha > 0.002f) {
+                    val layer = canvas.saveLayerAlpha(0f, 0f, pw, ph, (params.srcAlpha * 255f).toInt())
+                    canvas.translate(params.srcDx, params.srcDy)
+                    canvas.scale(params.srcScale, params.srcScale, pw / 2f, ph / 2f)
+                    drawState(canvas, e.from, pw, ph, 1f)
+                    canvas.restoreToCount(layer)
+                }
 
-            if (params.maskEnabled && params.maskRadius > 0.5f) {
-                circle.reset()
-                circle.addCircle(params.maskCenterX, params.maskCenterY, params.maskRadius, Path.Direction.CW)
-                val target = canvas.save()
-                canvas.clipPath(circle)
-                canvas.translate(params.dstDx, params.dstDy)
-                canvas.scale(params.dstScale, params.dstScale, w / 2f, h / 2f)
-                drawState(canvas, evalEdge.to, w, h, 1f)
-                canvas.restoreToCount(target)
-            } else if (evalT >= 0.9999f) {
-                drawState(canvas, evalEdge.to, w, h, 1f)
-            } else if (params.dstAlpha > 0.002f) {
-                val layer = canvas.saveLayerAlpha(0f, 0f, w, h, (params.dstAlpha * 255f).toInt())
-                canvas.translate(params.dstDx, params.dstDy)
-                canvas.scale(params.dstScale, params.dstScale, w / 2f, h / 2f)
-                drawState(canvas, evalEdge.to, w, h, 1f)
-                canvas.restoreToCount(layer)
+                if (params.maskEnabled && MaskGeometry.drawable(params.maskRadius)) {
+                    circle.reset()
+                    when (params.maskShape) {
+                        MaskShape.CIRCLE -> circle.addCircle(
+                            params.maskCenterX, params.maskCenterY, params.maskRadius, Path.Direction.CW,
+                        )
+                        MaskShape.ROUNDED_RECT -> {
+                            val half = MaskGeometry.roundedRectHalfExtents(params.maskRadius, pw, ph)
+                            val corner = MaskGeometry.roundedRectCornerPx(params.maskRadius, min(pw, ph))
+                            rect.set(
+                                params.maskCenterX - half[0], params.maskCenterY - half[1],
+                                params.maskCenterX + half[0], params.maskCenterY + half[1],
+                            )
+                            circle.addRoundRect(rect, corner, corner, Path.Direction.CW)
+                        }
+                    }
+                    val target = canvas.save()
+                    canvas.clipPath(circle)
+                    canvas.translate(params.dstDx, params.dstDy)
+                    canvas.scale(params.dstScale, params.dstScale, pw / 2f, ph / 2f)
+                    drawState(canvas, e.to, pw, ph, 1f)
+                    canvas.restoreToCount(target)
+                    if (MaskGeometry.hasFeather(params.maskFeather)) {
+                        drawMaskFeather(canvas, pw, ph, params)
+                    }
+                } else if (rawT >= 0.9999f) {
+                    drawState(canvas, e.to, pw, ph, 1f)
+                } else if (params.dstAlpha > 0.002f) {
+                    val layer = canvas.saveLayerAlpha(0f, 0f, pw, ph, (params.dstAlpha * 255f).toInt())
+                    canvas.translate(params.dstDx, params.dstDy)
+                    canvas.scale(params.dstScale, params.dstScale, pw / 2f, ph / 2f)
+                    drawState(canvas, e.to, pw, ph, 1f)
+                    canvas.restoreToCount(layer)
+                }
+                if (sceneSpec != null) drawSceneClock(canvas, pw, ph)
             }
         }
+        editDelegate.phoneRect.set(phoneRect)
+        editDelegate.draw(canvas, pw, ph)
+        canvas.restoreToCount(clip)
+
+        framePaint.strokeWidth = density
+        framePaint.shader = null
+        framePaint.color = 0x2EFFFFFF
+        canvas.drawRoundRect(phoneRect, corner, corner, framePaint)
+
+        if (lensSpinning || motionAnimating()) scheduleLensTick() else stopLensTick()
+    }
+
+    /** 息屏动态是否需要在场逐帧：总闸开 + 息屏在场 + 该样式有动参数。 */
+    private fun motionAnimating(): Boolean {
+        if (!allowAodDynamic) return false
+        val aodVisible = scene == SceneState.AOD ||
+            (edge != null && (edge!!.from == SceneState.AOD || edge!!.to == SceneState.AOD))
+        if (!aodVisible) return false
+        return (style.id == AodStyleCatalog.ID_SAIL && (aodRotateSpeed > 0f || aodColorMix > 0f)) ||
+            (sceneSpec?.photo != null && aodPhotoTilt > 0f)
+    }
+
+    private fun scheduleLensTick() {
+        if (lensScheduled) return
+        lensScheduled = true
+        Choreographer.getInstance().postFrameCallback(lensTick)
+    }
+
+    private fun stopLensTick() {
+        if (lensScheduled) {
+            Choreographer.getInstance().removeFrameCallback(lensTick)
+            lensScheduled = false
+        }
+        lensLastNanos = 0L
+    }
+
+    /** 壁纸与压暗整屏只画一次：各态只画自己的内容，避免同屏双画与压暗跳变。 */
+    private fun drawWallpaperOnce(canvas: Canvas, w: Float, h: Float, dim: Float) {
+        if (!drawWallpaperBackground(canvas, w, h, 0f)) {
+            drawAmbientWallpaper(canvas, w, h)
+        }
+        val a = (dim.coerceIn(0f, 1f) * 255f).toInt()
+        if (a <= 0) return
+        fill.style = Paint.Style.FILL
+        fill.shader = null
+        fill.color = Color.argb(a, 0, 0, 0)
+        canvas.drawRect(0f, 0f, w, h, fill)
+    }
+
+    private fun sceneDim(state: SceneState): Float = when (state) {
+        SceneState.AOD -> SystemSceneMotion.DIM_AOD
+        SceneState.LOCK -> SystemSceneMotion.DIM_LOCK
+        SceneState.HOME -> SystemSceneMotion.DIM_HOME
+    }
+
+    /** 遮罩边缘羽化：内实心外透明的径向环带。 */
+    private fun drawMaskFeather(canvas: Canvas, w: Float, h: Float, p: TransitionParams) {
+        val outer = MaskGeometry.featherOuterPx(p.maskRadius, p.maskFeather)
+        val inner = MaskGeometry.featherInnerPx(p.maskRadius, p.maskFeather)
+        if (outer <= inner) return
+        val stop = (inner / outer).coerceIn(0f, 0.999f)
+        fill.style = Paint.Style.FILL
+        fill.shader = RadialGradient(
+            p.maskCenterX, p.maskCenterY, outer,
+            intArrayOf(0x00000000, 0x00000000, 0x66000000),
+            floatArrayOf(0f, stop, 1f), Shader.TileMode.CLAMP,
+        )
+        canvas.drawRect(0f, 0f, w, h, fill)
+        fill.shader = null
     }
 
     private fun drawState(canvas: Canvas, state: SceneState, w: Float, h: Float, alpha: Float) {
@@ -370,7 +716,9 @@ class AodPreviewView @JvmOverloads constructor(
             AodStyleCatalog.ID_PORTRAIT -> 0xFFD8CCEA.toInt()
             else -> if (full) 0xFFD3DCE8.toInt() else 0xFFB7BDC4.toInt()
         }
-        drawClockBlock(canvas, w / 2f, centerY, base, timeColor, 0.58f)
+        if (!editDelegate.drawClockOverride(canvas, w, h, timeText, dateText)) {
+            drawClockBlock(canvas, w / 2f, centerY, base, timeColor, 0.58f)
+        }
 
         if (layer >= 0) canvas.restoreToCount(layer)
     }
@@ -407,19 +755,10 @@ class AodPreviewView @JvmOverloads constructor(
         } else {
             -1
         }
-        if (!drawWallpaperBackground(canvas, w, h, 0.30f)) {
-            drawAmbientWallpaper(canvas, w, h)
-            fill.style = Paint.Style.FILL
-            fill.shader = LinearGradient(
-                0f, 0f, 0f, h,
-                intArrayOf(0x59000000, 0x00000000, 0x52000000),
-                floatArrayOf(0f, 0.34f, 1f), Shader.TileMode.CLAMP,
-            )
-            canvas.drawRect(0f, 0f, w, h, fill)
-            fill.shader = null
-        }
 
-        drawClockBlock(canvas, w / 2f, h * 0.205f, h * 0.152f, 0xFFF3F6F9.toInt(), 0.66f)
+        if (!editDelegate.drawClockOverride(canvas, w, h, timeText, dateText)) {
+            drawClockBlock(canvas, w / 2f, h * 0.205f, h * 0.152f, 0xFFF3F6F9.toInt(), 0.66f)
+        }
         drawLockOverlay(canvas, w, h, 1f)
 
         if (layer >= 0) canvas.restoreToCount(layer)
@@ -433,26 +772,13 @@ class AodPreviewView @JvmOverloads constructor(
         } else {
             -1
         }
-        if (!drawWallpaperBackground(canvas, w, h, 0.16f)) {
-            drawAmbientWallpaper(canvas, w, h)
-            fill.style = Paint.Style.FILL
-            fill.shader = LinearGradient(
-                0f, 0f, 0f, h,
-                intArrayOf(0x33000000, 0x00000000, 0x2E000000),
-                floatArrayOf(0f, 0.40f, 1f), Shader.TileMode.CLAMP,
-            )
-            canvas.drawRect(0f, 0f, w, h, fill)
-            fill.shader = null
-        }
 
-        drawClockBlock(canvas, w / 2f, h * 0.098f, h * 0.104f, 0xFFF3F6F9.toInt(), 0.62f)
         drawHomeWeather(canvas, w, h)
 
-        val dockH = h * 0.098f
-        val dockTop = h * 0.686f
-        drawAppGrid(canvas, w, h * 0.268f, dockTop - dp(30f))
-        drawHomeDots(canvas, w, dockTop)
-        drawDock(canvas, w, dockTop, dockH)
+        val geo = homeGeometry(w, h)
+        drawAppGrid(canvas, geo)
+        drawHomeDots(canvas, geo)
+        drawDock(canvas, geo)
 
         if (layer >= 0) canvas.restoreToCount(layer)
     }
@@ -463,9 +789,20 @@ class AodPreviewView @JvmOverloads constructor(
         val u = if (scrubP >= 0f) {
             scrubP
         } else {
-            SceneTimeline.uOf(edge, t, scene, Easing.LINEAR)
+            SceneTimeline.uOf(edge, t, scene, SCENE_PLAY_CURVE)
         }
         sampleLayers()
+        aodLayerAlpha = layers.aodAlpha
+        contentGate = 1f
+        sailFade.reset()
+        if (spec.lens) {
+            drawSailScene(canvas, w, h, u, spec)
+            return
+        }
+        if (spec.photo != null) {
+            drawPhotoScene(canvas, w, h, u, spec)
+            return
+        }
         sceneSample.sample(spec.contract, u)
 
         val realWallpaper = if (useSystemWallpaper) wallpaper else null
@@ -518,10 +855,264 @@ class AodPreviewView @JvmOverloads constructor(
             canvas.restoreToCount(layer)
         }
 
-        drawSceneClock(canvas, w, h, u)
+        drawSceneClock(canvas, w, h)
         val chrome = maxOf(layers.lockAlpha, layers.homeAlpha)
         if (chrome > 0.002f) drawGestureBar(canvas, w, h, chrome * 0.7f)
         drawVignette(canvas, w, h)
+    }
+
+    /** 启航：圆形镜片展示旋转壁纸，展开时铺满整屏并交接到锁屏内容。 */
+    private fun drawSailScene(canvas: Canvas, w: Float, h: Float, u: Float, spec: AodSceneSpec) {
+        val aodAnchor = spec.clockAnchors[SceneState.AOD]
+        val aodX = aodAnchor?.centerX ?: 0.5f
+        val aodY = (aodAnchor?.centerY ?: 0.6f) + AodDrift.offsetY(SystemClock.uptimeMillis())
+        val expanded = SailLensMotion.expandedScale(h / w)
+        when {
+            scrubP >= 0f -> SailLensMotion.sampleTimeline(scrubP, aodX, aodY, expanded, lensPose, spinDeg = lensAngleDeg)
+            edge != null -> SailLensMotion.sample(edge!!, t, aodX, aodY, expanded, lensPose, spinDeg = lensAngleDeg)
+            else -> SailLensMotion.sampleStatic(scene, aodX, aodY, expanded, lensPose)
+        }
+
+        val effEdge = if (scrubP >= 0f) SceneTimeline.edgeAt(scrubP) else edge
+        val effT = if (scrubP >= 0f) SceneTimeline.localT(scrubP) else t
+
+        val realWallpaper = if (useSystemWallpaper) wallpaper else null
+        val backdrop = realWallpaper ?: sceneSky
+        val lockVisible = scene == SceneState.LOCK || (effEdge != null && effEdge.to == SceneState.LOCK)
+        val effectLayer = if (lockVisible && backdrop != null) requestEffectLayer(backdrop, w, h) else null
+        if (effectLayer != null) {
+            drawBitmapCover(canvas, effectLayer, w, h, layers.wallpaperScale, 0f, 0f)
+        } else if (backdrop != null) {
+            drawBitmapCover(canvas, backdrop, w, h, layers.wallpaperScale, 0f, 0f)
+        } else {
+            drawAmbientWallpaper(canvas, w, h)
+        }
+        fill.style = Paint.Style.FILL
+        fill.shader = null
+        fill.color = alphaColor(0xFF02040A.toInt(), layers.dim)
+        canvas.drawRect(0f, 0f, w, h, fill)
+
+        SailLensMotion.fade(effEdge, effT, sailFade)
+        aodLayerAlpha = if (effEdge == null) layers.aodAlpha else sailFade.aodAlpha
+        contentGate = sailFade.contentGate
+        if (aodLayerAlpha > 0.002f) {
+            lensSpinning = scene == SceneState.AOD && effEdge == null
+            com.coloros16.liquidglass.engine.effect.AodMotion.evaluate(
+                SystemClock.uptimeMillis(), allowAodDynamic, aodColorMix, aodRotateSpeed, aodPhotoTilt, aodMotion,
+            )
+            val layer = canvas.saveLayerAlpha(0f, 0f, w, h, (aodLayerAlpha * 255f).toInt())
+            fill.color = Color.BLACK
+            canvas.drawRect(0f, 0f, w, h, fill)
+            if (effEdge == null) lensPose.angleDeg = lensAngleDeg
+            lensRenderer.draw(
+                canvas, w, h, lensPose, SailLensMotion.lensZoom(lensPose.scale),
+                colorMix = if (scene == SceneState.AOD) aodMotion.colorMix else 0f,
+            )
+            canvas.restoreToCount(layer)
+        }
+
+        val lockHome = effEdge == TransitionEdge.LOCK_TO_HOME || effEdge == TransitionEdge.HOME_TO_LOCK
+        val lockAlpha = layers.lockAlpha * contentGate
+        if (lockAlpha > 0.002f) {
+            val layer = canvas.saveLayerAlpha(0f, 0f, w, h, (lockAlpha * 255f).toInt())
+            val scale = if (lockHome) 1f else layers.lockScale
+            canvas.scale(scale, scale, w / 2f, h * 0.40f)
+            drawLockOverlay(canvas, w, h, 1f, if (lockHome) 0f else lockShiftDp(u))
+            canvas.restoreToCount(layer)
+        }
+
+        val homeAlpha = layers.homeAlpha * contentGate
+        if (homeAlpha > 0.002f) {
+            val layer = canvas.saveLayerAlpha(0f, 0f, w, h, (homeAlpha * 255f).toInt())
+            val scale = if (lockHome) 1f else layers.homeScale
+            canvas.scale(scale, scale, w / 2f, h * 0.52f)
+            drawSceneHomeIcons(canvas, w, h, 1f)
+            drawSceneHomeDock(canvas, w, h, 1f)
+            canvas.restoreToCount(layer)
+        }
+
+        drawSceneClock(canvas, w, h)
+        val chrome = maxOf(lockAlpha, homeAlpha)
+        if (chrome > 0.002f) drawGestureBar(canvas, w, h, chrome * 0.7f)
+    }
+
+    /**
+     * 照片类息屏：绿幕帧当内容窗口，方形网格从时钟位置展开铺满整屏。
+     * 网格外用黑色收口，内容取同框壁纸（息屏期按样式模糊）。
+     */
+    private fun drawPhotoScene(canvas: Canvas, w: Float, h: Float, u: Float, spec: AodSceneSpec) {
+        val photo = spec.photo ?: return
+        val anchor = spec.clockAnchors[SceneState.AOD]
+        val drift = if (edge == null && scrubP < 0f && scene == SceneState.AOD) {
+            AodDrift.offsetY(SystemClock.uptimeMillis())
+        } else {
+            0f
+        }
+        val anchorX = (anchor?.centerX ?: 0.5f) - 0.5f
+        val anchorY = 0.5f - ((anchor?.centerY ?: 0.435f) + drift)
+
+        val effEdge = if (scrubP >= 0f) SceneTimeline.edgeAt(scrubP) else edge
+        val effT = if (scrubP >= 0f) SceneTimeline.localT(scrubP) else t
+        val aspect = h / w
+        if (effEdge == null) {
+            PhotoStyleMotion.sampleStatic(photo, scene, aspect, anchorX, anchorY, photoMotion)
+        } else {
+            PhotoStyleMotion.sample(photo, effEdge, effT, aspect, anchorX, anchorY, photoMotion)
+        }
+
+        SailLensMotion.fade(effEdge, effT, sailFade)
+        contentGate = sailFade.contentGate
+        aodLayerAlpha = 1f
+
+        val realWallpaper = if (useSystemWallpaper) wallpaper else null
+        val backdrop = stylePhoto ?: realWallpaper ?: sceneSky
+        val lockVisible = scene == SceneState.LOCK || (effEdge != null && effEdge.to == SceneState.LOCK)
+        val effectLayer = if (lockVisible && backdrop != null) requestEffectLayer(backdrop, w, h) else null
+        if (effectLayer != null) {
+            drawBitmapCover(canvas, effectLayer, w, h, layers.wallpaperScale, 0f, 0f)
+        } else if (backdrop != null) {
+            drawBitmapCover(canvas, backdrop, w, h, layers.wallpaperScale, 0f, 0f)
+        } else {
+            drawAmbientWallpaper(canvas, w, h)
+        }
+        fill.style = Paint.Style.FILL
+        fill.shader = null
+        fill.color = alphaColor(0xFF02040A.toInt(), layers.dim)
+        canvas.drawRect(0f, 0f, w, h, fill)
+
+        val frame = photoFrame
+        if (frame != null) {
+            val pair = if (framePair && style.id == AodStyleCatalog.ID_LEAVE_LIGHT) framePhoto else null
+            com.coloros16.liquidglass.engine.effect.AodMotion.evaluate(
+                SystemClock.uptimeMillis(), allowAodDynamic, aodColorMix, aodRotateSpeed, aodPhotoTilt, aodMotion,
+            )
+            val tilt = if (scene == SceneState.AOD && effEdge == null) aodMotion.photoTiltDeg else 0f
+            val values = photoMotion.v
+            val savedRotation = values[PhotoStyle.SLOT_ROTATION]
+            values[PhotoStyle.SLOT_ROTATION] = savedRotation + tilt
+            val reveal = if (values[PhotoStyle.SLOT_PHOTO_ALPHA] < 0.999f) {
+                captureRevealTarget(canvas, w, h, effEdge)
+            } else {
+                null
+            }
+            photoRenderer.draw(
+                canvas, w, h, values, frame, style.accent,
+                layers.dim * (1f - photoMotion.ratios[SceneState.AOD.ordinal]),
+                values[PhotoStyle.SLOT_BLUR],
+                layers.wallpaperScale,
+                pair, frameCropX, frameCropY, frameCropSize, frameCropAngle,
+                revealPhoto = reveal,
+            )
+            values[PhotoStyle.SLOT_ROTATION] = savedRotation
+        }
+        updatePhotoFrame(photo)
+
+        val lockHome = effEdge == TransitionEdge.LOCK_TO_HOME || effEdge == TransitionEdge.HOME_TO_LOCK
+        val lockAlpha = layers.lockAlpha * contentGate
+        if (lockAlpha > 0.002f) {
+            val layer = canvas.saveLayerAlpha(0f, 0f, w, h, (lockAlpha * 255f).toInt())
+            val scale = if (lockHome) 1f else layers.lockScale
+            canvas.scale(scale, scale, w / 2f, h * 0.40f)
+            drawLockOverlay(canvas, w, h, 1f, if (lockHome) 0f else lockShiftDp(u))
+            canvas.restoreToCount(layer)
+        }
+
+        val homeAlpha = layers.homeAlpha * contentGate
+        if (homeAlpha > 0.002f) {
+            val layer = canvas.saveLayerAlpha(0f, 0f, w, h, (homeAlpha * 255f).toInt())
+            val scale = if (lockHome) 1f else layers.homeScale
+            canvas.scale(scale, scale, w / 2f, h * 0.52f)
+            drawSceneHomeIcons(canvas, w, h, 1f)
+            drawSceneHomeDock(canvas, w, h, 1f)
+            canvas.restoreToCount(layer)
+        }
+
+        drawSceneClock(canvas, w, h)
+        val chrome = maxOf(lockAlpha, homeAlpha)
+        if (chrome > 0.002f) drawGestureBar(canvas, w, h, chrome * 0.7f)
+    }
+
+    /** 照片揭开目标层快照：photoAlpha<1 时色键内容混向的目标态整屏画面（对齐 u_launcher_effect）。 */
+    private fun captureRevealTarget(canvas: Canvas, w: Float, h: Float, effEdge: TransitionEdge?): Bitmap? {
+        val target = effEdge?.to ?: scene
+        if (target == SceneState.AOD) return null
+        val key = "${target.name}:${w.toInt()}x${h.toInt()}:${wallpaper?.hashCode() ?: 0}"
+        revealCacheKey?.let { if (it == key) return revealCache }
+        val rw = (w / 2f).toInt().coerceAtLeast(2)
+        val rh = (h / 2f).toInt().coerceAtLeast(2)
+        val bitmap = Bitmap.createBitmap(rw, rh, Bitmap.Config.ARGB_8888)
+        val off = Canvas(bitmap)
+        off.scale(rw / w, rh / h)
+        val realWallpaper = if (useSystemWallpaper) wallpaper else null
+        val backdrop = stylePhoto ?: realWallpaper ?: sceneSky
+        if (backdrop != null) {
+            drawBitmapCover(off, backdrop, w, h, layers.wallpaperScale, 0f, 0f)
+        } else {
+            drawAmbientWallpaper(off, w, h)
+        }
+        when (target) {
+            SceneState.LOCK -> drawLockOverlay(off, w, h, 1f, 0f)
+            SceneState.HOME -> {
+                drawSceneHomeIcons(off, w, h, 1f)
+                drawSceneHomeDock(off, w, h, 1f)
+            }
+            SceneState.AOD -> Unit
+        }
+        revealCache = bitmap
+        revealCacheKey = key
+        return bitmap
+    }
+
+    private var revealCache: Bitmap? = null
+    private var revealCacheKey: String? = null
+
+    private var clockTailEdge: TransitionEdge? = null
+    private var clockTailEdgeMs = 0L
+    private var clockTailStartMs = 0L
+    private var clockTailScheduled = false
+    private val clockTailTick = object : Choreographer.FrameCallback {
+        override fun doFrame(frameTimeNanos: Long) {
+            clockTailScheduled = false
+            clockTailEdge ?: return
+            if (!isAttachedToWindow) {
+                clockTailEdge = null
+                return
+            }
+            val elapsed = SystemClock.uptimeMillis() - clockTailStartMs
+            if (AodClockEntry.tailDone(elapsed, clockTailEdgeMs)) {
+                clockTailEdge = null
+            }
+            invalidate()
+            if (clockTailEdge != null) scheduleClockTail()
+        }
+    }
+
+    private fun scheduleClockTail() {
+        if (clockTailScheduled) return
+        clockTailScheduled = true
+        Choreographer.getInstance().postFrameCallback(clockTailTick)
+    }
+
+    /** 当前时钟进场缩放：播放/拖动取引擎 layers.aodClockScale（单一真值），边末后按补尾进度，静止态=1。 */
+    private fun clockEntryScale(): Float {
+        if (clockTailEdge != null) {
+            val elapsed = SystemClock.uptimeMillis() - clockTailStartMs
+            return AodClockEntry.scaleAt(AodClockEntry.tailProgress(elapsed, clockTailEdgeMs))
+        }
+        return layers.aodClockScale
+    }
+
+    /** 取当前视频时间对应的帧；未解码时沿用上一帧，并按进度前后预取。 */
+    private fun updatePhotoFrame(photo: PhotoStyle) {
+        val sequence = photoSequence ?: return
+        val index = photo.frameIndex(photoMotion.v[PhotoStyle.SLOT_VIDEO])
+        sequence.frame(index)?.let { photoFrame = it }
+        sequence.prefetch(
+            intArrayOf(
+                index + 1, index + 2, index + 3, index + 4,
+                index - 1, index - 2, index - 3, index - 4,
+            ),
+        )
     }
 
     private fun sampleLayers() {
@@ -548,7 +1139,10 @@ class AodPreviewView @JvmOverloads constructor(
         val dh = bh * scale
         src.set(0, 0, bitmap.width, bitmap.height)
         dst.set((w - dw) / 2f + dx, (h - dh) / 2f + dy, (w + dw) / 2f + dx, (h + dh) / 2f + dy)
-        canvas.drawBitmap(bitmap, src, dst, fill)
+        iconPaint.shader = null
+        iconPaint.colorFilter = null
+        iconPaint.alpha = 255
+        canvas.drawBitmap(bitmap, src, dst, iconPaint)
     }
 
     private fun drawSceneSky(canvas: Canvas, w: Float, h: Float, u: Float) {
@@ -798,11 +1392,9 @@ class AodPreviewView @JvmOverloads constructor(
         }
         val scale = 0.97f + 0.03f * alpha.coerceIn(0f, 1f)
         canvas.scale(scale, scale, w / 2f, h * 0.52f)
-        val dockH = h * 0.098f
-        val dockTop = h * 0.686f
-        drawHomeWeather(canvas, w, h)
-        drawAppGrid(canvas, w, h * 0.268f, dockTop - dp(30f))
-        drawHomeDots(canvas, w, dockTop)
+        val geo = homeGeometry(w, h)
+        drawAppGrid(canvas, geo)
+        drawHomeDots(canvas, geo)
         canvas.restoreToCount(layer)
     }
 
@@ -812,21 +1404,32 @@ class AodPreviewView @JvmOverloads constructor(
         } else {
             canvas.save()
         }
-        val dockH = h * 0.098f
-        drawDock(canvas, w, h * 0.686f, dockH)
+        drawDock(canvas, homeGeometry(w, h))
         canvas.restoreToCount(layer)
     }
 
-    /** 单一时钟层：三态共用一份文本，只按姿态缩放与换色，不被遮罩裁剪。 */
-    private fun drawSceneClock(canvas: Canvas, w: Float, h: Float, u: Float) {
+    /** 全场景只画一颗时钟，位置/缩放/透明度/旋转由时钟状态机逐帧插值；布局配置的偏移随插值一起过渡。 */
+    private fun drawSceneClock(canvas: Canvas, w: Float, h: Float) {
+        if (edge == null && scrubP < 0f &&
+            editDelegate.drawClockOverride(canvas, w, h, timeText, dateText)
+        ) return
         val pose = clockMachine.pose
-        if (!pose.visible) return
-        val base = h * 0.145f * pose.scale * layers.aodClockScale
-        val cx = pose.centerX * w
-        val cy = pose.centerY * h
-        val timeColor = mix3(0xFFC9D4E2.toInt(), 0xFFF0F4F8.toInt(), 0xFFF5F8FB.toInt(), u)
-        val layer = if (pose.alpha < 0.999f) {
-            canvas.saveLayerAlpha(0f, 0f, w, h, (pose.alpha.coerceIn(0f, 1f) * 255f).toInt())
+        val a = pose.alpha.coerceIn(0f, 1f)
+        if (a <= 0.002f) return
+        val drift = if (edge == null && scrubP < 0f && scene == SceneState.AOD) {
+            AodDrift.offsetY(SystemClock.uptimeMillis())
+        } else {
+            0f
+        }
+        val effEdge = if (scrubP >= 0f) SceneTimeline.edgeAt(scrubP) else edge
+        val effT = if (scrubP >= 0f) SceneTimeline.localT(scrubP) else t
+        val off = editDelegate.clockOffset(effEdge, effT)
+        val cx = (pose.centerX + off.first) * w
+        val cy = (pose.centerY + off.second + drift) * h
+        val clockScale = pose.scale * clockEntryScale()
+        if (editDelegate.drawSceneClockAt(canvas, w, h, cx, cy, a, pose.rotationDeg, effEdge, effT, timeText, dateText, clockScale)) return
+        val layer = if (a < 0.999f) {
+            canvas.saveLayerAlpha(0f, 0f, w, h, (a * 255f).toInt())
         } else {
             -1
         }
@@ -835,9 +1438,31 @@ class AodPreviewView @JvmOverloads constructor(
         } else {
             -1
         }
-        drawClockBlock(canvas, cx, cy, base, timeColor, 0.62f)
+        drawClockBlock(canvas, cx, cy, h * 0.145f * clockScale, sceneClockColor(), 0.62f)
         if (rotated >= 0) canvas.restoreToCount(rotated)
         if (layer >= 0) canvas.restoreToCount(layer)
+    }
+
+    private fun sceneClockColor(): Int = when {
+        scrubP >= 0f -> if (scrubP <= 0.5f) {
+            lerpColor(AOD_CLOCK_COLOR, LOCK_CLOCK_COLOR, scrubP / 0.5f)
+        } else {
+            lerpColor(LOCK_CLOCK_COLOR, HOME_CLOCK_COLOR, (scrubP - 0.5f) / 0.5f)
+        }
+
+        edge != null -> lerpColor(
+            clockColorOf(edge!!.from),
+            clockColorOf(edge!!.to),
+            SystemSceneMotion.clockCurve(edge!!).map(t),
+        )
+
+        else -> clockColorOf(scene)
+    }
+
+    private fun clockColorOf(state: SceneState): Int = when (state) {
+        SceneState.AOD -> AOD_CLOCK_COLOR
+        SceneState.LOCK -> LOCK_CLOCK_COLOR
+        SceneState.HOME -> HOME_CLOCK_COLOR
     }
 
     // ---------------------------------------------------------------- 通用部件
@@ -919,8 +1544,6 @@ class AodPreviewView @JvmOverloads constructor(
         text.textAlign = Paint.Align.LEFT
 
         drawNotificationCard(canvas, w, h * 0.415f, 0)
-        drawNotificationCard(canvas, w, h * 0.523f, 1)
-        drawMusicCard(canvas, w, h * 0.635f)
 
         canvas.restoreToCount(layer)
     }
@@ -951,7 +1574,7 @@ class AodPreviewView @JvmOverloads constructor(
         text.color = 0xFFF4F7FA.toInt()
         val textX = iconCx + iconSize / 2f + dp(12f)
         val titleBaseline = h + dp(25f)
-        canvas.drawText(appLabels.getOrNull(index) ?: previewApps[index].label, textX, titleBaseline, text)
+        canvas.drawText(homeIcons.getOrNull(index)?.label ?: previewApps[index].label, textX, titleBaseline, text)
 
         text.typeface = sans
         text.textSize = sp(11.5f)
@@ -970,119 +1593,70 @@ class AodPreviewView @JvmOverloads constructor(
         text.textAlign = Paint.Align.LEFT
     }
 
-    private fun drawMusicCard(canvas: Canvas, w: Float, top: Float) {
-        val cardH = dp(62f)
-        val left = dp(16f)
-        val right = w - dp(16f)
-        fill.style = Paint.Style.FILL
-        fill.shader = null
-        fill.color = 0x1AFFFFFF
-        canvas.drawRoundRect(r(left, top, right, top + cardH), dp(22f), dp(22f), fill)
-        stroke.style = Paint.Style.STROKE
-        stroke.strokeWidth = dp(1f)
-        stroke.pathEffect = null
-        stroke.color = 0x1FFFFFFF
-        canvas.drawRoundRect(r(left, top, right, top + cardH), dp(22f), dp(22f), stroke)
+    /** 按预览缩放折算的等效密度：dp 常量乘它即得预览像素。 */
+    private fun previewDensity(): Float = density * uiScale
 
-        val art = dp(40f)
-        val artCx = left + dp(16f) + art / 2f
-        val artCy = top + cardH / 2f
-        fill.shader = LinearGradient(
-            artCx - art / 2f, artCy - art / 2f, artCx + art / 2f, artCy + art / 2f,
-            intArrayOf(0xFF8FA3E0.toInt(), 0xFF44559A.toInt()),
-            null, Shader.TileMode.CLAMP,
-        )
-        canvas.drawRoundRect(
-            r(artCx - art / 2f, artCy - art / 2f, artCx + art / 2f, artCy + art / 2f),
-            dp(11f), dp(11f), fill,
-        )
-        fill.shader = null
+    /** 桌面几何按尺寸缓存，尺寸不变不重算。 */
+    private fun homeGeometry(w: Float, h: Float): HomeGeometry {
+        val key = "$w|$h|$uiScale|$homePages"
+        homeGeometry?.let { if (key == homeGeometryKey) return it }
         text.typeface = sansMedium
-        text.textSize = sp(16f)
-        text.letterSpacing = 0f
-        text.textAlign = Paint.Align.CENTER
-        text.color = 0xE6FFFFFF.toInt()
-        canvas.drawText("♪", artCx, artCy + sp(6f), text)
-        text.textAlign = Paint.Align.LEFT
-        text.typeface = sansMedium
-        text.textSize = sp(13f)
-        text.letterSpacing = 0.01f
-        text.textAlign = Paint.Align.LEFT
-        text.color = 0xFFF2F6FA.toInt()
-        val textX = artCx + art / 2f + dp(12f)
-        canvas.drawText("正在播放", textX, top + dp(26f), text)
-        text.typeface = sans
-        text.textSize = sp(11f)
-        text.color = 0x99E8EEF5.toInt()
-        canvas.drawText("轻音乐 · 夜航", textX, top + dp(43f), text)
-
-        val iconCx = right - dp(30f)
-        val iconCy = top + cardH / 2f
-        fill.style = Paint.Style.FILL
-        fill.color = 0xE6F2F6FA.toInt()
-        path.reset()
-        path.moveTo(iconCx - dp(4f), iconCy - dp(6f))
-        path.lineTo(iconCx + dp(6f), iconCy)
-        path.lineTo(iconCx - dp(4f), iconCy + dp(6f))
-        path.close()
-        canvas.drawPath(path, fill)
+        text.textSize = HomeLayout.ICON_TEXT_SP * scaled * uiScale
+        text.getFontMetrics(labelMetrics)
+        val labelH = labelMetrics.descent - labelMetrics.ascent
+        val geo = HomeGeometry.solve(w, h, previewDensity(), labelH, homePages)
+        homeGeometry = geo
+        homeGeometryKey = key
+        return geo
     }
 
-    private fun drawAppGrid(canvas: Canvas, w: Float, gridTop: Float, gridBottom: Float) {
-        val columns = 4
-        val rows = 3
-        val cellW = (w - dp(24f)) / columns
-        val cellH = (gridBottom - gridTop) / rows
-        val iconSize = min(cellW * 0.62f, cellH * 0.62f)
-        var index = 0
-        for (row in 0 until rows) {
-            for (col in 0 until columns) {
-                val cx = dp(12f) + cellW * (col + 0.5f)
-                val top = gridTop + cellH * row + (cellH - iconSize - dp(16f)) / 2f
-                drawAppIcon(canvas, index, cx, top + iconSize / 2f, iconSize)
-                text.typeface = sans
-                text.textSize = sp(9.5f)
-                text.letterSpacing = 0.01f
-                text.textAlign = Paint.Align.CENTER
-                text.color = 0xE6FFFFFF.toInt()
-                canvas.drawText(
-                    appLabels.getOrNull(index) ?: previewApps[index].label,
-                    cx, top + iconSize + dp(13f), text,
-                )
-                index++
-            }
+    private fun drawAppGrid(canvas: Canvas, geo: HomeGeometry) {
+        val count = min(previewApps.size, HomeLayout.COLUMNS * HomeLayout.ROWS)
+        text.typeface = sansMedium
+        text.textSize = HomeLayout.ICON_TEXT_SP * scaled * uiScale
+        text.letterSpacing = 0f
+        text.textAlign = Paint.Align.CENTER
+        text.color = HomeLayout.LABEL_COLOR_DARK_WP
+        text.setShadowLayer(
+            HomeLayout.LABEL_SHADOW_RADIUS_DP * geo.density, 0f, 0f, HomeLayout.LABEL_SHADOW_COLOR,
+        )
+        for (index in 0 until count) {
+            val left = geo.cellIconLeftPx(index)
+            val top = geo.cellIconTopPx(index)
+            drawAppIcon(canvas, index, left + geo.iconSizePx / 2f, top + geo.iconSizePx / 2f, geo.iconSizePx)
+            val label = homeIcons.getOrNull(index)?.label ?: previewApps[index].label
+            text.getFontMetrics(labelMetrics)
+            canvas.drawText(label, left + geo.iconSizePx / 2f, geo.cellLabelTopPx(index) - labelMetrics.ascent, text)
         }
+        text.clearShadowLayer()
     }
 
     private fun drawAppIcon(canvas: Canvas, index: Int, cx: Float, cy: Float, size: Float) {
-        val icon = appIcons.getOrNull(index)
-        if (icon != null) {
-            icon.setBounds(
-                (cx - size / 2f).toInt(),
-                (cy - size / 2f).toInt(),
-                (cx + size / 2f).toInt(),
-                (cy + size / 2f).toInt(),
-            )
-            icon.draw(canvas)
+        val icon = homeIcons.getOrNull(index)
+        val bitmap = icon?.bitmap ?: icon?.drawable?.let { cachedIconBitmap(index, it, size) }
+        if (bitmap != null && !bitmap.isRecycled) {
+            dst.set(cx - size / 2f, cy - size / 2f, cx + size / 2f, cy + size / 2f)
+            src.set(0, 0, bitmap.width, bitmap.height)
+            iconPaint.alpha = 255
+            canvas.drawBitmap(bitmap, src, dst, iconPaint)
             return
         }
-        val app = previewApps.getOrNull(index) ?: return
+        val radius = HomeLayout.iconCornerRadiusPx(size)
         fill.style = Paint.Style.FILL
-        fill.shader = LinearGradient(
-            cx - size / 2f, cy - size / 2f, cx + size / 2f, cy + size / 2f,
-            intArrayOf(app.top, app.bottom), null, Shader.TileMode.CLAMP,
-        )
-        canvas.drawRoundRect(
-            r(cx - size / 2f, cy - size / 2f, cx + size / 2f, cy + size / 2f),
-            dp(13f), dp(13f), fill,
-        )
         fill.shader = null
-        text.typeface = sansMedium
-        text.textSize = size * 0.34f
-        text.letterSpacing = 0f
-        text.textAlign = Paint.Align.CENTER
-        text.color = 0xFFFFFFFF.toInt()
-        canvas.drawText(app.label.take(1), cx, cy + size * 0.17f, text)
+        fill.color = 0x33FFFFFF
+        canvas.drawRoundRect(r(cx - size / 2f, cy - size / 2f, cx + size / 2f, cy + size / 2f), radius, radius, fill)
+    }
+
+    private fun cachedIconBitmap(index: Int, drawable: Drawable, size: Float): Bitmap {
+        val px = size.toInt().coerceAtLeast(1)
+        val slot = iconBitmapCache[index]
+        if (slot != null && slot.first === drawable && slot.second.width == px && !slot.second.isRecycled) {
+            return slot.second
+        }
+        val bitmap = HomeIconSource.toBitmap(drawable, px)
+        iconBitmapCache[index] = drawable to bitmap
+        return bitmap
     }
 
     private fun drawHomeWeather(canvas: Canvas, w: Float, h: Float) {
@@ -1094,42 +1668,44 @@ class AodPreviewView @JvmOverloads constructor(
         canvas.drawText("晴 13° · 北京市", w / 2f, h * 0.192f, text)
     }
 
-    private fun drawHomeDots(canvas: Canvas, w: Float, dockTop: Float) {
-        val dotsTop = dockTop - dp(24f)
+    private fun drawHomeDots(canvas: Canvas, geo: HomeGeometry) {
         fill.style = Paint.Style.FILL
         fill.shader = null
-        fill.color = 0x14FFFFFF
-        canvas.drawRoundRect(
-            r(w / 2f - dp(28f), dotsTop, w / 2f + dp(28f), dotsTop + dp(18f)),
-            dp(9f), dp(9f), fill,
-        )
-        for (i in 0 until 4) {
-            fill.color = if (i == 0) 0xFFFFFFFF.toInt() else 0x59FFFFFF
-            canvas.drawCircle(w / 2f - dp(11f) + dp(8f) * i, dotsTop + dp(9f), dp(1.8f), fill)
+        val radius = geo.indicatorItemSizePx / 2f
+        val cy = geo.indicatorItemTopPx() + radius
+        for (i in 0 until homePages) {
+            val alpha = if (i == 0) HomeLayout.INDICATOR_ACTIVE_ALPHA else HomeLayout.INDICATOR_NORMAL_ALPHA
+            fill.color = Color.argb(alpha, 255, 255, 255)
+            canvas.drawCircle(geo.indicatorItemLeftPx(i) + radius, cy, radius, fill)
         }
     }
 
-    private fun drawDock(canvas: Canvas, w: Float, dockTop: Float, dockH: Float) {
+    private fun drawDock(canvas: Canvas, geo: HomeGeometry) {
+        val left = geo.hotseatLeftPx
+        val top = geo.hotseatTopPx
+        val right = left + geo.hotseatWidthPx
+        val bottom = top + geo.hotseatHeightPx
+        val radius = geo.hotseatRadiusPx
         fill.style = Paint.Style.FILL
         fill.shader = null
-        fill.color = 0x1FFFFFFF
-        canvas.drawRoundRect(
-            r(dp(12f), dockTop, w - dp(12f), dockTop + dockH),
-            dp(26f), dp(26f), fill,
-        )
+        fill.color = HomeLayout.HOTSEAT_FILL_DARK_WP
+        canvas.drawRoundRect(r(left, top, right, bottom), radius, radius, fill)
         stroke.style = Paint.Style.STROKE
-        stroke.strokeWidth = dp(1f)
+        stroke.strokeWidth = HomeLayout.HOTSEAT_STROKE_PX * uiScale
         stroke.pathEffect = null
-        stroke.color = 0x17FFFFFF
-        canvas.drawRoundRect(
-            r(dp(12f), dockTop, w - dp(12f), dockTop + dockH),
-            dp(26f), dp(26f), stroke,
-        )
-        val dockIcon = min(dockH * 0.58f, w * 0.125f)
-        for (i in 0 until 4) {
-            val cx = dp(12f) + (w - dp(24f)) / 4f * (i + 0.5f)
-            val cy = dockTop + dockH / 2f
-            drawAppIcon(canvas, 12 + i, cx, cy, dockIcon)
+        stroke.shader = null
+        stroke.color = HomeLayout.HOTSEAT_STROKE_COLOR
+        canvas.drawRoundRect(r(left, top, right, bottom), radius, radius, stroke)
+        val iconTop = geo.hotseatIconTopPx()
+        for (i in 0 until HomeLayout.HOTSEAT_ICONS) {
+            val index = HomeIconSource.grid.size + i
+            val iconLeft = geo.hotseatIconLeftPx(i)
+            drawAppIcon(
+                canvas, index,
+                iconLeft + geo.hotseatIconSizePx / 2f,
+                iconTop + geo.hotseatIconSizePx / 2f,
+                geo.hotseatIconSizePx,
+            )
         }
     }
 
@@ -1207,23 +1783,129 @@ class AodPreviewView @JvmOverloads constructor(
         if (u <= 0.5f) lerpColor(a, b, u * 2f) else lerpColor(b, c, (u - 0.5f) * 2f)
 
     private fun drawWallpaperBackground(canvas: Canvas, w: Float, h: Float, scrim: Float): Boolean {
-        val bitmap = wallpaper ?: return false
-        if (!useSystemWallpaper) return false
+        val bitmap = (if (useSystemWallpaper) wallpaper else null) ?: sceneSky ?: return false
         fill.style = Paint.Style.FILL
         fill.shader = null
         fill.color = Color.WHITE
         fill.alpha = 255
-        val scale = maxOf(w / bitmap.width, h / bitmap.height)
+        val zoom = if (edge == null && scrubP < 0f) {
+            when (scene) {
+                SceneState.LOCK -> SystemSceneMotion.WALLPAPER_SCALE_LOCK
+                else -> SystemSceneMotion.WALLPAPER_SCALE_HOME
+            }
+        } else {
+            sampleLayers()
+            layers.wallpaperScale
+        }
+        val scale = maxOf(w / bitmap.width, h / bitmap.height) * zoom
         val width = bitmap.width * scale
         val height = bitmap.height * scale
         val left = (w - width) / 2f
         val top = (h - height) / 2f
         dst.set(left, top, left + width, top + height)
         src.set(0, 0, bitmap.width, bitmap.height)
-        canvas.drawBitmap(bitmap, src, dst, fill)
+        val layer = if (scene == SceneState.LOCK || (edge != null && edge!!.to == SceneState.LOCK)) requestEffectLayer(bitmap, w, h) else null
+        if (layer != null) {
+            src.set(0, 0, layer.width, layer.height)
+            val ls = maxOf(w / layer.width, h / layer.height) * zoom
+            val lw = layer.width * ls
+            val lh = layer.height * ls
+            dst.set((w - lw) / 2f, (h - lh) / 2f, (w + lw) / 2f, (h + lh) / 2f)
+            canvas.drawBitmap(layer, src, dst, iconPaint)
+        } else {
+            canvas.drawBitmap(bitmap, src, dst, fill)
+        }
         fill.color = Color.argb((scrim.coerceIn(0f, 1f) * 255f).toInt(), 0, 0, 0)
         canvas.drawRect(0f, 0f, w, h, fill)
         return true
+    }
+
+    /**
+     * 取当前效果处理后的整屏壁纸：贴图类做法线折射，模糊/景深走各自管线。
+     *
+     * 处理放后台线程，首帧先用原壁纸，算好再刷一次。
+     */
+    private fun requestEffectLayer(bitmap: Bitmap, w: Float, h: Float): Bitmap? {
+        val wp = lockWallpaperEffect
+        val sp = lockSpecialEffect
+        val meizu = MeizuGlassRenderer.kindOf(wp)
+        val textured = EffectTextureCatalog.hasTexture(wp)
+        val blurred = wp == EffectCatalog.LOCK_WP_BLUR
+        val depth = sp == EffectCatalog.LOCK_SP_BOKEH
+        if (meizu == null && !textured && !blurred && !depth) return null
+        val size = com.coloros16.liquidglass.engine.EffectOverlayPolicy.targetSize(w.toInt(), h.toInt())
+        val tw = size[0].coerceAtLeast(1)
+        val th = size[1].coerceAtLeast(1)
+        val intensity = lockWallpaperIntensity
+        val key = "$wp|$sp|$intensity|$tw|$th|${bitmap.width}x${bitmap.height}|${System.identityHashCode(bitmap)}"
+        if (key == effectLayerKey) return effectLayer
+        if (effectLoading) return effectLayer
+        effectLoading = true
+        Lg.i(TAG, "effect layer build wp=$wp sp=$sp size=${tw}x$th")
+        val assets = context.assets
+        Thread({
+            var fail: Throwable? = null
+            val out = runCatching {
+                val base = Bitmap.createScaledBitmap(bitmap, tw, th, true)
+                val result = when {
+                    meizu != null -> {
+                        val gray = if (meizu == MeizuGlassRenderer.FOG) {
+                            EffectTextureRenderer.decode(assets, "effect/meizu/fog.png")
+                        } else {
+                            null
+                        }
+                        val rendered = MeizuGlassRenderer.render(base, meizu, tw, th, intensity, gray, gray)
+                        gray?.recycle()
+                        rendered ?: base
+                    }
+                    textured -> {
+                        val spec = EffectTextureCatalog.find(wp)!!
+                        val normal = EffectTextureRenderer.decode(assets, spec.texturePath)
+                        if (normal == null) base else {
+                            // 该效果普通档需背景模糊时先糊底图，再折射+叠玻璃（系统 step/radius 真值）
+                            val backdrop = if (EffectTextureCatalog.needsBlur(spec, false)) {
+                                AodBitmap.blur(base, spec.blurStep, spec.blurRadius)
+                            } else {
+                                base
+                            }
+                            val refracted = EffectTextureRenderer.refract(backdrop, normal, spec, tw, th, false)
+                            val overlay = EffectTextureRenderer.render(normal, spec, tw, th, false)
+                            val canvas = Canvas(refracted)
+                            EffectTextureRenderer.draw(canvas, overlay, tw.toFloat(), th.toFloat())
+                            overlay.recycle()
+                            normal.recycle()
+                            if (backdrop !== base) backdrop.recycle()
+                            refracted
+                        }
+                    }
+                    depth -> TiltShiftRenderer.render(base, tw, th)
+                    else -> TiltShiftRenderer.blurred(base, 18f).let { full ->
+                        val outB = Bitmap.createBitmap(tw, th, Bitmap.Config.ARGB_8888)
+                        Canvas(outB).drawBitmap(full, null, android.graphics.RectF(0f, 0f, tw.toFloat(), th.toFloat()), null)
+                        full.recycle()
+                        outB
+                    }
+                }
+                if (result !== base) base.recycle()
+                result
+            }.getOrElse {
+                fail = it
+                null
+            }
+            post {
+                effectLoading = false
+                if (out != null) {
+                    effectLayer?.recycle()
+                    effectLayer = out
+                    effectLayerKey = key
+                    Lg.i(TAG, "effect layer ready wp=$wp sp=$sp")
+                } else {
+                    Lg.w(TAG, "effect layer failed wp=$wp sp=$sp err=${fail?.javaClass?.simpleName}:${fail?.message}")
+                }
+                invalidate()
+            }
+        }, "aod-effect-layer").apply { isDaemon = true }.start()
+        return effectLayer
     }
 
     private fun radial(canvas: Canvas, cx: Float, cy: Float, radius: Float, center: Int, edge: Int) {
@@ -1268,12 +1950,24 @@ class AodPreviewView @JvmOverloads constructor(
         super.onAttachedToWindow()
         requestAppIcons()
         requestSceneSky()
+        syncPhotoStyle(style.id)
+        syncLensSource()
         refreshTime()
         scheduleMinuteTick()
+        syncMotionTick()
     }
 
     override fun onDetachedFromWindow() {
         removeCallbacks(minuteTick)
+        stopLensTick()
+        clockTailEdge = null
+        if (clockTailScheduled) {
+            Choreographer.getInstance().removeFrameCallback(clockTailTick)
+            clockTailScheduled = false
+        }
+        photoSequence?.close()
+        photoSequence = null
+        photoFrame = null
         super.onDetachedFromWindow()
     }
 
@@ -1288,6 +1982,7 @@ class AodPreviewView @JvmOverloads constructor(
             post {
                 sceneSky = bitmap
                 sceneSkyLoading = false
+                syncLensSource()
                 invalidate()
             }
         }, "aod-scene-sky").start()
@@ -1297,25 +1992,12 @@ class AodPreviewView @JvmOverloads constructor(
     private fun requestAppIcons() {
         if (iconsRequested) return
         iconsRequested = true
-        val pm = context.packageManager
+        val appContext = context.applicationContext ?: context
         Thread({
-            val loaded = arrayOfNulls<Drawable>(previewApps.size)
-            val labels = arrayOfNulls<String>(previewApps.size)
-            for (i in previewApps.indices) {
-                try {
-                    val info = pm.getApplicationInfo(previewApps[i].pkg, 0)
-                    loaded[i] = pm.getApplicationIcon(info)
-                    labels[i] = pm.getApplicationLabel(info).toString()
-                } catch (t: Throwable) {
-                    loaded[i] = null
-                    labels[i] = null
-                }
-            }
+            val loaded = HomeIconSource.resolve(appContext)
             post {
-                for (i in loaded.indices) {
-                    appIcons[i] = loaded[i]
-                    appLabels[i] = labels[i]
-                }
+                homeIcons = loaded
+                iconBitmapCache.clear()
                 invalidate()
             }
         }, "aod-app-icons").apply { isDaemon = true }.start()
@@ -1342,4 +2024,15 @@ class AodPreviewView @JvmOverloads constructor(
     private fun dp(value: Float): Float = value * density * uiScale
 
     private fun sp(value: Float): Float = value * scaled * uiScale
+
+    private companion object {
+        const val TAG = "AodPreview"
+        const val PREVIEW_ASPECT = 9f / 19.5f
+
+        /** 播放期场景时间曲线：贝塞尔；拖动仍 1:1。 */
+        private val SCENE_PLAY_CURVE = com.coloros16.liquidglass.engine.CubicBezierEasing(0.33f, 0f, 0.67f, 1f)
+        val AOD_CLOCK_COLOR = 0xFFC9D4E2.toInt()
+        val LOCK_CLOCK_COLOR = 0xFFF0F4F8.toInt()
+        val HOME_CLOCK_COLOR = 0xFFF5F8FB.toInt()
+    }
 }

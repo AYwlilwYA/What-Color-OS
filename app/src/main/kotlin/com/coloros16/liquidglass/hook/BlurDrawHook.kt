@@ -22,6 +22,8 @@ import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import android.util.LruCache
+import android.view.Choreographer
+import android.view.MotionEvent
 import android.view.SurfaceControl
 import android.view.View
 import android.view.ViewGroup
@@ -32,6 +34,7 @@ import com.coloros16.liquidglass.config.ConfigStore
 import com.coloros16.liquidglass.config.Prefs
 import com.coloros16.liquidglass.debug.DebugElement
 import com.coloros16.liquidglass.debug.DebugOverlay
+import com.coloros16.liquidglass.engine.PressGlow
 import com.coloros16.liquidglass.engine.SafetyFuse
 import com.coloros16.liquidglass.glass.GlassRegistry
 import com.coloros16.liquidglass.hook.capture.CaptureEngine
@@ -287,8 +290,6 @@ object BlurDrawHook {
     private var lastMainSyncFirstFrameAt = 0L
     /** 审计日志每 id 最小打印间隔（ms） */
     private const val AUDIT_PER_ID_INTERVAL_MS = 1000L
-    /** 精修判定结果缓存有效期（ms） */
-    private const val POLISH_VERDICT_TTL_MS = 500L
     /** [2026-08-13 用户要求「通知持续期间必须一直抓屏」] heads-up 活跃期间**不间断**抓屏间隔毫秒。
      *  通知是瞬态场景（持续数秒），持续抓屏可接受；间隔 50ms ≈ 20Hz（captureDisplay 同步 Binder 自身
      *  20-50ms 耗时叠加，实际 ~10-14Hz），覆盖通知内容/入场动画每一帧变化。worker 线程执行（主线程仅首帧
@@ -536,6 +537,9 @@ object BlurDrawHook {
     //   映射到「实际绘制位置」（正向：R_drawn = s·R + (1-s)·pivotScreen；R 已含 translation，
     //   pivotScreen = 容器 getLocationOnScreen + pivotX/Y，hook 主线程捕获）再折算 srcRect。
     private const val CLASS_NOTIFICATION_PANEL_VIEW = "com.android.systemui.shade.NotificationPanelView"
+    private const val CLASS_NOTIFICATION_PANEL_CONTROLLER = "com.android.systemui.shade.NotificationPanelViewController"
+    /** C15 快捷开关详情弹窗（WiFi/蓝牙等）：独立窗口 + SurfaceControlViewHost，背景非 posteffect 可接管。 */
+    private const val CLASS_THEME_SYSTEM_UI_DIALOG = "com.oplus.systemui.common.dialog.OplusThemeSystemUiDialog"
     private const val CLASS_OPLUS_QS_ROOT_VIEW = "com.oplus.systemui.plugins.qs.OplusQSRootView"
     private const val CLASS_NOTIFICATION_STACK_SCROLL_LAYOUT = "com.android.systemui.statusbar.notification.stack.NotificationStackScrollLayout"
     private const val METHOD_SET_SCALE_X = "setScaleX"
@@ -1059,6 +1063,12 @@ object BlurDrawHook {
     /** posteffect 架构探针结果（PRE_AGSL 时启用 C15 draw(Canvas) 接管面）。 */
     @Volatile
     private var posteffectArchProbed = PosteffectArch.UNKNOWN
+    /** C15：面板展开状态（setExpandedHeightInternal 事件驱动写入；比 isShadeRenderingNow 的 500ms 窗口可靠）。 */
+    private var preAgsPanelOpen = false
+    /** C15 详情弹窗承载 View（qs_detail_frame）：玻璃自绘宿主 + 抓屏排除锚点。 */
+    private var preAgsDialogFrameRef: WeakReference<View>? = null
+    private var preAgsDialogSfcCache: SurfaceControl? = null
+    private var preAgsDialogSfcMissAt = 0L
     /** C15：BlurDrawable.drawablePath（私有，局部坐标路径）与 pathProvider（圆角来源）。 */
     private var mPreAgsDrawablePathField: Field? = null
     private var mPreAgsPathProviderField: Field? = null
@@ -1066,6 +1076,8 @@ object BlurDrawHook {
     /** 无 getBlurDrawable() 的版本（C15）：PlatformBlurDrawable.blurDrawable 私有字段即内部 posteffect 实例。 */
     private var mPlatformInnerBlurField: Field? = null
     private val preAgsGlassPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    /** C15：drawable id → 已构建的液态玻璃 RuntimeShader（后续帧只走增量 uniform，不重建几何/源绑定）。 */
+    private val preAgsShaderCache = HashMap<Int, RuntimeShader>()
     private var mAutoGetViewBlurProxy: Method? = null
     private var mViewProxyGetView: Method? = null
     private var mViewProxyGetBlurDrawable: Method? = null
@@ -1574,6 +1586,127 @@ object BlurDrawHook {
      *  避免 SCREEN_OFF 不锁屏等语义偏差）。
      *  注册用 systemUiContext（context.applicationContext.registerReceiver）；SYSTEM_UI 进程内该 context
      *  生命周期与进程一致，模块随 SystemUI 进程存续 → **无需 unregister**。context 解析失败则跳过注册并打日志。 */
+    /**
+     * 诊断：广播触发把当前抓屏快照写成 PNG，落宿主 cache 目录
+     * （`adb shell am broadcast -a com.coloros16.liquidglass.DUMP`）。
+     * 仅「运行日志」开启时注册；文件名为 lg_dump.png，每次覆盖。
+     */
+    private fun registerDiagnosticDumpReceiver() {
+        if (!moduleLogEnabled) {
+            Lg.i(TAG, "lg-dump: receiver skipped (module log off)")
+            return
+        }
+        val ctx = systemUiContext()
+        if (ctx == null) {
+            Lg.w(TAG, "lg-dump: receiver skipped, context null")
+            return
+        }
+        try {
+            val filter = android.content.IntentFilter(ACTION_DUMP_SNAPSHOT)
+            val receiver = object : android.content.BroadcastReceiver() {
+                override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+                    try {
+                        dumpSnapshotToCache()
+                    } catch (t: Throwable) {
+                        Lg.e(TAG, "lg-dump: onReceive failed", t)
+                    }
+                }
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                ctx.applicationContext.registerReceiver(receiver, filter, android.content.Context.RECEIVER_EXPORTED)
+            } else {
+                ctx.applicationContext.registerReceiver(receiver, filter)
+            }
+            Lg.i(TAG, "lg-dump: receiver registered (am broadcast -a $ACTION_DUMP_SNAPSHOT)")
+        } catch (t: Throwable) {
+            Lg.e(TAG, "lg-dump: register receiver failed", t)
+        }
+    }
+
+    /** 把当前背景快照位图写到宿主 cache/lg_dump.png（诊断用，供 adb 拉取）。 */
+    private fun dumpSnapshotToCache() {
+        val snap = screenSnapshot ?: regionSnapshot
+        if (snap == null) {
+            Lg.e(TAG, "lg-dump: no snapshot yet")
+            return
+        }
+        val ctx = systemUiContext()
+        if (ctx == null) {
+            Lg.e(TAG, "lg-dump: context null")
+            return
+        }
+        val bmp = snap.bitmap
+        val f = java.io.File(ctx.cacheDir, "lg_dump.png")
+        java.io.FileOutputStream(f).use { out -> bmp.compress(Bitmap.CompressFormat.PNG, 100, out) }
+        Lg.e(TAG, "lg-dump: wrote ${f.absolutePath} ${bmp.width}x${bmp.height} region=${snap.region}")
+        dumpDiagCsv(ctx)
+    }
+
+    /** 记录一次绘制时的屏幕区域采样（环形覆盖，诊断用）。 */
+    private fun recordDiagSample(id: Int, region: RectF) {
+        val i = (diagRingIdx % DIAG_RING_SAMPLES) * 6
+        diagRing[i] = SystemClock.uptimeMillis()
+        diagRing[i + 1] = id.toLong()
+        diagRing[i + 2] = region.left.toLong()
+        diagRing[i + 3] = region.top.toLong()
+        diagRing[i + 4] = region.right.toLong()
+        diagRing[i + 5] = region.bottom.toLong()
+        diagRingIdx++
+    }
+
+    /** 把坐标采样环写成 CSV（宿主 cache/lg_dump.csv），按时间升序。 */
+    private fun dumpDiagCsv(ctx: android.content.Context) {
+        val total = diagRingIdx
+        val n = minOf(total, DIAG_RING_SAMPLES)
+        val sb = StringBuilder(64 + n * 40)
+        sb.append("t_ms,id,left,top,right,bottom\n")
+        for (k in (total - n) until total) {
+            val i = (k % DIAG_RING_SAMPLES) * 6
+            sb.append(diagRing[i]).append(',')
+                .append(diagRing[i + 1]).append(',')
+                .append(diagRing[i + 2]).append(',')
+                .append(diagRing[i + 3]).append(',')
+                .append(diagRing[i + 4]).append(',')
+                .append(diagRing[i + 5]).append('\n')
+        }
+        val f = java.io.File(ctx.cacheDir, "lg_dump.csv")
+        f.writeText(sb.toString())
+        Lg.e(TAG, "lg-dump: wrote ${f.absolutePath} samples=$n")
+    }
+
+    /** 壁纸变更（含动态↔静态切换）：旧整屏快照失效 + 一次性重抓（事件驱动，无周期）。
+     *  快照置空使下一帧玻璃走「等新源」而非继续画旧壁纸；节流由 triggerBackgroundCapture 既有门控承担。 */
+    private fun registerWallpaperChangedReceiver() {
+        val ctx = systemUiContext()
+        if (ctx == null) {
+            Lg.w(TAG, "bg-wallpaper-changed: receiver skipped, context null")
+            return
+        }
+        try {
+            val filter = android.content.IntentFilter(android.content.Intent.ACTION_WALLPAPER_CHANGED)
+            val receiver = object : android.content.BroadcastReceiver() {
+                override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+                    try {
+                        screenSnapshot = null
+                        lastSnapshotFingerprint = 0
+                        if (moduleLogEnabled) Lg.i(TAG, "bg-wallpaper-changed: snapshot cleared, recapture requested")
+                        CaptureEngine.triggerBackgroundCapture(contentChange = true, force = true)
+                    } catch (t: Throwable) {
+                        Lg.e(TAG, "bg-wallpaper-changed: onReceive error", t)
+                    }
+                }
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                ctx.applicationContext.registerReceiver(receiver, filter, android.content.Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                ctx.applicationContext.registerReceiver(receiver, filter)
+            }
+            Lg.i(TAG, "bg-wallpaper-changed: receiver registered")
+        } catch (t: Throwable) {
+            Lg.e(TAG, "bg-wallpaper-changed: register receiver failed", t)
+        }
+    }
+
     private fun registerKeyguardStateBroadcastReceiver() {
         val ctx = systemUiContext()
         if (ctx == null) {
@@ -1696,7 +1829,7 @@ object BlurDrawHook {
             screenSnapshot = null
             lastSnapshotFingerprint = 0
             postInvalidateHosts()
-            CaptureEngine.triggerBackgroundCapture()
+            CaptureEngine.triggerBackgroundCapture(contentChange = true, force = true)
             RestoreEngine.fire(RestoreEngine.Timing.GLASS_OFF)
             Lg.i(TAG, "state: glass caches invalidated ($reason)")
         } catch (t: Throwable) {
@@ -1811,6 +1944,9 @@ object BlurDrawHook {
     /** [maskGlassDim] TTL 读取节流时刻（与 MATERIAL_PREFS_CACHE_MS 同拍，热路径零 IPC）。 */
     @Volatile
     private var maskGlassDimAtMs = 0L
+    /** 压暗自动跟随遮罩开关（KEY_MASK_DIM_FOLLOW_MASK）：开=独立压暗+主背景遮罩浓度叠加（未下拉=0）。 */
+    @Volatile
+    private var maskDimFollowMask = Prefs.DEFAULT_MASK_DIM_FOLLOW_MASK
     /** 遮罩下文字统一颜色 ARGB（KEY_MASK_TEXT_COLOR，默认纯白）。 */
     @Volatile
     internal var maskTextColor = Prefs.DEFAULT_MASK_TEXT_COLOR
@@ -1837,7 +1973,10 @@ object BlurDrawHook {
      *  收起时 scrim 不绘制故无副作用，hook 捕获真实值后覆盖）。主路径 drawScrimBlackTint 已改
      *  优先反射读 ScrimView.mViewAlpha 字段（不依赖 hook），本字段供兜底路径/反射失败 fallback。 */
     @Volatile
-    private var behindScrimAlpha = 1f
+    private var behindScrimAlpha = 0f
+    /** ScrimView 实例弱引用：玻璃跟随路反射读 mViewAlpha 真值用（与黑 tint 同源）。 */
+    @Volatile
+    private var scrimViewRef: java.lang.ref.WeakReference<View>? = null
     /** [2026-08-14 同步修复] 系统 behind_scrim mViewAlpha 峰值（学习值）：真机实测 ColorOS 16 展开完全时
      *  scrimAlpha≈0.15（系统 behind_scrim 本来就是浅半透明，非 1）。归一化用：progress = scrimAlpha / scrimPeak
      *  → 空隙遮罩 alpha = maskAlpha × progress，动画保留（系统渐入曲线）且终值 = maskAlpha（与玻璃 shader 同步）。
@@ -1872,10 +2011,35 @@ object BlurDrawHook {
                 Lg.w(TAG, "prefs read mask_glass_dim failed, keep $maskGlassDim", t)
                 maskGlassDim
             }
+            maskDimFollowMask = try {
+                Prefs.read(a).getBoolean(Prefs.KEY_MASK_DIM_FOLLOW_MASK, Prefs.DEFAULT_MASK_DIM_FOLLOW_MASK)
+            } catch (t: Throwable) {
+                maskDimFollowMask
+            }
         }
         // 预设覆盖：该元素归属的预设有压暗值则用预设值，否则用全局缓存值
-        return GlassRegistry.overridesFor(elementId)?.get(Prefs.KEY_MASK_GLASS_DIM)?.coerceIn(0f, 1f)
+        val ov = GlassRegistry.overridesFor(elementId)
+        val base = ov?.get(Prefs.KEY_MASK_GLASS_DIM)?.coerceIn(0f, 1f)
             ?: maskGlassDim
+        val followOn = ov?.get(Prefs.KEY_MASK_DIM_FOLLOW_MASK)?.let { it > 0.5f } ?: maskDimFollowMask
+        if (!followOn) return base
+        // 控制中心收起时跟随归 0（C15 逐帧面板高度即时判据）
+        if (posteffectArchProbed == PosteffectArch.PRE_AGSL && !preAgsPanelOpen) {
+            logThrottled("mask-dim-follow", Log.INFO) {
+                "mask dim follow: panel closed, independent=$base followed=0"
+            }
+            return base
+        }
+        // 跟随路：与黑遮罩同公式（progress×maskAlpha、同 scrimPeak 学习、反射读真值），与背景遮罩同步
+        val raw = readScrimViewAlpha(scrimViewRef?.get()) ?: behindScrimAlpha
+        if (raw > scrimPeak) scrimPeak = raw
+        val progress = if (scrimPeak > 0f) (raw / scrimPeak).coerceIn(0f, 1f) else 0f
+        val scrimAlphaNow = ov?.get(Prefs.KEY_MASK_ALPHA)?.coerceIn(0f, 1f) ?: maskAlpha
+        val followed = progress * scrimAlphaNow.coerceIn(0f, 1f)
+        logThrottled("mask-dim-follow", Log.INFO) {
+            "mask dim follow: independent=$base raw=$raw peak=$scrimPeak progress=$progress maskAlpha=$scrimAlphaNow followed=$followed"
+        }
+        return (base + followed).coerceIn(0f, 1f)
     }
 
     /**
@@ -2208,6 +2372,19 @@ object BlurDrawHook {
     @Volatile
     private var moduleLogEnabled = false
 
+    /** 诊断广播 action：触发把当前抓屏快照与坐标采样落宿主 cache。 */
+    private const val ACTION_DUMP_SNAPSHOT = "com.coloros16.liquidglass.DUMP"
+
+    /** 诊断坐标采样环容量（每采样 6 个 long：t / id / left / top / right / bottom）。 */
+    private const val DIAG_RING_SAMPLES = 4096
+
+    /** 诊断坐标采样环（只存最近若干次绘制，广播时导出 CSV）。 */
+    private val diagRing = LongArray(DIAG_RING_SAMPLES * 6)
+
+    /** 诊断采样写入序号（环形下标 = 序号 % 容量）。 */
+    @Volatile
+    private var diagRingIdx = 0
+
     // ---- [spec/44 流体云展开卡片玻璃化 2026-08-13] install 时读取并缓存（改动需重启 SystemUI 生效） ----
     /** 流体云展开卡片玻璃化总开关（Prefs.KEY_SEEDLING_CARD_GLASS_ENABLE，默认 false）。 */
     @Volatile
@@ -2364,6 +2541,18 @@ object BlurDrawHook {
     private var volumeDrawActiveTrackMethod: Method? = null
     @Volatile
     private var volumeDrawActiveTrackResolved = false
+    /** onDraw(Canvas) 方法缓存（宿主自绘轨道/进度时玻璃覆盖后的重绘入口） */
+    @Volatile
+    private var volumeSeekBarOnDrawMethod: Method? = null
+    @Volatile
+    private var volumeSeekBarOnDrawResolved = false
+    /** 轨道背景字段缓存（重绘进度时临时隐掉不透明背景用） */
+    @Volatile
+    private var volumeInactiveTrackField: Field? = null
+    @Volatile
+    private var volumeBackgroundColorField: Field? = null
+    @Volatile
+    private var volumeTrackFieldsResolved = false
     /** OplusVolumeDialogView.mDialogView 字段缓存（expandPanel 后取面板容器） */
     @Volatile
     private var volumeDialogViewField: Field? = null
@@ -2476,6 +2665,14 @@ object BlurDrawHook {
     private var cachedRemoveMixColor = Prefs.DEFAULT_REMOVE_PANEL_MIX_COLOR
     @Volatile
     private var cachedRemoveMixColorTimeMs = 0L
+    @Volatile
+    private var cachedTileOnBlueGlass = Prefs.DEFAULT_TILE_ON_BLUE_GLASS
+    @Volatile
+    private var cachedTileOnBlueGlassTimeMs = 0L
+    @Volatile
+    private var cachedDoubleLayerGlass = Prefs.DEFAULT_DOUBLE_LAYER_GLASS
+    @Volatile
+    private var cachedDoubleLayerGlassTimeMs = 0L
     /** [2026-09-16 面板材质底色] BlurConfig.get/setPlatformMixConfig（替换为 None 用） */
     private var mBlurConfigGetPlatformMixConfig: Method? = null
     private var mBlurConfigSetPlatformMixConfig: Method? = null
@@ -2703,7 +2900,7 @@ object BlurDrawHook {
         // 抓屏参数策略与七触发入口收口接线
         CapturePolicy.attach(api) { isMotionActive }
         CaptureEngine.attach(
-            background = { triggerBackgroundCapture(it) },
+            background = { contentChange, force -> triggerBackgroundCapture(contentChange, force) },
             mainThread = { triggerBackgroundCaptureOnMainThread() },
             firstFrame = { burstStop, logTag, pauseDuringPanelExpansion, mainThreadSyncFirstFrame, bypassMainSyncDedup ->
                 triggerFirstFrameCaptureWithBurst(burstStop, logTag, pauseDuringPanelExpansion, mainThreadSyncFirstFrame, bypassMainSyncDedup)
@@ -2810,6 +3007,8 @@ object BlurDrawHook {
         mountLegacyDrawBlur(api, classLoader)
         // C15（PRE_AGSL）：无 BaseDrawable/agsl → 挂根 drawable draw(Canvas) 作玻璃接管面（现役直接返回）
         mountPreAgsDraw(api, classLoader)
+        // C15：快捷开关详情弹窗（独立窗口，背景走静态模糊/白混色）→ 自己上玻璃（现役直接返回）
+        mountPreAgsDetailDialog(api, classLoader)
         mountMotionSources(api, classLoader)
         // [spec/114] 四处多版本兼容自检小表（#39/#14 在 mount 内、R5/R6/R14 在 resolveMethods 内已各打命中行）
         Lg.i(TAG, "lg-hook compat #39 onBlurReady=$compatHitOnBlurReady")
@@ -2879,6 +3078,8 @@ object BlurDrawHook {
         mountNotificationBackgroundRadius(api, classLoader)
         // [doc/spec/134 第二轮] ···展开按钮玻璃（attach 时白底容器换玻璃 drawable，默认关）
         mountVolumeMoreButtonGlass(api, classLoader)
+        // 点按位置发光：dispatchTouchEvent 触摸源（快路径只认已登记玻璃宿主，默认关）
+        mountPressGlow(api)
         // [doc/spec/135] 通知长按菜单玻璃（show 时菜单主体换玻璃 drawable + dismiss 还原，默认关）
         mountNotificationPopupGlass(api, classLoader)
         mountNotificationPopupDismiss(api, classLoader)
@@ -2901,8 +3102,12 @@ object BlurDrawHook {
         // [spec/62 锁屏耗电优化 2026-08-26] 注册锁屏状态缓存失效广播（屏幕开/关、用户解锁 → 缓存过期
         // 强制实测），消除锁屏/解锁切换 ≤500ms 竞态窗口内门控误判。context 解析失败自动跳过（内部打日志）。
         registerKeyguardStateBroadcastReceiver()
+        // 壁纸变更广播（含动态↔静态切换）：旧快照失效 + 一次性重抓，修「换壁纸后通知玻璃仍是旧壁纸帧」
+        registerWallpaperChangedReceiver()
         // [spec/85 省电模式] 注册省电状态广播（省电开 → 关玻璃 + 清缓存复位；省电关 → 立即重抓恢复）
         registerPowerSaveBroadcastReceiver()
+        // 诊断：广播触发抓屏快照落盘（仅运行日志开启时注册）
+        registerDiagnosticDumpReceiver()
         // [spec/60 周期强制刷新] 启动文字周期强制刷新循环（幂等去重；开关全关 / 无活跃宿主时
         // tick 轻量跳过，唯一成本是几微秒空 tick）
         ensureTextForceRefreshLoop()
@@ -5536,6 +5741,8 @@ object BlurDrawHook {
             } catch (t: Throwable) {
                 Lg.e(TAG, "MixColorTileDrawable.draw: intercept error", t)
             }
+            // 开启态蓝色透明：保留系统状态色覆盖层，不做跳过
+            if (tileOnBlueGlassEnabled()) return chain.proceed()
             // [任务 T] 移除玻璃之上的 maskColor 磨砂覆盖层（仅 z=true 时干预；失败回退原始含磨砂）
             var handled = false
             try {
@@ -5743,6 +5950,11 @@ object BlurDrawHook {
      * @return true = 已拦截（玻璃已画、maskColor 覆盖层已跳过）；false = 未处理（调用方应 proceed）
      */
     private fun skipTileMaskColorLayer(chain: XposedInterface.Chain): Boolean {
+        // 双层玻璃渲染关闭：内层这一层整层不渲染
+        if (!doubleLayerGlassEnabled()) {
+            logThrottled("tile-double-layer-off", Log.DEBUG) { "tile: double-layer glass disabled, inner layer skipped" }
+            return true
+        }
         val mix = try {
             chain.getThisObject()
         } catch (t: Throwable) {
@@ -7184,6 +7396,41 @@ object BlurDrawHook {
         } catch (t: Throwable) {
             Lg.e(TAG, "Hook G mount FAILED: $CLASS_QUICK_SETTINGS_CONTROLLER#$METHOD_SET_EXPANSION_HEIGHT", t)
         }
+        // C15：面板高度逐帧回调（拖动与回弹动画都经它），setExpansionHeight 在这一代只回调少数几次
+        mountPreAgsPanelHeight(api, classLoader)
+    }
+
+    /** C15（PRE_AGSL）逐帧运动源：NotificationPanelViewController#setExpandedHeightInternal(float)。 */
+    private fun mountPreAgsPanelHeight(api: XposedInterface, classLoader: ClassLoader) {
+        if (posteffectArchProbed != PosteffectArch.PRE_AGSL) return
+        try {
+            val clazz = Class.forName(CLASS_NOTIFICATION_PANEL_CONTROLLER, false, classLoader)
+            val method = clazz.getDeclaredMethod("setExpandedHeightInternal", Float::class.javaPrimitiveType)
+                .apply { isAccessible = true }
+            api.hook(method)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .intercept { chain ->
+                    try {
+                        // 高度 > 0 = 面板展开：本代没有逐帧的 shade 抓屏通道，展开期抓屏由周期循环
+                        // 满速兜底（见 periodicCaptureRunnable 的 preAgsShadeCapture）
+                        val h = try {
+                            chain.getArg(0) as? Float ?: 0f
+                        } catch (t: Throwable) {
+                            0f
+                        }
+                        preAgsPanelOpen = h > 0.5f
+                        // 拖动/回弹期 = 运动态：抓屏走满速，玻璃才跟得上背景刷新
+                        markMotion()
+                        invalidateRegisteredHostViews()
+                    } catch (t: Throwable) {
+                        Lg.e(TAG, "c15-height: invalidate hosts failed", t)
+                    }
+                    chain.proceed()
+                }
+            Lg.i(TAG, "Hook G mounted: $CLASS_NOTIFICATION_PANEL_CONTROLLER#setExpandedHeightInternal(float) (C15 per-frame -> invalidate hosts)")
+        } catch (t: Throwable) {
+            Lg.e(TAG, "Hook G mount FAILED: $CLASS_NOTIFICATION_PANEL_CONTROLLER#setExpandedHeightInternal", t)
+        }
     }
 
     /**
@@ -8064,6 +8311,9 @@ object BlurDrawHook {
         } catch (t: Throwable) {
             Lg.e(TAG, "transform: getThisObject failed", t); return
         } ?: return
+        // C15：容器逐帧变换 = 面板在动，玻璃宿主必须在同一帧重录才跟手（C16 由各宿主自己的
+        // 运动事件覆盖，此分支不参与）
+        if (posteffectArchProbed == PosteffectArch.PRE_AGSL) invalidateRegisteredHostViews()
         // [2026-08-13 二次修复] 容器类过滤（核心修复）：3 个容器类均未 override setScaleX/setScaleY/
         // setTranslationX/Y（继承 View，反编译实证）→ getMethod 解析到 View 继承方法 → hook 落在
         // **全局所有 View** 的 setScaleX 调用。若不过滤，无关 View 的 setScaleX 也写 containerTransforms，
@@ -8668,6 +8918,34 @@ object BlurDrawHook {
                 Lg.w(TAG, "volume-dialog: volumeDialog field unresolved, hidden-check degraded", t)
                 null
             }
+            // 排除专用登记：面板一挂上窗口树就记宿主（不画玻璃、不抓首帧），
+            // 音量条玻璃开关关着也能把面板从快照里排掉，防自采样竖纹反馈
+            try {
+                val attach = View::class.java.getDeclaredMethod(METHOD_ON_ATTACHED_TO_WINDOW).apply { isAccessible = true }
+                api.hook(attach)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .intercept { chain ->
+                        val result = chain.proceed()
+                        try {
+                            val v = chain.getThisObject() as? View
+                            if (v != null && v.javaClass.name == CLASS_VOLUME_DIALOG_VIEW &&
+                                volumeGlassHost?.get() == null
+                            ) {
+                                volumeGlassHost = WeakReference(v)
+                                volumeGlassHostAtMs = SystemClock.uptimeMillis()
+                                volumeSfcCache = null
+                                volumeSfcMissAt = 0L
+                                Lg.i(TAG, "volume-dialog: attach -> host noted (exclude-only)")
+                            }
+                        } catch (t: Throwable) {
+                            Lg.w(TAG, "volume-dialog: attach note error", t)
+                        }
+                        result
+                    }
+                Lg.i(TAG, "volume-dialog: attach exclude-note mounted")
+            } catch (t: Throwable) {
+                Lg.w(TAG, "volume-dialog: attach exclude-note mount FAILED", t)
+            }
             val method = clazz.getMethod(METHOD_DISMISS_H, Int::class.javaPrimitiveType)
             api.hook(method)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
@@ -8966,12 +9244,105 @@ object BlurDrawHook {
 
     /** 玻璃盖掉系统进度后重绘 drawActiveTrack（进度 + thumb 放回玻璃之上，进度保持可读）。 */
     private fun redrawActiveTrack(canvas: Canvas, seekbar: View) {
-        val m = drawActiveTrackMethod(seekbar.javaClass) ?: return
-        try {
-            m.invoke(seekbar, canvas)
-        } catch (t: Throwable) {
-            logVolumeDiag("redraw-fail", "volume-seekbar: drawActiveTrack 重绘失败 ${t.javaClass.simpleName}")
+        val m = drawActiveTrackMethod(seekbar.javaClass)
+        if (m != null) {
+            try {
+                m.invoke(seekbar, canvas)
+            } catch (t: Throwable) {
+                logVolumeDiag("redraw-fail", "volume-seekbar: drawActiveTrack 重绘失败 ${t.javaClass.simpleName}")
+            }
+            return
         }
+        // 宿主自绘轨道/进度（无 drawActiveTrack）：重跑 onDraw 把玻璃下被盖住的进度放回
+        val onDraw = seekBarOnDrawMethod(seekbar.javaClass)
+        if (onDraw == null) {
+            logVolumeDiag("redraw-none", "volume-seekbar: 无 drawActiveTrack 也无 onDraw，进度无法重绘")
+            return
+        }
+        // 重绘时隐掉轨道背景，只留进度与滑块，避免不透明底色把玻璃整块盖住
+        val restoreTrack = hideSeekBarTrackBackground(seekbar)
+        val save = canvas.save()
+        try {
+            onDraw.invoke(seekbar, canvas)
+        } catch (t: Throwable) {
+            logVolumeDiag("redraw-fail-ondraw", "volume-seekbar: onDraw 重绘失败 ${t.javaClass.simpleName}")
+        } finally {
+            canvas.restoreToCount(save)
+            restoreTrack?.invoke()
+        }
+    }
+
+    /** 临时隐藏 seekbar 轨道背景（inactive drawable 置空 + 背景色透明），返回恢复动作。 */
+    private fun hideSeekBarTrackBackground(seekbar: View): (() -> Unit)? {
+        val fields = seekBarTrackBackgroundFields(seekbar.javaClass) ?: return null
+        val (trackField, colorField) = fields
+        val savedTrack = try {
+            trackField.get(seekbar)
+        } catch (t: Throwable) {
+            return null
+        }
+        val savedColor = try {
+            colorField.getInt(seekbar)
+        } catch (t: Throwable) {
+            0
+        }
+        return try {
+            trackField.set(seekbar, null)
+            colorField.setInt(seekbar, 0)
+            val restore: () -> Unit = {
+                try {
+                    trackField.set(seekbar, savedTrack)
+                    colorField.setInt(seekbar, savedColor)
+                } catch (t: Throwable) {
+                    Lg.w(TAG, "volume-seekbar: 轨道背景恢复失败", t)
+                }
+            }
+            restore
+        } catch (t: Throwable) {
+            logVolumeDiag("track-hide-fail", "volume-seekbar: 轨道背景隐藏失败 ${t.javaClass.simpleName}")
+            null
+        }
+    }
+
+    /** seekbar 轨道背景字段解析（mInactiveTrackDrawable / mBackgroundColor，一次解析缓存）。 */
+    private fun seekBarTrackBackgroundFields(cls: Class<*>): Pair<Field, Field>? {
+        if (!volumeTrackFieldsResolved) {
+            synchronized(this) {
+                if (!volumeTrackFieldsResolved) {
+                    volumeInactiveTrackField = try {
+                        cls.getField("mInactiveTrackDrawable")
+                    } catch (t: Throwable) {
+                        null
+                    }
+                    volumeBackgroundColorField = try {
+                        cls.getField("mBackgroundColor")
+                    } catch (t: Throwable) {
+                        null
+                    }
+                    volumeTrackFieldsResolved = true
+                }
+            }
+        }
+        val track = volumeInactiveTrackField ?: return null
+        val color = volumeBackgroundColorField ?: return null
+        return track to color
+    }
+
+    /** onDraw(Canvas) 方法解析（public，一次解析缓存）。 */
+    private fun seekBarOnDrawMethod(cls: Class<*>): Method? {
+        if (!volumeSeekBarOnDrawResolved) {
+            synchronized(this) {
+                if (!volumeSeekBarOnDrawResolved) {
+                    volumeSeekBarOnDrawMethod = try {
+                        cls.getMethod("onDraw", Canvas::class.java)
+                    } catch (t: Throwable) {
+                        null
+                    }
+                    volumeSeekBarOnDrawResolved = true
+                }
+            }
+        }
+        return volumeSeekBarOnDrawMethod
     }
 
     /** drawActiveTrack(Canvas) 方法解析（public，一次解析缓存）。 */
@@ -9145,6 +9516,158 @@ object BlurDrawHook {
         if (now - prev < DEVICE_CARD_DIAG_TTL_MS) return
         volumeDiagAtMs[reason] = now
         Lg.i(TAG, "[$reason] $msg")
+    }
+
+    // ------------------------------------------------------------ 点按位置发光 ------------------------------------------------------------
+
+    /** 发光状态表：元素 id → 触点包络（主线程读写；上限 16，超出整表清）。 */
+    private val pressGlowStates = HashMap<Int, PressGlow.State>()
+    private var pressGlowMounted = false
+    private var pressGlowPumpRunning = false
+    @Volatile private var pressGlowEnabledValue = Prefs.DEFAULT_PRESS_GLOW
+    @Volatile private var pressGlowEnabledAtMs = 0L
+    @Volatile private var pressGlowStrengthValue = Prefs.DEFAULT_PRESS_GLOW_STRENGTH
+    @Volatile private var pressGlowStrengthAtMs = 0L
+
+    /** 元素级判定：所属玻璃配置的覆盖值优先（0/1），未配置回落全局开关。 */
+    private fun pressGlowEnabledFor(id: Int): Boolean {
+        val ov = GlassRegistry.overridesFor(id)?.get(Prefs.KEY_PRESS_GLOW)
+        if (ov != null) return ov > 0.5f
+        return pressGlowEnabled()
+    }
+
+    private fun pressGlowStrengthFor(id: Int): Float {
+        val ov = GlassRegistry.overridesFor(id)?.get(Prefs.KEY_PRESS_GLOW_STRENGTH)
+        return (ov ?: pressGlowStrength()).coerceIn(0f, 1f)
+    }
+
+    private fun pressGlowEnabled(): Boolean {
+        val now = SystemClock.uptimeMillis()
+        if (now - pressGlowEnabledAtMs < 500L) return pressGlowEnabledValue
+        pressGlowEnabledAtMs = now
+        pressGlowEnabledValue = try {
+            api?.let {
+                Prefs.readFloatCompat(Prefs.read(it), Prefs.KEY_PRESS_GLOW, if (Prefs.DEFAULT_PRESS_GLOW) 1f else 0f) > 0.5f
+            } ?: Prefs.DEFAULT_PRESS_GLOW
+        } catch (t: Throwable) {
+            Prefs.DEFAULT_PRESS_GLOW
+        }
+        return pressGlowEnabledValue
+    }
+
+    private fun pressGlowStrength(): Float {
+        val now = SystemClock.uptimeMillis()
+        if (now - pressGlowStrengthAtMs < 500L) return pressGlowStrengthValue
+        pressGlowStrengthAtMs = now
+        pressGlowStrengthValue = try {
+            api?.let {
+                Prefs.readFloatCompat(Prefs.read(it), Prefs.KEY_PRESS_GLOW_STRENGTH, Prefs.DEFAULT_PRESS_GLOW_STRENGTH)
+            } ?: Prefs.DEFAULT_PRESS_GLOW_STRENGTH
+        } catch (t: Throwable) {
+            Prefs.DEFAULT_PRESS_GLOW_STRENGTH
+        }.coerceIn(0f, 1f)
+        return pressGlowStrengthValue
+    }
+
+    /** 触摸源：全局 dispatchTouchEvent，但快路径只认「已登记玻璃宿主自身」，其余 View 两次查表即放行。 */
+    private fun mountPressGlow(api: XposedInterface) {
+        if (pressGlowMounted) return
+        try {
+            val method = View::class.java.getDeclaredMethod("dispatchTouchEvent", MotionEvent::class.java)
+            api.hook(method)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .intercept { chain ->
+                    val result = chain.proceed()
+                    try {
+                        notePressGlowTouch(chain.getThisObject() as? View, chain.getArg(0) as? MotionEvent)
+                    } catch (t: Throwable) {
+                        logThrottled("press-glow-touch-err", Log.WARN, 5000L) { "press-glow: touch note failed: $t" }
+                    }
+                    result
+                }
+            pressGlowMounted = true
+            Lg.i(TAG, "press-glow: dispatchTouchEvent source mounted")
+        } catch (t: Throwable) {
+            Lg.w(TAG, "press-glow: touch source mount FAILED", t)
+        }
+    }
+
+    private fun notePressGlowTouch(view: View?, ev: MotionEvent?) {
+        if (view == null || ev == null) return
+        val id = System.identityHashCode(view)
+        val active = pressGlowStates[id]
+        if (active == null) {
+            if (ev.actionMasked != MotionEvent.ACTION_DOWN) return
+            if (!pressGlowEnabledFor(id) || isPowerSaveGlassOff()) return
+            val entry = screenRegionMap[id] ?: return
+            if (entry.hostViewRef?.get() !== view) return
+            if (view.width <= 0 || view.height <= 0) return
+            pressGlowStates[id] = PressGlow.State(SystemClock.uptimeMillis(), null, ev.x, ev.y)
+            if (pressGlowStates.size > 16) pressGlowStates.clear()
+            logThrottled("press-glow-down", Log.INFO, 500L) {
+                "press-glow: down id=$id host=${entry.hostViewName} at=(${ev.x.toInt()},${ev.y.toInt()})"
+            }
+        } else {
+            when (ev.actionMasked) {
+                MotionEvent.ACTION_MOVE -> pressGlowStates[id] = active.copy(x = ev.x, y = ev.y)
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    pressGlowStates[id] = active.copy(upAtMs = SystemClock.uptimeMillis())
+                    logThrottled("press-glow-up", Log.INFO, 500L) { "press-glow: up id=$id" }
+                }
+            }
+        }
+        view.invalidate()
+        pumpPressGlowFrames()
+    }
+
+    /** 动画期帧泵：表空即停；省电/开关关立即清表（下一绘制帧强度归 0）。 */
+    private fun pumpPressGlowFrames() {
+        if (pressGlowPumpRunning || pressGlowStates.isEmpty()) return
+        pressGlowPumpRunning = true
+        try {
+            Choreographer.getInstance().postFrameCallback(object : Choreographer.FrameCallback {
+                override fun doFrame(frameTimeNanos: Long) {
+                    try {
+                        val now = SystemClock.uptimeMillis()
+                        if (!pressGlowEnabled() || isPowerSaveGlassOff()) {
+                            pressGlowStates.clear()
+                        } else {
+                            val it = pressGlowStates.entries.iterator()
+                            while (it.hasNext()) {
+                                val e = it.next()
+                                if (PressGlow.finished(e.value, now)) {
+                                    it.remove()
+                                }
+                                screenRegionMap[e.key]?.hostViewRef?.get()?.invalidate()
+                            }
+                        }
+                    } catch (t: Throwable) {
+                        Lg.e(TAG, "press-glow: pump tick failed", t)
+                    }
+                    if (pressGlowStates.isNotEmpty()) {
+                        Choreographer.getInstance().postFrameCallback(this)
+                    } else {
+                        pressGlowPumpRunning = false
+                        logThrottled("press-glow-pump", Log.INFO, 5000L) { "press-glow: frame pump done" }
+                    }
+                }
+            })
+        } catch (t: Throwable) {
+            pressGlowPumpRunning = false
+            Lg.e(TAG, "press-glow: spawn frame pump failed", t)
+        }
+    }
+
+    /** 绘制收口统一调用：把该元素当前光斑强度/位置/半径喂给 shader（无状态 = 强度 0 防残留）。 */
+    private fun applyPressGlowUniforms(shader: RuntimeShader, id: Int, w: Int, h: Int) {
+        val s = pressGlowStates[id]
+        val k = if (s == null || !pressGlowEnabledFor(id)) 0f
+        else PressGlow.intensity(s, SystemClock.uptimeMillis()) * pressGlowStrengthFor(id)
+        if (k > 0f && s != null) {
+            LiquidGlassShader.setPressGlowUniforms(shader, k, s.x, s.y, PressGlow.radiusPx(minOf(w, h).toFloat()))
+        } else {
+            LiquidGlassShader.setPressGlowUniforms(shader, 0f, 0f, 0f, 1f)
+        }
     }
 
     // ------------------------------------------------------------ [doc/spec/134 第二轮] ···展开按钮玻璃 ------------------------------------------------------------
@@ -9721,6 +10244,7 @@ object BlurDrawHook {
             lowResDiv = if (seedlingTier != null) seedlingWantDiv else 4,
         )
         markRenderLeg(id, RENDER_LEG_SEEDLING)
+        applyPressGlowUniforms(shader, id, w, h)
         canvas.save()
         try {
             canvas.translate(offsetX, offsetY)
@@ -10254,6 +10778,38 @@ object BlurDrawHook {
         }
         cachedRemoveMixColor = v
         cachedRemoveMixColorTimeMs = now
+        return v
+    }
+
+    /** 开启态蓝色透明开关（默认 false = 跳过状态色层只显玻璃）。改动 ≤1s 生效。 */
+    private fun tileOnBlueGlassEnabled(): Boolean {
+        val now = SystemClock.uptimeMillis()
+        if (now - cachedTileOnBlueGlassTimeMs < CAPTURE_PREFS_CACHE_MS) return cachedTileOnBlueGlass
+        val a = api ?: return Prefs.DEFAULT_TILE_ON_BLUE_GLASS
+        val v = try {
+            Prefs.read(a).getBoolean(Prefs.KEY_TILE_ON_BLUE_GLASS, Prefs.DEFAULT_TILE_ON_BLUE_GLASS)
+        } catch (t: Throwable) {
+            Lg.w(TAG, "prefs read tile_on_blue_glass failed, default false", t)
+            Prefs.DEFAULT_TILE_ON_BLUE_GLASS
+        }
+        cachedTileOnBlueGlass = v
+        cachedTileOnBlueGlassTimeMs = now
+        return v
+    }
+
+    /** 双层玻璃渲染开关（默认 true = 允许内外层叠加）。改动 ≤1s 生效。 */
+    private fun doubleLayerGlassEnabled(): Boolean {
+        val now = SystemClock.uptimeMillis()
+        if (now - cachedDoubleLayerGlassTimeMs < CAPTURE_PREFS_CACHE_MS) return cachedDoubleLayerGlass
+        val a = api ?: return Prefs.DEFAULT_DOUBLE_LAYER_GLASS
+        val v = try {
+            Prefs.read(a).getBoolean(Prefs.KEY_DOUBLE_LAYER_GLASS, Prefs.DEFAULT_DOUBLE_LAYER_GLASS)
+        } catch (t: Throwable) {
+            Lg.w(TAG, "prefs read double_layer_glass failed, default true", t)
+            Prefs.DEFAULT_DOUBLE_LAYER_GLASS
+        }
+        cachedDoubleLayerGlass = v
+        cachedDoubleLayerGlassTimeMs = now
         return v
     }
 
@@ -11628,6 +12184,11 @@ object BlurDrawHook {
     private val periodicCaptureRunnable = Runnable {
         periodicCapturePosted = false
         var forceCaptureScene = false
+        // C15 面板展开时系统抓屏通道只在少数节点回调（不像 C16 逐帧），靠它刷背景必然掉帧；
+        // 此代改由本循环在展开期满速兜底抓屏。展开标志用事件驱动的 preAgsPanelOpen——
+        // isShadeRenderingNow() 只有 500ms 窗口，间隔一大就会自踩成「展开不算展开」。
+        val preAgsShadeCapture = posteffectArchProbed == PosteffectArch.PRE_AGSL &&
+            (preAgsPanelOpen || isShadeRenderingNow())
         try {
             if (CapturePolicy.isPeriodicCaptureEnabled()) {
                 // 锁屏跳过：锁屏且无 heads-up 通知、面板未展开 → 无玻璃元素需要刷新，整屏抓屏无意义。
@@ -11646,7 +12207,7 @@ object BlurDrawHook {
                     if (forceCaptureScene) {
                         // 面板自身在渲染时让路（面板有它自己的抓屏通道覆盖），其余一律强制抓；
                         // 区域级抓屏开关开 → 只抓瞬态元素并集 bbox（存独立缓冲），否则整屏
-                        if (!isShadeRenderingNow()) {
+                        if (!isShadeRenderingNow() || preAgsShadeCapture) {
                             if (CapturePolicy.regionCaptureExperimentalEnabled()) {
                                 triggerRegionCapture()
                                 // 区域抓屏不接管整屏缓冲：整屏仍按模式节奏刷新（即时=每 tick，变化=兜底间隔）
@@ -11666,8 +12227,8 @@ object BlurDrawHook {
                         regionSnapshot = null
                         lastRegionSnapshotFingerprint = 0
                         // 变化/即时模式统一兜底：到点恒抓一次（静止也抓，指纹同帧跳过挡无效帧）。
-                        // 面板展开时让路（面板抓屏通道已实时覆盖）。
-                        if (!isShadeRenderingNow()) {
+                        // 面板展开时让路（面板抓屏通道已实时覆盖）；C15 面板通道稀疏，不让路。
+                        if (!isShadeRenderingNow() || preAgsShadeCapture) {
                             CaptureEngine.triggerBackgroundCapture(contentChange = false)
                         }
                     }
@@ -11676,8 +12237,8 @@ object BlurDrawHook {
         } catch (t: Throwable) {
             Lg.e(TAG, "periodic-capture: triggerBackgroundCapture error", t)
         }
-        // 续跑（kickPeriodicCapture 内部检查模式 + 宿主存活）。强制抓场景 → 高频续跑（面板同款速率）
-        kickPeriodicCapture(forceCaptureScene)
+        // 续跑（kickPeriodicCapture 内部检查模式 + 宿主存活）。强制抓场景 / C15 面板展开 → 高频续跑
+        kickPeriodicCapture(forceCaptureScene || preAgsShadeCapture)
     }
 
     /** 启动/续跑周期性抓屏（主线程调用；模式=静态 / 宿主全灭 → 不续跑）。改动 ≤1s 生效（每周期重读 Prefs）。 */
@@ -12876,7 +13437,32 @@ object BlurDrawHook {
             return false
         }
         if (SfGlassChannel.renderMode(api) == Prefs.RENDER_MODE_SF) {
-            logThrottled("c15-glass-sf", Log.INFO) { "c15-glass: sf mode, hand back to system id=$id" }
+            val dSf = drawable as? Drawable ?: return false
+            val boundsSf = Rect(dSf.bounds)
+            if (boundsSf.width() <= 0 || boundsSf.height() <= 0) {
+                logThrottled("c15-glass-sf", Log.INFO) { "c15-glass: sf mode empty bounds id=$id" }
+                return false
+            }
+            ensurePreAgsCanvasRegion(drawable, canvas, boundsSf)
+            val entry = screenRegionMap[id]
+            val region = entry?.region
+            if (region != null && region.width() > 0f && region.height() > 0f) {
+                val short = minOf(region.width(), region.height()) / 2f
+                val corner = (entry?.cornerRadius ?: 0f).coerceIn(0f, short)
+                val host = entry?.hostViewRef?.get() ?: preAgsWalkHostView(drawable)
+                SfGlassChannel.claimForDraw(
+                    id,
+                    region.left, region.top,
+                    region.width(), region.height(),
+                    corner,
+                    host = host,
+                )
+                logThrottled("c15-glass-sf", Log.INFO) {
+                    "c15-glass: sf mode claim id=$id region=$region corner=$corner host=${entry?.hostViewName}"
+                }
+            } else {
+                logThrottled("c15-glass-sf", Log.INFO) { "c15-glass: sf mode no region id=$id bounds=$boundsSf" }
+            }
             return false
         }
         val d = drawable as? Drawable ?: return false
@@ -12886,17 +13472,31 @@ object BlurDrawHook {
             return false
         }
         ensurePreAgsCanvasRegion(drawable, canvas, bounds)
-        val build = try {
-            buildLiquidShader(drawable, bounds)
-        } catch (t: Throwable) {
-            Lg.e(TAG, "c15-glass: build shader failed id=$id", t)
-            glassFuse.recordFailure(FUSE_DOMAIN_GLASS, "preAgsBuild:${t.javaClass.simpleName}")
-            null
-        } ?: run {
-            logThrottled("c15-glass-nobuild-$id", Log.DEBUG, 1000L) {
-                "c15-glass: skip build id=$id bounds=$bounds view=${screenRegionMap[id]?.hostViewName}"
+        // 已建过的元素只走增量 uniform（滑动时仅 srcRect 变），避免每帧重建源绑定/全量材质
+        val cachedShader = preAgsShaderCache[id]
+        val shader: RuntimeShader
+        if (cachedShader != null && shaderOwnerSet.contains(cachedShader) &&
+            screenRegionMap[id]?.metaBall == null
+        ) {
+            shader = cachedShader
+            touchShaderCache(id)
+            refreshShaderUniforms(preAgsGlassPaint, shader, drawable, bounds)
+        } else {
+            val build = try {
+                buildLiquidShader(drawable, bounds)
+            } catch (t: Throwable) {
+                Lg.e(TAG, "c15-glass: build shader failed id=$id", t)
+                glassFuse.recordFailure(FUSE_DOMAIN_GLASS, "preAgsBuild:${t.javaClass.simpleName}")
+                null
+            } ?: run {
+                logThrottled("c15-glass-nobuild-$id", Log.DEBUG, 1000L) {
+                    "c15-glass: skip build id=$id bounds=$bounds view=${screenRegionMap[id]?.hostViewName}"
+                }
+                return false
             }
-            return false
+            shader = build.shader
+            if (preAgsShaderCache.size > 128) preAgsShaderCache.clear()
+            preAgsShaderCache[id] = shader
         }
         val path = try {
             mPreAgsDrawablePathField?.get(drawable) as? Path
@@ -12906,7 +13506,8 @@ object BlurDrawHook {
         canvas.save()
         try {
             canvas.translate(bounds.left.toFloat(), bounds.top.toFloat())
-            preAgsGlassPaint.shader = build.shader
+            applyPressGlowUniforms(shader, id, bounds.width(), bounds.height())
+            preAgsGlassPaint.shader = shader
             canvas.drawPath(path, preAgsGlassPaint)
         } catch (t: Throwable) {
             Lg.e(TAG, "c15-glass: draw path failed id=$id", t)
@@ -12917,44 +13518,101 @@ object BlurDrawHook {
             canvas.restore()
         }
         markRenderLeg(id, RENDER_LEG_PRE_AGSL)
+        if (moduleLogEnabled) screenRegionMap[id]?.region?.let { recordDiagSample(id, it) }
         logThrottled("c15-glass-ok", Log.INFO, 1000L) {
-            "c15-glass: draw ok id=$id bounds=$bounds view=${screenRegionMap[id]?.hostViewName}"
+            "c15-glass: draw ok id=$id bounds=$bounds region=${screenRegionMap[id]?.region} view=${screenRegionMap[id]?.hostViewName}"
         }
         return true
     }
 
     /**
      * C15 屏幕区域自登记：C16 的宿主类注册钩子（通知卡 / 磁贴 / 侧滑 …）在这一代大多不存在，
-     * `screenRegionMap` 因此恒 miss、玻璃不出。这里在绘制瞬间用 canvas 矩阵把 drawable 本地矩形
-     * 反推成绝对屏幕矩形，自建条目（宿主 View 不可得 → hostViewRef=null，build 侧走 reconcileRegion）。
+     * `screenRegionMap` 因此恒 miss、玻璃不出。
+     *
+     * 定位优先级：
+     * 1. **callback 链反推宿主 View**（最准）：绘制进独立 RenderNode 的元素，其 canvas 矩阵是单位阵，
+     *    拿矩阵会把所有卡都算成 (0,0)-(w,h) → 全都采同一块背景（真机实锤）。宿主 View 的屏幕位置才是真值。
+     * 2. 无宿主时才退回 canvas 矩阵；**单位阵且无宿主 = 拿不到位置 → 跳过**（宁可回退系统模糊，不画错背景）。
+     *
      * 每帧覆盖写：位置随面板下拉动画实时跟手，不依赖创建期的一次性注册。
      */
     private fun ensurePreAgsCanvasRegion(drawable: Any, canvas: Canvas, bounds: Rect) {
         val id = System.identityHashCode(drawable)
-        val matrix = Matrix()
+        val host = preAgsWalkHostView(drawable)
+        val canvasMatrix = Matrix()
         try {
-            canvas.getMatrix(matrix)
+            canvas.getMatrix(canvasMatrix)
         } catch (t: Throwable) {
             Lg.e(TAG, "c15-map: canvas matrix failed id=$id", t)
-            return
         }
-        val abs = RectF(0f, 0f, bounds.width().toFloat(), bounds.height().toFloat())
-        matrix.mapRect(abs)
-        if (abs.width() < 1f || abs.height() < 1f || abs.left.isNaN() || abs.top.isNaN()) {
-            logThrottled("c15-map-bad-$id", Log.DEBUG) { "c15-map: skip bad rect id=$id rect=$abs m=$matrix" }
+        val matrixIdentity = canvasMatrix.isIdentity
+        val region: RectF
+        val hostName: String
+        val hostRef: WeakReference<View>?
+        val via: String
+        if (host != null) {
+            // 宿主进运动失效表：面板下拉/翻页时 invalidate 宿主 → 重录 RenderNode → 本方法重新定位
+            registerHostView(host)
+            val loc = IntArray(2)
+            try {
+                host.getLocationOnScreen(loc)
+            } catch (t: Throwable) {
+                Lg.e(TAG, "c15-map: host loc failed id=$id", t)
+                loc[0] = 0; loc[1] = 0
+            }
+            region = RectF(
+                loc[0] + bounds.left.toFloat(),
+                loc[1] + bounds.top.toFloat(),
+                loc[0] + bounds.right.toFloat(),
+                loc[1] + bounds.bottom.toFloat(),
+            )
+            hostName = host.javaClass.simpleName
+            hostRef = WeakReference(host)
+            via = "host"
+        } else {
+            if (matrixIdentity) {
+                logThrottled("c15-map-noanchor-$id", Log.INFO, 1000L) {
+                    "c15-map: no host & identity matrix, skip id=$id bounds=$bounds"
+                }
+                return
+            }
+            region = RectF(0f, 0f, bounds.width().toFloat(), bounds.height().toFloat())
+            canvasMatrix.mapRect(region)
+            hostName = "preAgsCanvas"
+            hostRef = null
+            via = "canvas"
+        }
+        if (region.width() < 1f || region.height() < 1f || region.left.isNaN() || region.top.isNaN()) {
+            logThrottled("c15-map-bad-$id", Log.DEBUG) { "c15-map: skip bad rect id=$id rect=$region" }
             return
         }
         val corner = preAgsPathCornerRadius(drawable)
             ?: (minOf(bounds.width(), bounds.height()) * 0.16f)
         if (screenRegionMap.size > 1024) screenRegionMap.clear()
         screenRegionMap[id] = RegionEntry(
-            region = abs,
+            region = region,
             autoBounds = Rect(bounds),
-            hostViewName = "preAgsCanvas",
+            hostViewName = hostName,
             cornerRadius = corner,
             cornerRadiusSource = "preAgsCanvas",
+            hostViewRef = hostRef,
             sourceTag = "preAgsCanvas",
         )
+        logThrottled("c15-map-$id", Log.INFO, 1000L) {
+            "c15-map: id=$id via=$via host=$hostName region=$region bounds=$bounds identity=$matrixIdentity m=[${canvasMatrix.toShortString()}]"
+        }
+    }
+
+    /** drawable.callback 链上溯宿主 View（BlurDrawable → PlatformBlurDrawable → View，最多 4 跳）。 */
+    private fun preAgsWalkHostView(drawable: Any): View? {
+        var cur: Any? = (drawable as? Drawable)?.callback
+        var depth = 0
+        while (cur != null && depth < 4) {
+            if (cur is View) return cur
+            cur = (cur as? Drawable)?.callback
+            depth++
+        }
+        return null
     }
 
     /** C15 圆角真值：drawable.pathProvider → BaseRoundRectPathProvider.getCornerRadii() 四角最大值。 */
@@ -12974,6 +13632,243 @@ object BlurDrawHook {
         } ?: return null
         val r = radii.maxOrNull() ?: 0f
         return r.takeIf { it > 0f }
+    }
+
+    // ------------------------------------------------------------ C15 详情弹窗（WiFi/蓝牙）玻璃 ------------------------------------------------------------
+
+    /**
+     * C15 的快捷开关详情弹窗（`OplusThemeSystemUiDialog`）是**独立窗口**：内容托管在
+     * `SysUiInlineSurfaceView` + `SurfaceControlViewHost` 里，背景由系统静态模糊 + 白混色给出
+     * （本机 `supportsBlursOnWindows()` 为假，走不了跨窗动态模糊）→ 整块发白。
+     * 这里在弹窗 show 之后把 `qs_detail_frame` 的背景换成自绘液态玻璃；抓屏侧把该窗口排除，
+     * 采样到的是弹窗背后的壁纸而不是它自己。
+     * 仅 PRE_AGSL 挂载；C16 的详情是下拉面板内联绘制（走原有链），本链完全不进。
+     */
+    private fun mountPreAgsDetailDialog(api: XposedInterface, classLoader: ClassLoader) {
+        if (posteffectArchProbed != PosteffectArch.PRE_AGSL) return
+        try {
+            val cls = Class.forName(CLASS_THEME_SYSTEM_UI_DIALOG, false, classLoader)
+            val show = cls.getMethod("show")
+            api.hook(show)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .intercept { chain ->
+                    chain.proceed()
+                    try {
+                        val dialog = chain.getThisObject() as? android.app.Dialog
+                        if (dialog != null) {
+                            mainHandler().post { applyPreAgsDialogGlass(dialog) }
+                        }
+                    } catch (t: Throwable) {
+                        Lg.e(TAG, "c15-dialog: schedule apply failed", t)
+                    }
+                }
+            Lg.i(TAG, "Hook G mounted: $CLASS_THEME_SYSTEM_UI_DIALOG#show() (C15 detail dialog -> glass)")
+        } catch (t: Throwable) {
+            Lg.e(TAG, "Hook G mount FAILED: $CLASS_THEME_SYSTEM_UI_DIALOG#show", t)
+        }
+    }
+
+    /** 弹窗显示后把详情框背景换成玻璃；系统后续 updateBackground 会覆盖 → 由 onDraw 每次重设（见 drawable）。 */
+    private fun applyPreAgsDialogGlass(dialog: android.app.Dialog) {
+        try {
+            val decor = dialog.window?.decorView ?: return
+            val id = decor.resources.getIdentifier("qs_detail_frame", "id", "com.android.systemui")
+            if (id == 0) {
+                logThrottled("c15-dialog-noid", Log.WARN) { "c15-dialog: qs_detail_frame id not found" }
+                return
+            }
+            val frame = decor.findViewById<View>(id) ?: return
+            if (preAgsDialogFrameRef?.get() === frame) return
+            val corner = preAgsDialogCornerPx(frame)
+            frame.background = PreAgsDialogGlassDrawable(frame, corner) { c, host, w, h, r ->
+                drawPreAgsDialogGlass(c, host, w, h, r)
+            }
+            preAgsDialogFrameRef = WeakReference(frame)
+            preAgsDialogSfcCache = null
+            preAgsDialogSfcMissAt = 0L
+            registerHostView(frame)
+            frame.invalidate()
+            Lg.i(TAG, "c15-dialog: glass applied frame=${frame.javaClass.simpleName} ${frame.width}x${frame.height} corner=$corner")
+        } catch (t: Throwable) {
+            Lg.e(TAG, "c15-dialog: apply glass failed", t)
+        }
+    }
+
+    /** 弹窗圆角：取系统资源真值，缺失按短边比例兜底。 */
+    private fun preAgsDialogCornerPx(host: View): Float {
+        try {
+            val res = host.resources
+            val id = res.getIdentifier("qs_detail_bg_corner_radius", "dimen", "com.android.systemui")
+            if (id != 0) {
+                val v = res.getDimensionPixelSize(id).toFloat()
+                if (v > 0f) return v
+            }
+        } catch (t: Throwable) {
+        }
+        val w = host.width.coerceAtLeast(1)
+        val h = host.height.coerceAtLeast(1)
+        return minOf(w, h) * 0.08f
+    }
+
+    /** 弹窗承载窗根 SurfaceControl（抓屏排除用）；正缓存有效即复用，失败短负缓存。 */
+    @Synchronized
+    private fun resolvePreAgsDialogSfc(): SurfaceControl? {
+        preAgsDialogSfcCache?.let { if (it.isValid) return it }
+        val now = SystemClock.uptimeMillis()
+        if (now < preAgsDialogSfcMissAt) return null
+        val host = preAgsDialogFrameRef?.get()
+        if (host == null || !host.isAttachedToWindow) {
+            preAgsDialogSfcMissAt = now + 500L
+            return null
+        }
+        val root = try {
+            host.rootView
+        } catch (t: Throwable) {
+            null
+        } ?: run {
+            preAgsDialogSfcMissAt = now + 500L
+            return null
+        }
+        val viaReflect = try {
+            reflectViewRootSurfaceControl(root)
+        } catch (t: Throwable) {
+            null
+        }
+        if (viaReflect != null && viaReflect.isValid) {
+            preAgsDialogSfcCache = viaReflect
+            return viaReflect
+        }
+        val viaField = try {
+            val m1 = mGetViewRootImpl ?: View::class.java.getMethod("getViewRootImpl").also { mGetViewRootImpl = it }
+            val vri = m1.invoke(root)
+            if (vri != null) fieldViewRootSurfaceControl(vri) else null
+        } catch (t: Throwable) {
+            null
+        }
+        if (viaField != null && viaField.isValid) {
+            preAgsDialogSfcCache = viaField
+            return viaField
+        }
+        preAgsDialogSfcMissAt = now + 500L
+        logThrottled("c15-dialog-sfc", Log.WARN) { "c15-dialog: sfc resolve failed (自采样风险)" }
+        return null
+    }
+
+    /** 弹窗背景玻璃 drawable：底色兜底 + 玻璃自绘（快照不可用时至少不是纯白板）。 */
+    private class PreAgsDialogGlassDrawable(
+        private val host: View,
+        private val cornerPx: Float,
+        private val glassDraw: (Canvas, View, Int, Int, Float) -> Boolean,
+    ) : android.graphics.drawable.Drawable() {
+        private val rect = RectF()
+        private val scrim = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x33FFFFFF }
+
+        override fun draw(canvas: Canvas) {
+            val w = host.width
+            val h = host.height
+            if (w <= 0 || h <= 0) return
+            rect.set(0f, 0f, w.toFloat(), h.toFloat())
+            canvas.drawRoundRect(rect, cornerPx, cornerPx, scrim)
+            glassDraw(canvas, host, w, h, cornerPx)
+        }
+
+        override fun setAlpha(alpha: Int) {}
+        override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) {}
+        @Deprecated("Deprecated in Java")
+        override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
+    }
+
+    /** 弹窗玻璃自绘：几何/材质/背景源复用主链，坐标 = 视图本地（背景绘制）。 */
+    private fun drawPreAgsDialogGlass(canvas: Canvas, host: View, w: Int, h: Int, cornerPx: Float): Boolean {
+        if (glassFuseTripped) return false
+        if (isPowerSaveGlassOff()) return false
+        if (!Prefs.glassEnabled(api)) return false
+        if (SfGlassChannel.renderMode(api) == Prefs.RENDER_MODE_SF) {
+            val loc = IntArray(2)
+            try {
+                host.getLocationOnScreen(loc)
+            } catch (t: Throwable) {
+                return false
+            }
+            SfGlassChannel.claimForDraw(
+                System.identityHashCode(host),
+                loc[0].toFloat(), loc[1].toFloat(), w.toFloat(), h.toFloat(),
+                cornerPx, host = host,
+            )
+            return false
+        }
+        val loc = IntArray(2)
+        try {
+            host.getLocationOnScreen(loc)
+        } catch (t: Throwable) {
+            return false
+        }
+        val screenRegion = RectF(
+            loc[0].toFloat(), loc[1].toFloat(),
+            (loc[0] + w).toFloat(), (loc[1] + h).toFloat(),
+        )
+        val id = System.identityHashCode(host)
+        if (screenRegionMap.size > 1024) screenRegionMap.clear()
+        screenRegionMap[id] = RegionEntry(
+            region = screenRegion,
+            autoBounds = Rect(0, 0, w, h),
+            hostViewName = "c15Dialog",
+            cornerRadius = cornerPx,
+            cornerRadiusSource = "c15Dialog",
+            hostViewRef = WeakReference(host),
+            sourceTag = "c15Dialog",
+        )
+        val renderSource = resolveRenderSource(id, screenRegion) ?: return false
+        val srcRect = renderSource.srcRect
+        val source = renderSource.source
+        val viewport = RectF(0f, 0f, w.toFloat(), h.toFloat())
+        val params = buildParams(w.toFloat(), h.toFloat(), cornerPx, elementId = id)
+        val shader = obtainShader(id)
+        val sourceShader = LiquidGlassShader.createSourceBitmapShader(source)
+        val wantDiv = lowResTierOf(0.807f * params.blurRadius)
+        val tier = buildLowResTierShader(source, srcRect, wantDiv)
+        LiquidGlassShader.setUniforms(
+            shader, params, sourceShader, tier?.shader ?: sourceShader,
+            sourceRect = srcRect,
+            lowResSourceRect = tier?.lowResSrcRect ?: srcRect,
+            debugCoord = 0f,
+            maskRect = null,
+            maskCornerRadius = 0f,
+            cornerConicBlend = 1f,
+            maskOffsetX = 0f,
+            maskOffsetY = 0f,
+            maskAlpha = 0f,
+            sourceSizeX = source.width.toFloat(),
+            sourceSizeY = source.height.toFloat(),
+        )
+        appliedUniformsMap[id] = AppliedKey(
+            frame = 0L, sourceBitmapId = System.identityHashCode(source),
+            viewport = viewport, srcRect = srcRect, maskRect = null,
+            cornerIsConic = false, cornerWeight = DEFAULT_CORNER_WEIGHT,
+            cornerRadius = cornerPx, cornerConicBlend = 1f, maskAlpha = 0f,
+            lowResDiv = if (tier != null) wantDiv else 4,
+        )
+        markRenderLeg(id, RENDER_LEG_PRE_AGSL)
+        applyPressGlowUniforms(shader, id, w, h)
+        canvas.save()
+        try {
+            canvas.translate(0f, 0f)
+            seedlingGlassPaint.shader = shader
+            val path = Path().apply {
+                addRoundRect(RectF(0f, 0f, w.toFloat(), h.toFloat()), cornerPx, cornerPx, Path.Direction.CW)
+            }
+            canvas.drawPath(path, seedlingGlassPaint)
+        } catch (t: Throwable) {
+            Lg.e(TAG, "c15-dialog: draw glass failed", t)
+            return false
+        } finally {
+            seedlingGlassPaint.shader = null
+            canvas.restore()
+        }
+        logThrottled("c15-dialog-ok", Log.INFO, 1000L) {
+            "c15-dialog: draw ok ${w}x$h region=$screenRegion src=$srcRect corner=$cornerPx"
+        }
+        return true
     }
 
     /**
@@ -13676,7 +14571,9 @@ object BlurDrawHook {
             }
             // [spec/35 黑遮罩 / spec/41 作用范围修正] 遮罩 uniform 变化检测：SystemUI 下拉所有元素
             // 统一值，配置/首次应用变化 → 走全量 setUniforms 重设 uMaskAlpha（禁用轻量分支）
-            val maskOverlayChanged = applied == null || applied.maskAlpha != cg.maskAlpha
+            // 压暗实时取值：scrim 动画真值逐帧变，geometryCache 快照（1s TTL）会让玻璃滞后背景跳变
+            val maskNow = maskAlphaFor(cg.hostViewName, id)
+            val maskOverlayChanged = applied == null || applied.maskAlpha != maskNow
             // [2026-09-16 doc/spec/67] 材质参数指纹变化（任何材质滑杆改动）→ 必须走全量 setUniforms 重设。
             // 否则材质改动被 `if (!uniformsChanged) return true` 吃掉，直到几何变化才生效。
             val materialChanged = applied == null || applied.materialHash != bindParams.hashCode()
@@ -13773,6 +14670,7 @@ object BlurDrawHook {
             // [spec/127] 轻量分支不重绑 uSourceLowRes → 档位变化（lowResTierChanged）禁入，走全量重绑。
             if (srcRectChanged && !sourceBitmapChanged && !viewportChanged && !maskChanged && !cornerChanged && !maskOverlayChanged && !materialChanged && !metaBallChanged && !tiltChanged && !lowResTierChanged && !lowResRebind) {
                 LiquidGlassShader.setSourceRectOnly(shader, bindSrcRect, lowResSrcRect)
+                applyPressGlowUniforms(shader, id, viewport.width().toInt(), viewport.height().toInt())
                 appliedUniformsMap[id] = applied!!.copy(srcRect = bindSrcRect)
                 // [coord 诊断] 与全量路径同一计数（每 64 次 + 距上次 ≥2s 打一条，验证 srcRect 跟手）
                 refreshUniformCount++
@@ -13795,6 +14693,7 @@ object BlurDrawHook {
             // [spec/127] 同分支 1：档位变化禁入（不重绑 uSourceLowRes），走全量。
             if (srcRectChanged && !sourceBitmapChanged && !maskChanged && !cornerChanged && !maskOverlayChanged && !materialChanged && !metaBallChanged && !tiltChanged && !lowResTierChanged && !lowResRebind) {
                 LiquidGlassShader.setViewportAndSourceRect(shader, viewport, bindSrcRect, lowResSrcRect, cg.maskRect)
+                applyPressGlowUniforms(shader, id, viewport.width().toInt(), viewport.height().toInt())
                 appliedUniformsMap[id] = applied!!.copy(viewport = viewport, srcRect = bindSrcRect)
                 refreshUniformCount++
                 val coordRefreshNow = SystemClock.uptimeMillis()
@@ -13825,7 +14724,7 @@ object BlurDrawHook {
                 maskOffsetY = cg.maskOffsetY,
                 // [spec/35 黑遮罩 / spec/41 作用范围修正] SystemUI 下拉所有玻璃元素统一传 uMaskAlpha
                 //（= 配置值；uMaskAlpha=0 即遮罩关闭时 shader 内分支零开销跳过）
-                maskAlpha = cg.maskAlpha,
+                maskAlpha = maskNow,
                 // [doc/spec/100 方案2] metaball 黏连桥（null = 非 metaball，shader 侧零变化）
                 metaBalls = mbNow,
                 // [doc/spec/112] 通知卡倾斜角（0 = 恒等零变化；动画期每帧更新）
@@ -13834,11 +14733,12 @@ object BlurDrawHook {
                 sourceSizeX = bindBitmap?.width?.toFloat() ?: 0f,
                 sourceSizeY = bindBitmap?.height?.toFloat() ?: 0f,
             )
+            applyPressGlowUniforms(shader, id, viewport.width().toInt(), viewport.height().toInt())
             appliedUniformsMap[id] = AppliedKey(
                 frame, sourceBitmapId, viewport, bindSrcRect, cg.maskRect,
                 cornerIsConic = cg.cornerIsConic, cornerWeight = cg.cornerWeight, cornerRadius = cg.cornerRadius,
                 cornerConicBlend = cg.cornerConicBlend,
-                maskAlpha = cg.maskAlpha,
+                maskAlpha = maskNow,
                 materialHash = bindParams.hashCode(),
                 // [doc/spec/100 方案2] metaball 状态（球动 → 下帧 metaBallChanged 触发全量重设）
                 metaBalls = mbNow,
@@ -13970,7 +14870,7 @@ object BlurDrawHook {
             // highlight/depth/dispersion 等）一并后台算；readMaterialParams 1s 节流缓存 @Volatile 线程安全。
             val params = buildParams(
                 viewport.width(), viewport.height(), cornerRadius, effectiveCornerIsConic,
-                entry.cornerWeight, elementId = id, polishedOverride = entry.polished,
+                entry.cornerWeight, elementId = id,
             )
             return ComputedGeometry(
                 bounds = Rect(bounds),
@@ -14063,19 +14963,19 @@ object BlurDrawHook {
         val geo = computeRealGeometry(bounds, entry, shape)
         // [doc/spec/100 方案2] metaball uniform 输入（geo.bodyRect==null → null → shader 端零变化）
         val mbNow = resolveMetaBalls(entry, geo.bodyRect, geo.viewport)
-        // [2026-10-14 诊断] 幽灵浮层排查：打印几何与 metaball 状态
-        if (moduleLogEnabled) {
+        // 幽灵浮层排查：几何与 metaball 状态（逐帧路径，按 id 节流）
+        logThrottled("ghost-diag-$id", Log.INFO) {
             val mbSnapNow = entry.metaBall
             val compDetail = mbSnapNow?.companions?.joinToString(";") { c ->
                 "c(pos=${c.posX},${c.posY} hw=${c.halfW} hh=${c.halfH} bs=${c.blendShape})"
             } ?: "-"
-            Lg.i(TAG, "ghost-diag: id=$id view=${entry.hostViewName} bounds=$bounds " +
+            "ghost-diag: id=$id view=${entry.hostViewName} bounds=$bounds " +
                 "mbSnap=${mbSnapNow != null} companions=${mbSnapNow?.companions?.size ?: -1} " +
                 "body(pos=${mbSnapNow?.body?.posX},${mbSnapNow?.body?.posY} " +
                 "hw=${mbSnapNow?.body?.halfW} hh=${mbSnapNow?.body?.halfH}) " +
                 "comp=[$compDetail] " +
                 "geo.vp=${geo.viewport} geo.mask=${geo.maskRect} geo.body=${geo.bodyRect} " +
-                "geo.off=(${geo.offsetX},${geo.offsetY}) mbNow=${mbNow != null} balls=${mbNow?.balls?.size ?: -1}")
+                "geo.off=(${geo.offsetX},${geo.offsetY}) mbNow=${mbNow != null} balls=${mbNow?.balls?.size ?: -1}"
         }
         // [R2] viewport = 真实绘制尺寸（元素自身尺寸；无扩张 = drawable getBounds 宽高）。符合已验证契约：
         // coord=元素局部坐标、uViewport=元素尺寸（不再用 canvas clipBounds 当 viewport——
@@ -14170,13 +15070,12 @@ object BlurDrawHook {
             val coordKey = "src=${region.srcRect} vp=$viewport"
             if (lastCoordRenderKey[region.id] != coordKey) {
                 lastCoordRenderKey[region.id] = coordKey
-                Lg.i(
-                    TAG,
+                logThrottled("coord-render-${region.id}", Log.INFO) {
                     "coord: render drawable=${drawable.javaClass.simpleName} id=${region.id} " +
                         "view=${region.hostViewName} bounds=$bounds region=${region.screenRegion} " +
                         "srcRect=${region.srcRect} source=${source.width}x${source.height} " +
                         "elementSource=${renderSource.isElementSource} viewport=$viewport"
-                )
+                }
             }
             // [任务 D/问题 10] 圆角半径来源只在变化/首次打（替代硬编码 28）
             if (lastLoggedCornerRadius[region.id] != region.cornerRadius) {
@@ -14215,11 +15114,11 @@ object BlurDrawHook {
         }
         // uDebugCoord 实验开关：coord 决定性实验用。0=玻璃正常渲染；1=直接输出红/绿周期调试网格（不走玻璃管线）。
         // 正常关闭，需复测 coord 空间时临时开 1f。uDebugCoord 分支保留在 LiquidGlassShader.kt 供后续实验。
-        // [2026-10-14 诊断] 打印最终传入 setUniforms 的 maskRect
-        if (moduleLogEnabled) {
-            Lg.i(TAG, "ghost-diag-set: id=${region.id} maskRect=${region.maskRect} " +
+        // 最终传入 setUniforms 的 maskRect（逐帧路径，按 id 节流）
+        logThrottled("ghost-diag-set-${region.id}", Log.INFO) {
+            "ghost-diag-set: id=${region.id} maskRect=${region.maskRect} " +
                 "maskCornerRadius=${region.maskCornerRadius} vp=$viewport " +
-                "mbBridge=${mbNow != null && mbNow.balls.isNotEmpty()}")
+                "mbBridge=${mbNow != null && mbNow.balls.isNotEmpty()}"
         }
         LiquidGlassShader.setUniforms(
             shader, params, sourceShader, lowResShader,
@@ -14244,13 +15143,14 @@ object BlurDrawHook {
             sourceSizeX = bindBitmap.width.toFloat(),
             sourceSizeY = bindBitmap.height.toFloat(),
         )
+        applyPressGlowUniforms(shader, region.id, viewport.width().toInt(), viewport.height().toInt())
         if (params.clipBypassMask || params.clipBypassShape) {
             logThrottled("lg-clip-bypass-draw-build", Log.DEBUG) {
                 "lg-clip-bypass-draw-build: mask=${params.clipBypassMask} shape=${params.clipBypassShape} id=${region.id}"
             }
         }
-        // 首次同步应用诊断：记录实际上榜的材质值（定位首帧高光比配置粗亮的取值来源）
-        logThrottled("lg-mat-sync-${region.id}", Log.INFO, intervalMs = 0L) {
+        // 实际上榜的材质值（逐帧路径，按 id 节流）
+        logThrottled("lg-mat-sync-${region.id}", Log.INFO) {
             "mat-sync: id=${region.id} hl=${params.highlight} w=${params.highlightWidth} " +
                 "floor=${params.highlightFloor} falloff=${params.highlightFalloff} " +
                 "polish=${params.surfacePolish} host=${region.hostViewName}"
@@ -14897,6 +15797,8 @@ object BlurDrawHook {
         val edgeStroke: Float = Prefs.DEFAULT_EDGE_STROKE,
         /** 外描边宽度 px（默认 1.2）。 */
         val edgeStrokeWidth: Float = Prefs.DEFAULT_EDGE_STROKE_WIDTH,
+        /** 高光增强 0/1（默认 1=增强）；配置参数，元素可按所属配置覆盖。 */
+        val highlightEnhance: Float = if (Prefs.DEFAULT_HIGHLIGHT_ENHANCE) 1f else 0f,
     )
 
     @Volatile
@@ -14950,6 +15852,11 @@ object BlurDrawHook {
                     prefs.getFloat(Prefs.KEY_INNER_GLOW, Prefs.DEFAULT_INNER_GLOW).coerceIn(0f, 1f),
                     prefs.getFloat(Prefs.KEY_EDGE_STROKE, Prefs.DEFAULT_EDGE_STROKE).coerceIn(0f, 1f),
                     prefs.getFloat(Prefs.KEY_EDGE_STROKE_WIDTH, Prefs.DEFAULT_EDGE_STROKE_WIDTH).coerceIn(0f, 8f),
+                    highlightEnhance = Prefs.readFloatCompat(
+                        prefs,
+                        Prefs.KEY_HIGHLIGHT_ENHANCE,
+                        if (Prefs.DEFAULT_HIGHLIGHT_ENHANCE) 1f else 0f,
+                    ),
                 )
             } catch (t: Throwable) {
                 Lg.e(TAG, "buildParams: prefs float read failed, use defaults", t)
@@ -14966,14 +15873,9 @@ object BlurDrawHook {
         return result
     }
 
-    private class PolishVerdict(val atMs: Long, val value: Boolean)
-
-    /** elementId → 判定时刻与结果；宿主身份短窗稳定，TTL 内不重复走父链 */
-    private val polishVerdictCache = ConcurrentHashMap<Int, PolishVerdict>()
-
     /**
      * 注册期用真实宿主 View 判定精修材质并写进 entry（同时镜像到仍存活的旧 entry）。
-     * true 一旦成立即保持：重排/复用中间态父链断开不会把高光带打回宽钝形态。
+     * 仅作审计与诊断；渲染取值以配置参数 [Prefs.KEY_HIGHLIGHT_ENHANCE] 为准。
      */
     private fun applyPolishVerdict(entry: RegionEntry, previous: RegionEntry?, host: View) {
         try {
@@ -14993,30 +15895,6 @@ object BlurDrawHook {
     /** 注册期精修判定审计表（宿主类名 → 首次结论，只记一次） */
     private val polishVerdictSeenHosts = ConcurrentHashMap<String, Boolean>()
 
-    /** 精修判定：高光增强全局开关（KEY_HIGHLIGHT_ENHANCE，500ms TTL），开则所有元素统一细高光带。 */
-    private fun polishedVerdictFor(elementId: Int): Boolean = highlightEnhanceEnabled()
-
-    /** 高光增强开关缓存（500ms TTL，热路径零 IPC）。 */
-    @Volatile
-    private var highlightEnhanceValue = Prefs.DEFAULT_HIGHLIGHT_ENHANCE
-
-    @Volatile
-    private var highlightEnhanceCachedAtMs = 0L
-
-    private fun highlightEnhanceEnabled(): Boolean {
-        val now = SystemClock.uptimeMillis()
-        if (now - highlightEnhanceCachedAtMs < 500L) return highlightEnhanceValue
-        highlightEnhanceValue = try {
-            api?.let { Prefs.read(it).getBoolean(Prefs.KEY_HIGHLIGHT_ENHANCE, Prefs.DEFAULT_HIGHLIGHT_ENHANCE) }
-                ?: Prefs.DEFAULT_HIGHLIGHT_ENHANCE
-        } catch (t: Throwable) {
-            Lg.w(TAG, "prefs read highlight_enhance failed, default true", t)
-            Prefs.DEFAULT_HIGHLIGHT_ENHANCE
-        }
-        highlightEnhanceCachedAtMs = now
-        return highlightEnhanceValue
-    }
-
     private fun buildParams(
         width: Float,
         height: Float,
@@ -15024,7 +15902,6 @@ object BlurDrawHook {
         cornerIsConic: Boolean = false,
         cornerWeight: Float = DEFAULT_CORNER_WEIGHT,
         elementId: Int = 0,
-        polishedOverride: Boolean? = null,
     ): LiquidGlassShader.Params {
         val def = LiquidGlassShader.Params(viewportWidth = width, viewportHeight = height)
         return try {
@@ -15087,7 +15964,8 @@ object BlurDrawHook {
                 parallaxY = pick(Prefs.KEY_PARALLAX_Y, m.parallaxY),
                 clipBypassMask = cb.mask,
                 clipBypassShape = cb.shape,
-                surfacePolish = polishedOverride ?: polishedVerdictFor(elementId),
+                // 高光增强：按元素所属配置取值，未配回落全局默认
+                surfacePolish = pick(Prefs.KEY_HIGHLIGHT_ENHANCE, m.highlightEnhance) > 0.5f,
                 edgeStroke = pick(Prefs.KEY_EDGE_STROKE, m.edgeStroke).coerceIn(0f, 1f),
                 edgeStrokeWidth = pick(Prefs.KEY_EDGE_STROKE_WIDTH, m.edgeStrokeWidth).coerceIn(0f, 8f),
             )
@@ -15150,16 +16028,22 @@ object BlurDrawHook {
      * 主线程调用（registerScreenRegionCore / recordNotificationCardRegion / mountPanelExpansion /
      * captureOriginalFrame）。**不由元素移动触发**（移动只更新 srcRect 折算，不重抓背景）。
      */
-    private fun triggerBackgroundCapture(contentChange: Boolean = true) {
+    private fun triggerBackgroundCapture(contentChange: Boolean = true, force: Boolean = false) {
         // 省电开启 → 不入队抓屏（玻璃已关，快照无消费者）
         if (isPowerSaveGlassOff()) return
-        // 静态模式 → 零抓屏（快照冻结为现有值）
-        if (CapturePolicy.captureMode() == Prefs.BG_CAPTURE_MODE_STATIC) return
+        // 静态模式 → 不做周期/常规抓屏；force=true 的事件驱动一次性补抓放行（壁纸变更/源失效）
+        if (CapturePolicy.captureMode() == Prefs.BG_CAPTURE_MODE_STATIC && !force) {
+            logThrottled("static-capture-skip", Log.DEBUG) { "bg-static: capture skipped (static mode, force=false)" }
+            return
+        }
+        if (force) {
+            logThrottled("static-capture-force", Log.INFO) { "bg-static: event-driven force capture (static mode bypass)" }
+        }
         // [spec/55 诊断日志] 触发时间戳（t2）——「hook 触发 → 抓屏请求」延迟（hook 可靠否）；contentChange 附带调用来源
-        diagCapLog("enqueue", if (contentChange) " contentChange=true" else " contentChange=false")
+        diagCapLog("enqueue", (if (contentChange) " contentChange=true" else " contentChange=false") + " force=$force")
         if (contentChange) markContentChanged()
         // 存量变化节流（KEY_BG_CAPTURE_MIN_INTERVAL_MS，0=不节流）：仅内容变化路径生效，周期/强制路径不过此门
-        if (contentChange) {
+        if (contentChange && !force) {
             val minInterval = CapturePolicy.bgCaptureMinIntervalMs()
             if (minInterval > 0) {
                 val now = SystemClock.uptimeMillis()
@@ -15169,7 +16053,7 @@ object BlurDrawHook {
         }
         // 触发抓屏入队 → worker 消费（异步，主线程零阻塞；captureDisplay 由 worker
         // 线程同步执行 [captureSnapshotImmediate]；失败重试重新入队）。
-        scheduleElementCaptures()
+        scheduleElementCaptures(force)
     }
 
     /**
@@ -15606,8 +16490,8 @@ object BlurDrawHook {
      *  单 worker 串行 + pending 去重 = 同刻至多一路 captureDisplay。
      *  变化抓屏不再节流（旧键 KEY_BG_CAPTURE_MIN_INTERVAL_MS 停用，内容变化一律立即入队）。
      *  静态模式不入队（零抓屏，快照冻结为现有值）。 */
-    private fun scheduleElementCaptures() {
-        if (CapturePolicy.captureMode() == Prefs.BG_CAPTURE_MODE_STATIC) return
+    private fun scheduleElementCaptures(force: Boolean = false) {
+        if (CapturePolicy.captureMode() == Prefs.BG_CAPTURE_MODE_STATIC && !force) return
         // 入队 → kick 起 worker 消费（异步，主线程零阻塞）。无论 enqueue 是否实际
         // 入队都 kick（pending 去重命中 = 队列已有任务待消费或 worker 正在抓，kick 内部 running>0 / 队列空
         // 早退无副作用；孤儿残留场景也能经 kick 的「队列非空 + running=0 → 重新起 worker」恢复）。
@@ -16077,15 +16961,23 @@ object BlurDrawHook {
         if (simpleBannerActiveHost?.get()?.rootView === rootView) return true
         if (headsUpActiveHost?.get()?.rootView === rootView) return true
         if (cardBackgroundActiveHost?.get()?.rootView === rootView) return true
-        // 音量弹窗：刚绘制过（1.5s 活跃窗）的音量条宿主窗口根
+        // 音量弹窗：宿主还在窗口树上就排除（生命周期由 dismissH/attach 登记管理）；
+        // 1.5s 活跃窗只兜「宿主没走 dismissH 且已 detach」的残留引用
         val volumeHost = volumeGlassHost?.get()
-        if (volumeHost != null && SystemClock.uptimeMillis() - volumeGlassHostAtMs < VOLUME_HOST_ACTIVE_MS) {
-            val volumeRoot = try {
-                volumeHost.rootView
+        if (volumeHost != null) {
+            val alive = try {
+                volumeHost.isAttachedToWindow
             } catch (t: Throwable) {
-                null
+                false
             }
-            if (volumeRoot === rootView) return true
+            if (alive || SystemClock.uptimeMillis() - volumeGlassHostAtMs < VOLUME_HOST_ACTIVE_MS) {
+                val volumeRoot = try {
+                    volumeHost.rootView
+                } catch (t: Throwable) {
+                    null
+                }
+                if (volumeRoot === rootView) return true
+            }
         }
         val name = rootView.javaClass.name
         return name.contains("NotificationShadeWindowView") ||
@@ -16720,6 +17612,14 @@ object BlurDrawHook {
                     null
                 }
             }),
+            ExcludeSpec(id = "c15dialog", dedupe = true, resolve = {
+                try {
+                    resolvePreAgsDialogSfc()
+                } catch (t: Throwable) {
+                    Lg.e(TAG, "bg-element: resolve c15 dialog sfc failed", t)
+                    null
+                }
+            }),
             ExcludeSpec(id = "menu", dedupe = true, resolve = {
                 try {
                     resolveMenuPanelSfc()
@@ -17028,7 +17928,11 @@ object BlurDrawHook {
      *  渐入曲线），展开完全 progress=1 → alpha = maskAlpha，与玻璃 shader uMaskAlpha 同步（maskAlpha=1 两边全黑）。
      *  保留原 scrimAlpha×maskAlpha 的动画手感，仅把系数放大到最终对齐 maskAlpha。 */
     private fun scrimMaskPaintFor(scrimAlpha: Float): Paint? {
-        if (!maskEnabled || maskAlpha <= 0f) return null
+        // 预设覆盖：ScrimView 类绑定的预设可改遮罩开关与强度（面板级统一值；未绑定回落全局）
+        val ov = GlassRegistry.overridesForClass(CLASS_SCRIM_VIEW)
+        val enabled = ov?.get(Prefs.KEY_MASK_ENABLE)?.let { it > 0.5f } ?: maskEnabled
+        val strength = ov?.get(Prefs.KEY_MASK_ALPHA)?.coerceIn(0f, 1f) ?: maskAlpha
+        if (!enabled || strength <= 0f) return null
         val a = scrimAlpha.coerceIn(0f, 1f)
         if (a <= 0f) return null
         if (a > scrimPeak) scrimPeak = a
@@ -17037,7 +17941,7 @@ object BlurDrawHook {
             p.style = Paint.Style.FILL
             scrimMaskPaint = p
         }
-        paint.color = android.graphics.Color.argb((progress * maskAlpha.coerceIn(0f, 1f) * 255f).toInt(), 0, 0, 0)
+        paint.color = android.graphics.Color.argb((progress * strength.coerceIn(0f, 1f) * 255f).toInt(), 0, 0, 0)
         return paint
     }
 
@@ -17047,7 +17951,12 @@ object BlurDrawHook {
      *  系统 setViewAlpha 每次写入、onDraw 时已是当前动画值，**不依赖 hook**——最稳）；反射失败才
      *  fallback behindScrimAlpha（hook setViewAlpha/getViewAlpha 捕获）。mask 关 / alpha 0 → 不画。 */
     private fun drawScrimBlackTint(chain: XposedInterface.Chain) {
-        if (!maskEnabled || maskAlpha <= 0f) return
+        run {
+            val ov = GlassRegistry.overridesForClass(CLASS_SCRIM_VIEW)
+            val enabled = ov?.get(Prefs.KEY_MASK_ENABLE)?.let { it > 0.5f } ?: maskEnabled
+            val strength = ov?.get(Prefs.KEY_MASK_ALPHA)?.coerceIn(0f, 1f) ?: maskAlpha
+            if (!enabled || strength <= 0f) return
+        }
         val drawable = try {
             chain.getThisObject() as? Drawable
         } catch (t: Throwable) {
@@ -17059,6 +17968,7 @@ object BlurDrawHook {
             null
         } ?: return
         val hostView = resolveScrimHostView(chain)
+        hostView?.let { scrimViewRef = java.lang.ref.WeakReference(it) }
         val scrimAlpha = readScrimViewAlpha(hostView) ?: behindScrimAlpha
         val paint = scrimMaskPaintFor(scrimAlpha) ?: return
         val bounds = drawable.bounds
@@ -17098,6 +18008,16 @@ object BlurDrawHook {
      *  @param isExt this 是 ScrimViewEx/ExImp（非 ScrimView），需经 mExtGetScrimView 反取宿主 ScrimView；
      *               false 时 this 就是 ScrimView 本身（**注意不是 AutoBlurDrawable**，不能用
      *               resolveScrimHostView 那条 AutoBlurDrawable→viewBlurProxy→hostView 反射链）。 */
+    /** scrim 真值变化时触发玻璃宿主重绘：玻璃压暗值只在重绘帧才上屏，不触发绘制会残留旧帧。
+     *  走既有节流合并入口（spec/105 脏标记+窗口合并），不另开逐 View 直发路径。 */
+    private fun invalidateGlassHostsOnScrimChange() {
+        logThrottled("scrim-invalidate", Log.INFO) {
+            "scrim alpha changed, invalidate glass hosts"
+        }
+        markMotion()
+        invalidateRegisteredHostViews()
+    }
+
     private fun mountScrimAlphaHook(
         api: XposedInterface,
         classLoader: ClassLoader,
@@ -17117,7 +18037,13 @@ object BlurDrawHook {
                         } else {
                             try { chain.getThisObject() as? View } catch (t: Throwable) { null }
                         }
-                        if (isBehindScrimHost(host)) behindScrimAlpha = alpha.coerceIn(0f, 1f)
+                        if (isBehindScrimHost(host)) {
+                            val next = alpha.coerceIn(0f, 1f)
+                            val scrimChanged = next != behindScrimAlpha
+                            behindScrimAlpha = next
+                            host?.let { scrimViewRef = java.lang.ref.WeakReference(it) }
+                            if (scrimChanged) invalidateGlassHostsOnScrimChange()
+                        }
                     } catch (t: Throwable) {
                         Lg.e(TAG, "scrimViewAlpha: $className#$METHOD_SET_VIEW_ALPHA intercept error", t)
                     }
@@ -17148,7 +18074,13 @@ object BlurDrawHook {
                     try {
                         val alpha = result as? Float
                         val host = try { chain.getThisObject() as? View } catch (t: Throwable) { null }
-                        if (alpha != null && isBehindScrimHost(host)) behindScrimAlpha = alpha.coerceIn(0f, 1f)
+                        if (alpha != null && isBehindScrimHost(host)) {
+                            val next = alpha.coerceIn(0f, 1f)
+                            val scrimChanged = next != behindScrimAlpha
+                            behindScrimAlpha = next
+                            host?.let { scrimViewRef = java.lang.ref.WeakReference(it) }
+                            if (scrimChanged) invalidateGlassHostsOnScrimChange()
+                        }
                     } catch (t: Throwable) {
                         Lg.e(TAG, "scrimViewAlpha: $CLASS_SCRIM_VIEW#$METHOD_GET_VIEW_ALPHA intercept error", t)
                     }

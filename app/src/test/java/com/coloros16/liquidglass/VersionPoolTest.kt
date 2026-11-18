@@ -126,6 +126,17 @@ class VersionPoolTest {
     }
 
     @Test
+    fun systemui160012IsLegacyArch() {
+        val d = VersionPool.query(VersionPool.PKG_SYSTEMUI, 160012L)
+        assertEquals(MatchKind.Exact, d.match)
+        assertEquals(16, d.major)
+        assertEquals(160012L, d.point)
+        assertSame(Profiles.SYSTEMUI_16, d.profile)
+        assertSame(PosteffectArch.LEGACY, d.profile.posteffectArch)
+        assertEquals(CaptureRev.LEGACY, d.profile.captureRev)
+    }
+
+    @Test
     fun systemuiFloorAcrossPointGap() {
         val d = VersionPool.query("com.android.systemui", 165000L)
         assertEquals(MatchKind.Nearest, d.match)

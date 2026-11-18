@@ -3,6 +3,7 @@ package com.coloros16.liquidglass.hook.capture
 import android.os.SystemClock
 import com.coloros16.liquidglass.config.Prefs
 import com.coloros16.liquidglass.log.Lg
+import com.coloros16.liquidglass.sf.SfGlassChannel
 import io.github.libxposed.api.XposedInterface
 
 /**
@@ -33,8 +34,14 @@ object CapturePolicy {
         this.motionActive = motionActive
     }
 
-    /** 抓屏模式：0=即时 / 1=变化 / 2=静态。≤1s TTL 缓存，读失败/越界回默认 1（变化）。 */
-    fun captureMode(): Int = Prefs.captureMode(api)
+    /**
+     * 抓屏模式：SF 渲染模式下恒静态（背景由 SF 链每帧直供，模块不抓）；否则读用户三档。
+     * ≤1s TTL 缓存，读失败/越界回默认 1（变化）。
+     */
+    fun captureMode(): Int {
+        if (SfGlassChannel.renderMode(api) == Prefs.RENDER_MODE_SF) return Prefs.BG_CAPTURE_MODE_STATIC
+        return Prefs.captureMode(api)
+    }
 
     /** 即时抓屏速率 Hz（KEY_PANEL_CAPTURE_HZ，默认 60，clamp 30~120）。
      *  存量越界值读取时夹到 30~120。 */

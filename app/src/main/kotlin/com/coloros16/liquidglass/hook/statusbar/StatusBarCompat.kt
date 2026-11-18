@@ -26,6 +26,11 @@ object StatusBarCompat {
         "status_bar_start_side_container",
         "status_bar_end_side_container",
         "status_bar_end_side_content",
+        "status_icon_area",
+        "keyguard_header",
+        "quick_qs_status_icons",
+        "icons",
+        "batteryRemainingIcon",
         "statusIcons",
         "notification_icon_area",
         "clock",
@@ -112,6 +117,12 @@ object StatusBarCompat {
      * 侧写运行时真值到版本池补丁层（差异/缺失时功能自行降级）。
      */
     fun gate(classLoader: ClassLoader): Gates {
+        val resolved = hostLoader(classLoader)
+        Lg.i(
+            TAG,
+            "sb-gate paramLoader=${classLoader.javaClass.name} resolvedLoader=${resolved.javaClass.name} " +
+                "ctxLoader=${Lg.processContext()?.classLoader?.javaClass?.name} same=${resolved === classLoader}",
+        )
         val fragment = present(classLoader, FQCN_FRAGMENT, "class.fragment")
         val container = present(classLoader, FQCN_ICON_CONTAINER, "class.container")
         val controller = present(classLoader, FQCN_ICON_CONTROLLER, "class.controller")
@@ -149,9 +160,21 @@ object StatusBarCompat {
     /** 状态栏布局结构补丁键（值 = rev1 / unknown）。 */
     const val PATCH_STATUS_BAR_LAYOUT = "statusBarLayout"
 
+    /**
+     * 宿主可用的类加载器：优先进程 Application 的 classLoader，取不到才回退框架入参。
+     * 框架入参在部分注入模式下无法加载 SystemUI 主 dex（实测同类同 dex 时玻璃线走 context 成功、纯入参全 CNFE）。
+     */
+    fun hostLoader(fallback: ClassLoader): ClassLoader =
+        try {
+            Lg.processContext()?.classLoader ?: fallback
+        } catch (_: Throwable) {
+            fallback
+        }
+
     private fun present(classLoader: ClassLoader, fqcn: String, label: String): Boolean {
+        val loader = hostLoader(classLoader)
         val ok = try {
-            Class.forName(fqcn, false, classLoader)
+            Class.forName(fqcn, false, loader)
             true
         } catch (_: Throwable) {
             false

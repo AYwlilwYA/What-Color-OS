@@ -7,6 +7,7 @@ import android.content.IntentFilter
 import android.os.Build
 import android.os.SystemClock
 import com.coloros16.liquidglass.config.Prefs
+import com.coloros16.liquidglass.engine.ChromakeyMask
 import com.coloros16.liquidglass.engine.ContentLayerConfig
 import com.coloros16.liquidglass.engine.MaskLayerConfig
 import com.coloros16.liquidglass.engine.SceneStateMapper
@@ -17,6 +18,7 @@ import com.coloros16.liquidglass.engine.TransitionEdge
 import com.coloros16.liquidglass.engine.TransitionEvaluator
 import com.coloros16.liquidglass.engine.TransitionProfile
 import com.coloros16.liquidglass.log.Lg
+import com.coloros16.liquidglass.ui.aod.AodSceneCatalog
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedInterface.ExceptionMode
 import java.lang.reflect.Method
@@ -63,6 +65,14 @@ object AodHandoffHook {
         crossfade = true,
     )
 
+    /** 照片类息屏：揭开由色键帧承担，几何遮罩让位。 */
+    private val FRAME_CAPABILITIES = StyleCapabilities(
+        sceneContinuous = false,
+        mask = true,
+        crossfade = true,
+        frameReveal = true,
+    )
+
     /** 节流诊断日志：同 key 2s 内一条；key 与计数都回显进打印文本（只进节流表按 key grep 恒 0）。 */
     private fun logThrottled(key: String, msg: String, intervalMs: Long = THROTTLE_MS) {
         val now = SystemClock.uptimeMillis()
@@ -80,6 +90,8 @@ object AodHandoffHook {
     @Volatile private var installed = false
     @Volatile private var gateEnabled = false
     @Volatile private var gateReadAt = 0L
+    @Volatile private var revealByFrame = false
+    @Volatile private var revealReadAt = 0L
     @Volatile private var stopped = false
     @Volatile private var lastFrom = "?"
     @Volatile private var lastTo = "?"
@@ -131,28 +143,27 @@ object AodHandoffHook {
             } catch (t: Throwable) {
                 Lg.e(TAG, "aod-install $METHOD_START 失败 ${t.javaClass.simpleName}: ${t.message}", t)
             }
-            try {
-                val update = repo.getDeclaredMethod(
-                    METHOD_UPDATE,
-                    UUID::class.java,
-                    Float::class.javaPrimitiveType!!,
-                    state,
-                    cont,
-                )
-                api.hook(update)
-                    .setExceptionMode(ExceptionMode.PROTECTIVE)
-                    .intercept { chain ->
-                        try {
-                            recordUpdate(chain.getArg(0), chain.getArg(1), chain.getArg(2))
-                        } catch (t: Throwable) {
-                            logThrottled("aod-arg", "update 参数解析失败 ${t.javaClass.simpleName} upd=${updateHits.get()}")
+            val update = resolveUpdateMethod(repo, state, cont)
+            if (update == null) {
+                Lg.e(TAG, "aod-install $METHOD_UPDATE 两种签名都取不到，进度泵不可用")
+            } else {
+                try {
+                    api.hook(update)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .intercept { chain ->
+                            try {
+                                recordUpdate(chain.getArg(0), chain.getArg(1), chain.getArg(2))
+                            } catch (t: Throwable) {
+                                logThrottled("aod-arg", "update 参数解析失败 ${t.javaClass.simpleName} upd=${updateHits.get()}")
+                            }
+                            report("aod-hit")
+                            chain.proceed()
                         }
-                        report("aod-hit")
-                        chain.proceed()
-                    }
-                hook++
-            } catch (t: Throwable) {
-                Lg.e(TAG, "aod-install $METHOD_UPDATE 失败 ${t.javaClass.simpleName}: ${t.message}", t)
+                    hook++
+                    Lg.i(TAG, "aod-mount $METHOD_UPDATE params=${update.parameterTypes.size}")
+                } catch (t: Throwable) {
+                    Lg.e(TAG, "aod-install $METHOD_UPDATE 失败 ${t.javaClass.simpleName}: ${t.message}", t)
+                }
             }
         } catch (t: Throwable) {
             Lg.e(TAG, "aod-install 类解析失败 ${t.javaClass.simpleName}: ${t.message}", t)
@@ -165,6 +176,45 @@ object AodHandoffHook {
             TAG,
             "aod-install hook=$hook/2 installed=$installed gate=$gate " +
                 "hits start=${startHits.get()} upd=${updateHits.get()} bridge=${bridge != null}",
+        )
+    }
+
+    /**
+     * 进度方法签名按档解析：suspend 版四参（带 Continuation）与非 suspend 版三参。
+     *
+     * 两档实机签名不同，只取一种会让另一档整条进度泵静默失效。
+     * 前三参顺序一致，回调取 arg0/1/2 两档通用。
+     */
+    private fun resolveUpdateMethod(
+        repo: Class<*>,
+        state: Class<*>,
+        cont: Class<*>,
+    ): Method? {
+        val candidates = updateSignatureCandidates(state, cont)
+        val index = MethodSignaturePicker.pickIndex(METHOD_UPDATE, candidates) { name, params ->
+            try {
+                repo.getDeclaredMethod(name, *params)
+            } catch (t: Throwable) {
+                logThrottled(
+                    "aod-update-sig-${params.size}",
+                    "${params.size} 参签名不存在 ${t.javaClass.simpleName}",
+                )
+                null
+            }
+        }
+        if (index >= 0) {
+            Lg.i(TAG, "aod-update-sig 命中候选 $index（${candidates[index].size} 参）")
+        }
+        return if (index >= 0) repo.getDeclaredMethod(METHOD_UPDATE, *candidates[index]) else null
+    }
+
+    /** 候选签名：带协程续体的四参在前，不带的三参在后。 */
+    internal fun updateSignatureCandidates(state: Class<*>, cont: Class<*>): List<Array<Class<*>>> {
+        val uuid = UUID::class.java
+        val progress = Float::class.javaPrimitiveType!!
+        return listOf(
+            arrayOf(uuid, progress, state, cont),
+            arrayOf(uuid, progress, state),
         )
     }
 
@@ -253,8 +303,8 @@ object AodHandoffHook {
             "aod-bridge",
             String.format(
                 Locale.US,
-                "edge=$edge t=%.3f mask=%b r=%.0f dstA=%.2f srcA=%.2f cam=%.2f/%.2f",
-                p.t, p.maskEnabled, p.maskRadius, p.dstAlpha, p.srcAlpha, p.cameraX, p.cameraY,
+                "edge=$edge t=%.3f mask=%b byFrame=%b r=%.0f dstA=%.2f srcA=%.2f cam=%.2f/%.2f",
+                p.t, p.maskEnabled, p.maskByFrame, p.maskRadius, p.dstAlpha, p.srcAlpha, p.cameraX, p.cameraY,
             ),
             BRIDGE_LOG_MS,
         )
@@ -262,6 +312,33 @@ object AodHandoffHook {
 
     /** 供后续渲染消费方取同一份桥（未装载时返回 null）。 */
     fun bridgeOrNull(): TransitionBridge? = bridge
+
+    /**
+     * 按当前息屏样式刷新揭开能力：照片类交给色键帧，其余走几何遮罩。
+     *
+     * 读键走 TTL 缓存，只在档位真变时写桥并打一条日志。
+     */
+    fun refreshRevealCapability() {
+        val b = bridge ?: return
+        val now = SystemClock.uptimeMillis()
+        if (revealReadAt != 0L && now - revealReadAt < GATE_TTL_MS) return
+        revealReadAt = now
+        val a = api ?: return
+        val byFrame = try {
+            val prefs = Prefs.read(a)
+            val styleOn = prefs.getBoolean(Prefs.KEY_ALIVE_AOD_STYLE, false)
+            val id = prefs.getString(Prefs.KEY_ALIVE_AOD_STYLE_ID, Prefs.DEFAULT_ALIVE_AOD_STYLE_ID)
+            styleOn && ChromakeyMask.revealsByFrame(AodSceneCatalog.photoOf(id ?: "")?.id ?: 0)
+        } catch (t: Throwable) {
+            logThrottled("aod-reveal-read", "读样式失败 ${t.javaClass.simpleName} 保持 $revealByFrame")
+            revealByFrame
+        }
+        if (byFrame == revealByFrame) return
+        revealByFrame = byFrame
+        val caps = if (byFrame) FRAME_CAPABILITIES else HOST_CAPABILITIES
+        b.setCapabilities(caps, caps)
+        Lg.i(TAG, "aod-reveal caps: frame=$byFrame")
+    }
 
     private fun safeEnumName(m: Method, target: Any): String? =
         m.invoke(target)?.toString()
@@ -303,6 +380,7 @@ object AodHandoffHook {
                             Intent.ACTION_SCREEN_ON -> {
                                 stopped = false
                                 val gen = guard.onScreenOn(SystemClock.uptimeMillis())
+                                com.coloros16.liquidglass.hook.aod.AodStageHook.noteInteraction()
                                 Lg.i(TAG, "aod-screen on gen=$gen wake=${guard.wakeSerial()}")
                             }
                             Intent.ACTION_SCREEN_OFF -> {

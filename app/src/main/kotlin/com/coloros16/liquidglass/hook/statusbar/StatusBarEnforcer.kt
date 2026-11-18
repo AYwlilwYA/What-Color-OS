@@ -29,6 +29,7 @@ object StatusBarEnforcer {
 
     private val originalVisibility = WeakHashMap<View, Int>()
     private val originalPadding = WeakHashMap<View, IntArray>()
+    private val paddingTouched = WeakHashMap<View, Boolean>()
     private val originalTransform = WeakHashMap<View, FloatArray>()
     private val originalTypeLayout = WeakHashMap<View, IntArray>()
     private val throttleAt = ConcurrentHashMap<String, Long>()
@@ -53,9 +54,37 @@ object StatusBarEnforcer {
 
     @Volatile
     private var reorderPending = false
+    private var lastReorderKey: String? = null
+    private var lastReorderContainer: WeakReference<ViewGroup>? = null
+
+    @Volatile
+    private var orderDragActive = false
+
+    /** 保修重排用的 protected 方法（解析一次；失败回退 remove/add）。 */
+    private val orderDetachMethod: Method? by lazy {
+        try {
+            ViewGroup::class.java.getDeclaredMethod("detachViewFromParent", View::class.java)
+                .apply { isAccessible = true }
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    private val orderAttachMethod: Method? by lazy {
+        try {
+            ViewGroup::class.java.getDeclaredMethod(
+                "attachViewToParent", View::class.java, Int::class.javaPrimitiveType,
+                ViewGroup.LayoutParams::class.java,
+            ).apply { isAccessible = true }
+        } catch (_: Throwable) {
+            null
+        }
+    }
 
     /** 首次接管排序前的子 View 顺序（关排序时还原）。 */
     private var defaultOrder: List<WeakReference<View>>? = null
+
+    /** 电量原位（排序期间搬进图标容器，出序/关闸时搬回）。 */
 
     /** 通知图标区原父容器与原索引（移到右侧后用于还原）。 */
     private var notifyOriginalParent: WeakReference<ViewGroup>? = null
@@ -129,6 +158,7 @@ object StatusBarEnforcer {
         applyContainer(container, cfg)
         // 根视图侧的元素也在每次布局后补齐（旋转/重建后自愈）
         rootRef?.get()?.let { applyRoot(it, cfg) }
+        applySideRoots(container, cfg)
     }
 
     /** 容器新增子 View：新图标进来时补一次（Hook 侧已合并 post）。 */
@@ -141,6 +171,7 @@ object StatusBarEnforcer {
         if (rootRef?.get() == null && container is ViewGroup) deriveRootFrom(container)
         applyContainer(container, cfg)
         rootRef?.get()?.let { applyRoot(it, cfg) }
+        applySideRoots(container, cfg)
     }
 
     /**
@@ -195,6 +226,7 @@ object StatusBarEnforcer {
                 }
                 padIt.remove()
             }
+            paddingTouched.clear()
             val tfIt = originalTransform.entries.iterator()
             while (tfIt.hasNext()) {
                 val e = tfIt.next()
@@ -238,6 +270,33 @@ object StatusBarEnforcer {
 
     // ------------------------------------------------------------ 根视图侧（通知图标 / 边距）
 
+    /**
+     * 侧树（锁屏 / 下拉顶栏）：容器沿父链上溯已知根 id，命中即对该根跑根侧应用
+     * （锁屏树无 end_side_content 挂 status_icon_area；下拉栏电池 id=batteryRemainingIcon）。
+     */
+    private fun applySideRoots(container: View, cfg: StatusBarConfig) {
+        try {
+            findAncestorRoot(container, "keyguard_header")?.let { applyRoot(it, cfg) }
+            findAncestorRoot(container, "quick_qs_status_icons")?.let { applyRoot(it, cfg) }
+        } catch (t: Throwable) {
+            logThrottled("sb-side-err", "sb-skip side root ${t.javaClass.simpleName}")
+        }
+    }
+
+    /** 从容器沿父链找指定 id 的根；普通树走不到该 id 时返回 null。 */
+    private fun findAncestorRoot(start: View, idName: String): View? {
+        val targetId = StatusBarCompat.id(idName)
+        if (targetId == 0) return null
+        var node: View? = start
+        var depth = 0
+        while (node != null && depth < 14) {
+            if (node.id == targetId) return node
+            node = node.parent as? View
+            depth++
+        }
+        return null
+    }
+
     private fun applyRoot(root: View, cfg: StatusBarConfig) {
         try {
             val notifyArea = childView(root, "notification_icon_area")
@@ -247,7 +306,7 @@ object StatusBarEnforcer {
             logThrottled("sb-apply-root", "sb-skip root ${t.javaClass.simpleName}")
         }
         try {
-            val battery = childView(root, "battery")
+            val battery = childView(root, "battery") ?: childView(root, "batteryRemainingIcon")
             applyVisibility(battery, cfg.duoEnable, "duo_battery")
             if (!cfg.duoEnable) restoreVisibility(battery)
         } catch (t: Throwable) {
@@ -353,12 +412,32 @@ object StatusBarEnforcer {
     /** 左右边距：dp < 0 = 用记录的原值（即系统默认）。只改水平方向。 */
     private fun applyContainerPadding(root: View, idName: String, leftDp: Int, rightDp: Int, density: Float) {
         val v = childView(root, idName) ?: return
+        if (leftDp < 0 && rightDp < 0) {
+            // 未配置自定义边距：绝不碰系统 padding（含 cutout 避让的动态调整）
+            if (paddingTouched.remove(v) == true) {
+                val orig = originalPadding.remove(v)
+                if (orig != null && (v.paddingLeft != orig[0] || v.paddingRight != orig[2])) {
+                    try {
+                        v.setPadding(orig[0], v.paddingTop, orig[2], v.paddingBottom)
+                        logThrottled("sb-apply-margin", "sb-restore margin $idName")
+                    } catch (t: Throwable) {
+                        logThrottled("sb-apply-margin-err", "sb-skip margin restore $idName ${t.javaClass.simpleName}")
+                    }
+                }
+            }
+            return
+        }
         val orig = originalPadding.getOrPut(v) { intArrayOf(v.paddingLeft, v.paddingTop, v.paddingRight, v.paddingBottom) }
         val left = if (leftDp < 0) orig[0] else (leftDp * density).toInt()
         val right = if (rightDp < 0) orig[2] else (rightDp * density).toInt()
+        logThrottled(
+            "sb-margin-probe-$idName",
+            "sb-margin probe $idName cur=${v.paddingLeft},${v.paddingRight} orig=${orig[0]},${orig[2]} target=$left,$right cfg=$leftDp,$rightDp",
+        )
         if (v.paddingLeft != left || v.paddingRight != right) {
             try {
                 v.setPadding(left, v.paddingTop, right, v.paddingBottom)
+                paddingTouched[v] = true
                 logThrottled("sb-apply-margin", "sb-apply margin $idName left=${leftDp}dp right=${rightDp}dp")
             } catch (t: Throwable) {
                 logThrottled("sb-apply-margin-err", "sb-skip margin $idName ${t.javaClass.simpleName}")
@@ -619,70 +698,183 @@ object StatusBarEnforcer {
 
     // ------------------------------------------------------------ 图标排序
 
+    /**
+     * 图标排序：只算目标序，结构改动排到下一帧执行。
+     * 本函数在 onLayout 回调内被调用，直接改子 View 会重入 requestLayout 导致崩溃。
+     */
     private fun applyOrder(container: ViewGroup, cfg: StatusBarConfig) {
-        if (cfg.iconOrder.isEmpty()) {
-            restoreOrder(container)
+        if (container.isInTouchMode && container.hasFocus()) {
+            logThrottled("sb-order-defer-touch", "sb-order defer: 容器持有焦点(交互中)")
             return
         }
-        val count = container.childCount
-        if (count < 2) return
-        val children = ArrayList<View>(count)
-        for (i in 0 until count) {
-            try {
-                container.getChildAt(i)?.let { children.add(it) }
-            } catch (_: Throwable) {
-            }
+        if (orderDragActive) {
+            logThrottled("sb-order-defer-drag", "sb-order defer: 拖拽进行中")
+            return
         }
-        if (children.size < 2) return
+        if (cfg.iconOrder.isEmpty()) {
+            logThrottled("sb-order-empty", "sb-order cfg 为空(走还原) children=${container.childCount}")
+            scheduleReorder(container, null)
+            return
+        }
+        val children = collectOrderChildren(container)
+        if (children.size < 2) {
+            logThrottled(
+                "sb-order-few",
+                "sb-order skip 子View不足 n=${children.size} cfg=${cfg.iconOrder.size}项" +
+                    " duo=${cfg.duoEnable}(三合一开启会隐藏 mobile/wifi 致可排序项不足)",
+            )
+            return
+        }
         if (defaultOrder == null) defaultOrder = children.map { WeakReference(it) }
+        if (cfg.iconOrder.contains("battery")) {
+            logThrottled("sb-order-battery-unsupported", "sb-order battery 不参与容器排序(系统测量协议不兼容)")
+        }
         val rank = HashMap<String, Int>()
         cfg.iconOrder.forEachIndexed { index, name -> rank[name] = index }
+        val slots = children.map { slotOf(it) }
         val desired = children.sortedBy { rank[slotOf(it)] ?: Int.MAX_VALUE }
-        if (desired == children) return
-        if (reorderPending) return
+        if (desired == children) {
+            logThrottled(
+                "sb-order-same",
+                "sb-order 已是目标序 slots=${slots.joinToString(",")} cfg=${cfg.iconOrder.joinToString(",")}",
+            )
+            return
+        }
+        logThrottled("sb-order-plan", "sb-order plan slots=${slots.joinToString(",")} -> ${desired.joinToString(",") { slotOf(it) }}")
+        scheduleReorder(container, desired)
+    }
+
+    /** 把重排排到下一帧（脱离 layout 遍历），同容器同目标只排一次。 */
+    private fun scheduleReorder(container: ViewGroup, desired: List<View>?) {
+        if (reorderPending) {
+            logThrottled("sb-order-pending", "sb-order skip 已有待执行重排")
+            return
+        }
+        val key = desired?.joinToString(",") { slotOf(it) } ?: "@restore"
+        if (key == lastReorderKey && container === lastReorderContainer?.get()) {
+            logThrottled("sb-order-dedup", "sb-order skip 同目标已排过 key=$key")
+            return
+        }
         reorderPending = true
-        try {
-            children.forEach { container.removeView(it) }
-            desired.forEachIndexed { index, v -> container.addView(v, index) }
-            logThrottled("sb-apply-order", "sb-apply order=${desired.joinToString(",") { slotOf(it) }}")
-        } finally {
+        lastReorderKey = key
+        lastReorderContainer = WeakReference(container)
+        container.post {
             reorderPending = false
+            try {
+                if (orderDragActive) {
+                    logThrottled("sb-order-drop-drag", "sb-order drop: 拖拽进行中")
+                    return@post
+                }
+                if (desired == null) doRestoreOrder(container) else doReorder(container, desired)
+            } catch (t: Throwable) {
+                logThrottled("sb-order-exec-err", "sb-skip order exec ${t.javaClass.simpleName}")
+            }
         }
     }
 
-    /** 关排序时按首次接管前的子 View 顺序还原（新出现的 View 排在末尾，交给后续系统插入）。 */
-    private fun restoreOrder(container: ViewGroup) {
-        val snapshot = defaultOrder ?: return
-        val count = container.childCount
-        if (count < 2) {
-            defaultOrder = null
+    /** 帧内执行重排：detach/attach 保状态，逐个校验仍在容器内。 */
+    private fun doReorder(container: ViewGroup, desired: List<View>) {
+        val live = desired.filter { it.parent === container }
+        if (live.size < 2) {
+            logThrottled("sb-order-stale", "sb-order skip 目标已离树 live=${live.size}/${desired.size}")
             return
         }
-        val rank = HashMap<View, Int>()
-        snapshot.forEachIndexed { index, ref -> ref.get()?.let { rank[it] = index } }
-        val children = ArrayList<View>(count)
-        for (i in 0 until count) {
+        val current = collectOrderChildren(container)
+        if (live == current.filter { live.contains(it) } && live.size == current.size) {
+            logThrottled("sb-order-already", "sb-order skip 帧内已是目标序 n=${live.size}")
+            return
+        }
+        val detach = orderDetachMethod
+        val attach = orderAttachMethod
+        if (detach == null || attach == null) {
             try {
-                container.getChildAt(i)?.let { children.add(it) }
+                live.forEach { container.removeView(it) }
+                live.forEachIndexed { index, v -> container.addView(v, index) }
+                container.requestLayout()
+                container.invalidate()
+                logThrottled("sb-apply-order", "sb-apply order=${live.joinToString(",") { slotOf(it) }} mode=readd")
+            } catch (t: Throwable) {
+                logThrottled("sb-order-readd-err", "sb-skip order readd ${t.javaClass.simpleName}")
+            }
+            return
+        }
+        // detach 与 attach 必须成对：逐个记录原 index，任一步失败按原序全部 attach 回去
+        val detached = ArrayList<Pair<View, Int>>(live.size)
+        var failed = false
+        try {
+            live.forEach { v ->
+                val idx = container.indexOfChild(v)
+                detach.invoke(container, v)
+                detached.add(v to idx)
+            }
+            live.forEachIndexed { index, v -> attach.invoke(container, v, index, v.layoutParams) }
+        } catch (t: Throwable) {
+            failed = true
+            logThrottled("sb-order-attach-err", "sb-skip order attach ${t.javaClass.simpleName}")
+        }
+        if (failed) {
+            var restored = 0
+            detached.sortedBy { it.second }.forEach { (v, idx) ->
+                try {
+                    if (v.parent == null) {
+                        attach.invoke(container, v, idx.coerceIn(0, container.childCount), v.layoutParams)
+                        restored++
+                    }
+                } catch (_: Throwable) {
+                }
+            }
+            Lg.e(TAG, "sb-order rollback restored=$restored/${detached.size}")
+            try {
+                container.requestLayout()
+                container.invalidate()
+            } catch (_: Throwable) {
+            }
+            return
+        }
+        try {
+            container.requestLayout()
+            container.invalidate()
+        } catch (_: Throwable) {
+        }
+        logThrottled("sb-apply-order", "sb-apply order=${live.joinToString(",") { slotOf(it) }} mode=attach")
+    }
+
+    private fun collectOrderChildren(container: ViewGroup): ArrayList<View> {
+        val out = ArrayList<View>(container.childCount)
+        for (i in 0 until container.childCount) {
+            try {
+                container.getChildAt(i)?.let { out.add(it) }
             } catch (_: Throwable) {
             }
         }
-        if (children.size < 2) {
-            defaultOrder = null
-            return
-        }
-        val desired = children.sortedBy { rank[it] ?: Int.MAX_VALUE }
+        return out
+    }
+
+    /** 关排序：按首次接管前的顺序还原（新出现的 View 排末尾）。 */
+    private fun restoreOrder(container: ViewGroup) {
+        if (defaultOrder == null) return
+        scheduleReorder(container, null)
+    }
+
+    private fun doRestoreOrder(container: ViewGroup) {
+        val snapshot = defaultOrder ?: return
         defaultOrder = null
+        lastReorderKey = null
+        val children = collectOrderChildren(container)
+        if (children.size < 2) return
+        val rank = HashMap<View, Int>()
+        snapshot.forEachIndexed { index, ref -> ref.get()?.let { rank[it] = index } }
+        val desired = children.sortedBy { rank[it] ?: Int.MAX_VALUE }
         if (desired == children) return
-        if (reorderPending) return
-        reorderPending = true
-        try {
-            children.forEach { container.removeView(it) }
-            desired.forEachIndexed { index, v -> container.addView(v, index) }
-            logThrottled("sb-restore-order", "sb-restore order=${desired.joinToString(",") { slotOf(it) }}")
-        } finally {
-            reorderPending = false
-        }
+        doReorder(container, desired)
+        logThrottled("sb-restore-order", "sb-restore order=${desired.joinToString(",") { slotOf(it) }}")
+    }
+
+    /** 系统拖拽排序开始/结束（hook 侧回传）：拖拽期间冻结模块重排，避免抢同一批子 View。 */
+    fun noteOrderDrag(active: Boolean) {
+        if (orderDragActive == active) return
+        orderDragActive = active
+        logThrottled("sb-order-drag", "sb-order drag=$active")
     }
 
     private fun slotOf(v: View): String {
@@ -761,6 +953,11 @@ object StatusBarEnforcer {
         } catch (t: Throwable) {
             logThrottled("sb-apply-$feature-err", "sb-skip $feature ${t.javaClass.simpleName}")
         }
+    }
+
+    /** 闪现闸回压前记系统期望值：锁屏电量可能先被闸压 GONE，根侧来不及记原值（已记则不动）。 */
+    fun noteVisibilityOrig(v: View, value: Int) {
+        if (!originalVisibility.containsKey(v)) originalVisibility[v] = value
     }
 
     /** 强制可见（保持副卡 5G 等），原值记录后可还原。 */

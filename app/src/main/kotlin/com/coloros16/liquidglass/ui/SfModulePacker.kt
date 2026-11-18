@@ -203,6 +203,7 @@ internal object SfModulePacker {
             "fingerprint.txt" to fingerprintTxt.toByteArray(Charsets.UTF_8),
             "service.sh" to serviceSh,
             "post-fs-data.sh" to POST_FS_DATA_SH.toByteArray(Charsets.UTF_8),
+            "sepolicy.rule" to SEPOLICY_RULE.toByteArray(Charsets.UTF_8),
             "install.sh" to installSh,
         )
     }
@@ -389,6 +390,12 @@ internal object SfModulePacker {
 
         install_module
         exit 0
+    """.trimIndent() + "\n"
+
+    private val SEPOLICY_RULE = """
+        allow surfaceflinger shell_data_file file { read open getattr map execute }
+        allow surfaceflinger shell_data_file dir { search getattr open read }
+        allow surfaceflinger vendor_default_prop file { read open getattr map }
     """.trimIndent() + "\n"
 
     private val POST_FS_DATA_SH = """

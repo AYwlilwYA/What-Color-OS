@@ -7,7 +7,7 @@
         </LinearLayout>
         <com.google.android.material.card.MaterialCardView style="@style/ShellPlate" android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="14dp">
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="16dp">
-                <Switch android:id="@+id/switchAnimOpen" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_anim_open_enabled" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                <com.coloros16.liquidglass.ui.LgSwitch android:id="@+id/switchAnimOpen" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_anim_open_enabled" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
                     />
                 <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_anim_open_enabled_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
                 <LinearLayout android:id="@+id/rowAnimOpen" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:background="?attr/selectableItemBackground" android:gravity="center_vertical" android:orientation="horizontal" android:paddingVertical="10dp">
@@ -15,7 +15,7 @@
                     <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="›" android:textColor="@color/lg_ink_400" android:textSize="18sp" />
                 </LinearLayout>
                 <View android:layout_width="match_parent" android:layout_height="1dp" android:layout_marginTop="12dp" android:layout_marginBottom="12dp" android:background="?attr/colorOutlineVariant" />
-                <Switch android:id="@+id/switchAnimClose" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_anim_close_enabled" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                <com.coloros16.liquidglass.ui.LgSwitch android:id="@+id/switchAnimClose" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_anim_close_enabled" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
                     />
                 <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_anim_close_enabled_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
                 <LinearLayout android:id="@+id/rowAnimClose" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:background="?attr/selectableItemBackground" android:gravity="center_vertical" android:orientation="horizontal" android:paddingVertical="10dp">
@@ -23,7 +23,7 @@
                     <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="›" android:textColor="@color/lg_ink_400" android:textSize="18sp" />
                 </LinearLayout>
                 <View android:layout_width="match_parent" android:layout_height="1dp" android:layout_marginTop="12dp" android:layout_marginBottom="12dp" android:background="?attr/colorOutlineVariant" />
-                <Switch android:id="@+id/switchAnimBreak" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_anim_break_enabled" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                <com.coloros16.liquidglass.ui.LgSwitch android:id="@+id/switchAnimBreak" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_anim_break_enabled" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
                     />
                 <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_anim_break_enabled_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
                 <LinearLayout android:id="@+id/rowAnimBreak" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:background="?attr/selectableItemBackground" android:gravity="center_vertical" android:orientation="horizontal" android:paddingVertical="10dp">
@@ -40,7 +40,7 @@
         <com.google.android.material.card.MaterialCardView style="@style/ShellPlate" android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="14dp">
             <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:divider="@drawable/bg_seam_line_inset" android:dividerHeight="1dp" android:showDividers="middle">
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
-                    <Switch android:id="@+id/switchAnimTilt" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_anim_tilt_enabled" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                    <com.coloros16.liquidglass.ui.LgSwitch android:id="@+id/switchAnimTilt" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_anim_tilt_enabled" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
                     />
                     <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_anim_tilt_enabled_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
                 </LinearLayout>

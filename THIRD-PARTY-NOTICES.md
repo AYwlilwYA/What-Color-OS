@@ -83,3 +83,24 @@
 示例代码依据 [Android 站点许可](https://developer.android.com/license) 按 Apache License 2.0 提供；
 副本见 licenses/Apache-2.0.txt。相关实现位于 ParticleDissolveHook.kt，修改日期 2026-10-29，
 新增取消、排队上限与通知窗口生命周期处理。粒子流场与碎化 AGSL 为本次独立实现，继续按项目 GPLv3 分发。
+
+---
+
+## 照片类息屏素材（绿幕帧序列）
+
+- **来源**：Meizu 22 出厂 FlymeOS 12.6.0.0A / 壁纸组件 13.0.5 / UI 3.5.45（本地参考树 `reference/OpenAlive/vendor/flyme/provenance.json` 记录设备、版本与逐文件 sha256）
+- **性质**：系统自带的息屏动画素材，**不是开源许可内容**，本项目仅作效果复刻的本地素材使用，不具备再分发授权
+
+**涉及文件**
+
+| 路径 | 说明 |
+|------|------|
+| `app/src/main/assets/aod/photo/leave_light/` | 留光帧序列（61 帧 + start/end，720²，120fps） |
+| `app/src/main/assets/aod/photo/moon/` | 星月帧序列（32 帧 + start/end，720²，60fps） |
+| `app/src/main/assets/aod/photo/door/` | 轻启帧序列（41 帧 + start/end，720²，60fps） |
+| `app/src/main/assets/aod/photo/mountain/` | 山脉帧序列（43 帧 + start/end，1080²，60fps） |
+| `app/src/main/assets/aod/photo/galaxy/` | 银河帧序列（56 帧 + start/end，1080²，60fps） |
+
+**修改说明**
+
+素材未改动像素数据，仅原样解压到包内（`zlib` RGB8 掩膜：R 通道主色、G 通道壁纸窗口、B 通道白色），运行时由 `PhotoSceneRenderer` 做色键合成。对外发布若触及素材再分发，需先取得授权或替换为自绘素材。

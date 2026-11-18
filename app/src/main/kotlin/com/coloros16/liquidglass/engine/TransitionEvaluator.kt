@@ -18,6 +18,7 @@ class TransitionParams {
     var maskCenterY: Float = 0f
     var maskRadius: Float = 0f
     var maskFeather: Float = 0f
+    var maskByFrame: Boolean = false
 
     var srcAlpha: Float = 1f
     var dstAlpha: Float = 0f
@@ -43,6 +44,7 @@ class TransitionParams {
         maskCenterY = 0f
         maskRadius = 0f
         maskFeather = 0f
+        maskByFrame = false
         srcAlpha = 1f
         dstAlpha = 0f
         srcScale = 1f
@@ -68,6 +70,7 @@ class TransitionParams {
         maskCenterY = other.maskCenterY
         maskRadius = other.maskRadius
         maskFeather = other.maskFeather
+        maskByFrame = other.maskByFrame
         srcAlpha = other.srcAlpha
         dstAlpha = other.dstAlpha
         srcScale = other.srcScale
@@ -160,6 +163,10 @@ class TransitionEvaluator(
         direct: Boolean = false,
     ): Boolean {
         if (!config.enabled || !srcCapabilities.mask || !dstCapabilities.mask) return false
+        if (srcCapabilities.frameReveal || dstCapabilities.frameReveal) {
+            out.maskByFrame = true
+            return true
+        }
         val e = if (direct) t else config.easing.map(t)
         val cx = config.centerXFraction.coerceIn(0f, 1f) * screen.widthPx
         val cy = config.centerYFraction.coerceIn(0f, 1f) * screen.heightPx

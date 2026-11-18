@@ -38,16 +38,34 @@ class TransitionBridge(
     private var lastAdvanceAtMs: Long = 0L
 
     /** 无原生进度的边：起播内部时间轴，由调用方按帧 [advance]。 */
-    fun startSelfTimed(edge: TransitionEdge, durationMs: Long, nowMs: Long) {
+    fun startSelfTimed(edge: TransitionEdge, durationMs: Long, nowMs: Long = nowMs()) {
         clock.play(edge, durationMs, 0f, ClockSource.INTERNAL_TIMELINE)
         lastAdvanceAtMs = nowMs
     }
 
-    /** 推进内部时间轴；返回是否仍在播放。 */
-    fun advance(nowMs: Long): Boolean {
+    /** 推进内部时间轴；返回是否仍在播放。时间基准必须与起播一致。 */
+    fun advance(nowMs: Long = nowMs()): Boolean {
         lastAdvanceAtMs = nowMs
         return clock.advance(nowMs)
     }
+
+    /**
+     * 确保某边在播放：系统泵已在喂进度时不接管，否则起内部时间轴。
+     *
+     * 起播时刻由时钟自己的时间源决定，调用方推进时必须用同一时间源。
+     * 返回 true 表示本次调用起了播（调用方据此武装帧回调）。
+     */
+    fun ensurePlaying(edge: TransitionEdge, durationMs: Long): Boolean {
+        val state = clock.state()
+        if (state.source == ClockSource.SYSTEM_PUMP && state.edge == edge) return false
+        if (state.playing && state.edge == edge) return false
+        if (state.edge == edge && state.t >= 1f) return false
+        startSelfTimed(edge, durationMs, nowMs())
+        return true
+    }
+
+    /** 时钟时间源（毫秒）：起播与推进必须都用它，不能混用别的时间基准。 */
+    fun nowMs(): Long = clock.now()
 
     fun lastAdvanceAt(): Long = lastAdvanceAtMs
 

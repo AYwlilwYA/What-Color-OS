@@ -25,9 +25,16 @@ object TextColorPolicy {
      *  调用方负责前置排除（状态栏 / 展开按钮 / app 彩色 / 未 attach）与缓存 / 防自循环注入尾。 */
     fun resolveReadableTextColor(textView: TextView, originalColor: Int, screenX: Int, screenY: Int): Int? {
         val tvTag = textView.javaClass.name.substringAfterLast('.')
+        // 预设覆盖：文字所在玻璃区域的宿主类绑定预设时，反色/强制白按预设值（未设键回落全局开关）
+        val hostCls = TextScopeMatcher.glassRegionHostAt(screenX, screenY)
+        val ov = com.coloros16.liquidglass.glass.GlassRegistry.overridesForClass(hostCls)
+        val forceWhite = ov?.get(com.coloros16.liquidglass.config.Prefs.KEY_TEXT_FORCE_WHITE_ENABLE)
+            ?.let { it > 0.5f } ?: BlurDrawHook.textForceWhiteEnabled
+        val contrast = ov?.get(com.coloros16.liquidglass.config.Prefs.KEY_TEXT_CONTRAST_ENABLE)
+            ?.let { it > 0.5f } ?: BlurDrawHook.textContrastEnabled
         // 1. 文字强制白：玻璃区域内 / heads-up 窗口内中性色文字恒白/灰
-        if (BlurDrawHook.textForceWhiteEnabled) {
-            if (TextScopeMatcher.isOverGlassRegion(screenX, screenY) || TextScopeMatcher.isInHeadsUpWindow(textView)) {
+        if (forceWhite) {
+            if (hostCls != null || TextScopeMatcher.isInHeadsUpWindow(textView)) {
                 val a = (originalColor ushr 24) and 0xFF
                 val injected = (a shl 24) or (BlurDrawHook.maskTextColor and 0x00FFFFFF)
                 EngineLog.log("TextColor", "decide rule=forceWhite tv=$tvTag x=$screenX y=$screenY color=0x${injected.toString(16)}")
@@ -41,7 +48,7 @@ object TextColorPolicy {
             return injected
         }
         // 3. 文字反转取色：玻璃区域内中性色文字按系统黑白通道
-        if (BlurDrawHook.textContrastEnabled && TextScopeMatcher.isOverGlassRegion(screenX, screenY)) {
+        if (contrast && hostCls != null) {
             val injected = systemQsColorInjected(originalColor)
             EngineLog.log("TextColor", "decide rule=contrast tv=$tvTag x=$screenX y=$screenY color=0x${injected.toString(16)}")
             return injected

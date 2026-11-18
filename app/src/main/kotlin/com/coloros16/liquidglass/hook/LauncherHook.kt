@@ -18,9 +18,11 @@ import android.os.Bundle
 import android.os.IBinder
 import android.os.SystemClock
 import android.view.Choreographer
+import android.view.MotionEvent
 import android.view.SurfaceControl
 import android.view.View
 import android.view.ViewGroup
+import com.coloros16.liquidglass.engine.PressGlow
 import com.coloros16.liquidglass.config.Prefs
 import com.coloros16.liquidglass.debug.DebugElement
 import com.coloros16.liquidglass.debug.DebugOverlay
@@ -353,6 +355,10 @@ object LauncherHook {
         var lastY = Int.MIN_VALUE
         var lastW = -1
         var lastH = -1
+        var lastScrollX = Int.MIN_VALUE
+        var lastScrollY = Int.MIN_VALUE
+        var lastMatrixValid = false
+        val lastMatrix = FloatArray(9)
     }
 
     // ------------------------------------------------------------ 状态字段
@@ -615,11 +621,16 @@ object LauncherHook {
     private val captureInFlightIds = ConcurrentHashMap.newKeySet<Int>()
     private val elementCaptureRetries = ConcurrentHashMap<Int, Int>()
     private val elementCaptureQuitAt = ConcurrentHashMap<Int, Long>()
+    /** 事件驱动一次性补抓标记（壁纸变更等）：静态模式下也放行本轮抓屏，worker 消费后即清。 */
+    private val forceCaptureIds = ConcurrentHashMap.newKeySet<Int>()
     @Volatile
     private var elementCaptureWorkerRunning = 0
     /** 上次整屏抓屏入队时刻（桌面抓屏节流用） */
     @Volatile
     private var lastSnapshotCaptureAtMs = 0L
+    /** 动态壁纸连续「内容未变」的抓帧数：只在画面确实不动时退让，一旦变化立即回零恢复满速。 */
+    @Volatile
+    private var liveStillFrames = 0
     /** 桌面抓屏节流（亮屏 / 锁屏息屏各自一条，1s TTL 缓存） */
     @Volatile
     private var launcherCaptureIntervalMs = Prefs.DEFAULT_LAUNCHER_BG_CAPTURE_MIN_INTERVAL_MS
@@ -627,11 +638,11 @@ object LauncherHook {
     private var launcherCaptureLockedIntervalMs = Prefs.DEFAULT_LAUNCHER_BG_CAPTURE_MIN_INTERVAL_LOCKED_MS
     @Volatile
     private var launcherCaptureIntervalCachedAtMs = 0L
-    /** 高光增强开关缓存（500ms TTL） */
+    /** 动态壁纸帧刷新：静态壁纸不动，动态壁纸必须持续取当前画面（仅桌面可见时）。 */
     @Volatile
-    private var highlightEnhanceValue = Prefs.DEFAULT_HIGHLIGHT_ENHANCE
+    private var liveWallpaperCached = false
     @Volatile
-    private var highlightEnhanceCachedAtMs = 0L
+    private var liveWallpaperCachedAtMs = 0L
     /** 抓屏频次统计（5s 窗口，用于真机核对背景刷新频率） */
     @Volatile
     private var captureRateCount = 0
@@ -643,6 +654,9 @@ object LauncherHook {
     /** 材质参数变化重录合并标志（避免连续调参时每帧都全量 invalidate） */
     @Volatile
     private var materialInvalidatePosted = false
+    /** 滚动事件监听是否已挂上（桌面滑动时重新武装运动追踪） */
+    @Volatile
+    private var scrollTrackingAttached = false
     /** 框架 prefs 变更监听（跨进程实现可能不支持，注册失败即只依赖 TTL 重读） */
     private var materialPrefsListener: android.content.SharedPreferences.OnSharedPreferenceChangeListener? = null
     /** 缓存的 Launcher 根 SurfaceControl（反射 hostView.getRootView().getViewRootImpl().getSurfaceControl()） */
@@ -778,6 +792,8 @@ object LauncherHook {
         mountCardBlurGlass(api, classLoader)
         // PressFeedback 平色家族玻璃接管（白名单驱动；当前条目：最近任务清除钮/编辑模式整理完成钮）
         mountPressFeedbackGlass(api, classLoader)
+        // 点按位置发光：dispatchTouchEvent 触摸源（快路径只认已登记玻璃宿主，默认关）
+        mountPressGlow(api)
         // 桌面长按菜单全屏底衬玻璃（离线位图两层 → 自研玻璃渲染核）
         mountPopupMenuGlass(api)
         mountOnBlurReady(api, classLoader)
@@ -786,6 +802,8 @@ object LauncherHook {
         mountWallpaperZoomCommand(api, classLoader)
         // [spec/85 补接] 省电模式广播（开 → 即刻门控 + 重录宿主；关 → 下一帧恢复玻璃）
         registerPowerSaveBroadcastReceiver()
+        // 壁纸变更广播（动态↔静态切换 → 解码缓存失效 + 一次性重抓，修「换静态壁纸玻璃仍是旧动态帧」）
+        registerWallpaperChangedReceiver()
         // 材质参数变更监听（桌面热跟随；不支持时由 1s TTL 重读兜底）
         registerMaterialPrefsListener()
         // 调试悬浮球（launcher 进程独立实例，与 SystemUI 三窗互不共享运行态）
@@ -2824,6 +2842,7 @@ object LauncherHook {
         return try {
             canvas.save()
             try {
+                applyPressGlowUniforms(shader, id, w, h)
                 pressGlassPaint.shader = shader
                 canvas.drawRoundRect(0f, 0f, w.toFloat(), h.toFloat(), corner, corner, pressGlassPaint)
             } finally {
@@ -3203,6 +3222,7 @@ object LauncherHook {
             materialHash = params.hashCode(),
             lowResDiv = if (tier != null) wantDiv else 4,
         )
+        applyPressGlowUniforms(shader, id, bounds.width(), bounds.height())
         if (appliedUniformsMap.size > 128) appliedUniformsMap.clear()
         return LiquidShaderBuild(shader)
     }
@@ -3236,6 +3256,7 @@ object LauncherHook {
             applied.refractionHeight == refractionHeight &&
             applied.materialHash == materialHash && !lowResTierChanged
         ) {
+            applyPressGlowUniforms(shader, id, bounds.width(), bounds.height())
             return true
         }
             var boundDiv = applied?.lowResDiv ?: 4
@@ -3269,6 +3290,7 @@ object LauncherHook {
                     boundDiv = 4
                 }
             }
+            applyPressGlowUniforms(shader, id, bounds.width(), bounds.height())
             appliedUniformsMap[id] = AppliedKey(sourceBitmapId, viewport, srcRect, entry.cornerRadius, refractionHeight, materialHash, boundDiv)
             if (appliedUniformsMap.size > 128) appliedUniformsMap.clear()
             return true
@@ -3283,6 +3305,7 @@ object LauncherHook {
      * 折算到快照坐标（移动实时跟手，不重抓）。快照缺失 → 异步请求后台 worker 抓屏，本帧 null 回退系统模糊。
      */
     private fun resolveRenderSource(id: Int, screenRegion: RectF): RenderSource? {
+        ensureLiveMotionTracker()
         val snap = requestScreenSnapshotAsync()
         if (snap != null && snap.bitmap.width > 0 && snap.bitmap.height > 0 && snap.region.width() > 0f) {
             val scaleX = snap.bitmap.width.toFloat() / snap.region.width()
@@ -3358,22 +3381,64 @@ object LauncherHook {
      * onBlurReady 频繁回调 / 新映射建立 都只在壁纸变化（id 变）时真正重解码（refreshWallpaperSourceIfChanged
      * 内部判定），其余情况 no-op，消除 Launcher 侧持续抓屏耗电。动态壁纸/解码失败回退 captureDisplay 抓屏。
      */
-    private fun triggerBackgroundCapture() {
+    private fun triggerBackgroundCapture(force: Boolean = false) {
         if (wallpaperFileSourceEnabled()) {
-            refreshWallpaperSourceIfChanged()
+            refreshWallpaperSourceIfChanged(force)
             return
         }
-        enqueueSnapshotCapture()
+        enqueueSnapshotCapture(force)
+    }
+
+    /** 动态壁纸是否在用（1s TTL；静态壁纸走文件解码，零持续抓屏）。 */
+    private fun liveWallpaperActive(): Boolean {
+        val now = SystemClock.uptimeMillis()
+        if (now - liveWallpaperCachedAtMs < 1000L) return liveWallpaperCached
+        liveWallpaperCachedAtMs = now
+        liveWallpaperCached = try {
+            wallpaperManager()?.wallpaperInfo != null
+        } catch (t: Throwable) {
+            false
+        }
+        return liveWallpaperCached
+    }
+
+    /** 动态壁纸帧刷新走既有 Choreographer 运动追踪帧回调（只在桌面可见且壁纸在播时武装）。 */
+    private fun ensureLiveMotionTracker() {
+        if (!liveWallpaperActive() || frameCallbackPosted) return
+        kickMotionTracker()
+    }
+
+    /** 采样检查抓屏是否为空缓冲（全透明 = 抓空）。 */
+    private fun hasCaptureContent(bitmap: android.graphics.Bitmap): Boolean {
+        if (bitmap.isRecycled || bitmap.width < 2 || bitmap.height < 2) return false
+        val stepX = (bitmap.width / 6).coerceAtLeast(1)
+        val stepY = (bitmap.height / 6).coerceAtLeast(1)
+        var y = stepY / 2
+        while (y < bitmap.height) {
+            var x = stepX / 2
+            while (x < bitmap.width) {
+                if (android.graphics.Color.alpha(bitmap.getPixel(x, y)) >= 8) return true
+                x += stepX
+            }
+            y += stepY
+        }
+        return false
     }
 
     /** 入队背景源刷新任务（唯一任务 = SNAPSHOT_ID 整屏快照/壁纸解码；pending 去重防 onBlurReady
      *  多 drawable 同帧连调重复入队）。失败冷却期内不重入队（3 次失败暂停，下个内容变化/渲染兜底重试）。
      *  节流间隔走桌面独立配置键（亮屏 / 锁屏息屏两条，默认均为 0 = 不节流）。 */
-    private fun enqueueSnapshotCapture() {
+    private fun enqueueSnapshotCapture(force: Boolean = false) {
         val now = SystemClock.uptimeMillis()
         if (now < (elementCaptureQuitAt[SNAPSHOT_ID] ?: 0L)) return
         val minInterval = launcherCaptureMinIntervalMs()
-        if (minInterval > 0 && now - lastSnapshotCaptureAtMs < minInterval) return
+        if (!force && minInterval > 0 && now - lastSnapshotCaptureAtMs < minInterval) return
+        if (force) {
+            forceCaptureIds.add(SNAPSHOT_ID)
+            logOncePerSecond("staticForceCapture") {
+                Lg.i(TAG, "bg-element: event-driven force capture enqueued (static mode bypass)")
+            }
+        }
         if (pendingCaptureIds.add(SNAPSHOT_ID)) {
             lastSnapshotCaptureAtMs = now
             elementCaptureQueue.add(SNAPSHOT_ID)
@@ -3421,10 +3486,10 @@ object LauncherHook {
      * - 静态壁纸 id 变 / 首次 → 置 wallpaperDecodePending + 入队 worker 解码。
      * - 动态壁纸 / WallpaperManager 拿不到 → 清静态源 + 入队回退 captureDisplay 抓屏。
      */
-    private fun refreshWallpaperSourceIfChanged() {
+    private fun refreshWallpaperSourceIfChanged(force: Boolean = false) {
         val wm = wallpaperManager()
         if (wm == null) {
-            enqueueSnapshotCapture()
+            enqueueSnapshotCapture(force)
             return
         }
         val isLive = try {
@@ -3436,7 +3501,7 @@ object LauncherHook {
             // 动态壁纸：静态文件源不可用 → 回退 captureDisplay 抓屏（spec/42 setUid 方案，resolveWallpaperUid 已解析动态壁纸 UID）
             wallpaperSource = null
             wallpaperDecodePending = false
-            enqueueSnapshotCapture()
+            enqueueSnapshotCapture(force)
             return
         }
         val id = try {
@@ -3445,7 +3510,7 @@ object LauncherHook {
             -1
         }
         if (id <= 0) {
-            enqueueSnapshotCapture()
+            enqueueSnapshotCapture(force)
             return
         }
         val src = wallpaperSource
@@ -3456,8 +3521,9 @@ object LauncherHook {
         wallpaperDecodeTargetId = id
         if (!wallpaperDecodePending) {
             wallpaperDecodePending = true
-            enqueueSnapshotCapture()
         }
+        // 无论是否已在待解码都入队一次（pending 单飞去重）：否则「pending 已置但队列已消费完」时不再入队 = 永不重解码
+        enqueueSnapshotCapture(force)
     }
 
     private fun kickElementCaptureWorker() {
@@ -3507,15 +3573,23 @@ object LauncherHook {
                 // [doc/spec/52] 壁纸文件解码背景源优先（静态壁纸零持续抓屏）；解码失败/动态壁纸
                 // 回退 captureDisplay 抓屏（spec/42 setUid 只抓壁纸层，兼容向后）。
                 captureInFlightIds.add(id)
-                val bg = try {
-                    if (wallpaperFileSourceEnabled()) {
-                        refreshWallpaperBackground() ?: captureScreenSnapshotWithSfc()
+                val forced = forceCaptureIds.remove(id)
+                val produced = try {
+                    if (wallpaperFileSourceEnabled() && !liveWallpaperActive()) {
+                        refreshWallpaperBackground() ?: captureScreenSnapshotWithSfc(forced)
                     } else {
-                        captureScreenSnapshotWithSfc()
+                        captureScreenSnapshotWithSfc(forced)
                     }
                 } finally {
                     captureInFlightIds.remove(id)
                     noteCaptureRate()
+                }
+                // 抓空（全透明帧）会让玻璃背景整块消失，直接丢弃并保留上一帧。
+                val bg = produced?.takeIf { hasCaptureContent(it.bitmap) }
+                if (produced != null && bg == null) {
+                    logOncePerSecond("bgEmptyFrame") {
+                        Lg.w(TAG, "bg-element: empty capture frame dropped (${produced.bitmap.width}x${produced.bitmap.height})")
+                    }
                 }
                 if (bg != null) {
                     val prev = screenSnapshot
@@ -3523,6 +3597,7 @@ object LauncherHook {
                         prev.region == bg.region &&
                         prev.wallpaperZoomAtCapture == bg.wallpaperZoomAtCapture &&
                         sameBitmapContent(prev.bitmap, bg.bitmap)
+                    if (liveWallpaperActive()) liveStillFrames = if (unchanged) (liveStillFrames + 1).coerceAtMost(8) else 0
                     LowResTier.prebuild(bg.bitmap)
                     screenSnapshot = bg
                     elementCaptureRetries[id] = 0
@@ -3534,6 +3609,12 @@ object LauncherHook {
                     } else {
                         Lg.i(TAG, "bg-element: launcher background ready ${bg.bitmap.width}x${bg.bitmap.height} region=${bg.region.toShortString()}")
                         postInvalidateRegistered()
+                        // 快照就绪时部分宿主可能尚未登记，补一次延迟重绘把它们从系统白模糊切到玻璃
+                        try {
+                            mainHandler().postDelayed({ invalidateRegisteredHostViews() }, 200L)
+                        } catch (t: Throwable) {
+                            Lg.w(TAG, "bg-element: delayed invalidate post failed", t)
+                        }
                     }
                 } else {
                     // 失败重试（3 次/320ms），用尽冷却
@@ -3562,9 +3643,9 @@ object LauncherHook {
     }
 
     /** 回退抓屏：解析 Launcher 根 surface → captureDisplay 整屏排除 Launcher 窗口（spec/42 setUid 壁纸层）。
-     *  sfc 解析失败返回 null（走失败重试/冷却，不静默丢弃）。静态模式 → 不抓屏（壁纸文件解码不受影响）。 */
-    private fun captureScreenSnapshotWithSfc(): ElementBackground? {
-        if (captureMode() == Prefs.BG_CAPTURE_MODE_STATIC) return null
+     *  sfc 解析失败返回 null（走失败重试/冷却，不静默丢弃）。静态模式 → 不抓屏；force=true 的事件补抓放行。 */
+    private fun captureScreenSnapshotWithSfc(force: Boolean = false): ElementBackground? {
+        if (captureMode() == Prefs.BG_CAPTURE_MODE_STATIC && !force) return null
         // [doc/spec/42] SystemUI 弹窗（USB 选择等，ownerUid=SystemUI=壁纸同 UID）setUid 无法
         // 排除；曾尝试反射 IWindowManager.getVisibleWindows() 检测弹窗跳过抓屏，实测 ColorOS 16
         // 该方法已移除（hidden API 限制），检测失效已移除。根治=跨进程 exclude（见 spec/42）。
@@ -3848,7 +3929,11 @@ object LauncherHook {
         if (wallpaperDecodePending || src == null) {
             val decoded = decodeWallpaperSource()
             wallpaperDecodePending = false
-            if (decoded == null) return null
+            if (decoded == null) {
+                // 解码失败（文件未就绪等）：清旧源，回退抓屏，避免继续用旧壁纸条带
+                wallpaperSource = null
+                return null
+            }
             wallpaperSource = decoded
             wallpaperDecodeTargetId = decoded.wallpaperId
             syncWallpaperOffsetsFromSystem()
@@ -4072,6 +4157,8 @@ object LauncherHook {
         val edgeStroke: Float = Prefs.DEFAULT_EDGE_STROKE,
         /** 外描边宽度 px（默认 1.2）。 */
         val edgeStrokeWidth: Float = Prefs.DEFAULT_EDGE_STROKE_WIDTH,
+        /** 高光增强 0/1（默认 1=增强）；配置参数，元素可按所属配置覆盖。 */
+        val highlightEnhance: Float = if (Prefs.DEFAULT_HIGHLIGHT_ENHANCE) 1f else 0f,
     )
 
     @Volatile
@@ -4124,6 +4211,11 @@ object LauncherHook {
                     prefs.getFloat(Prefs.KEY_PARALLAX_Y, def.parallaxY),
                     prefs.getFloat(Prefs.KEY_EDGE_STROKE, Prefs.DEFAULT_EDGE_STROKE).coerceIn(0f, 1f),
                     prefs.getFloat(Prefs.KEY_EDGE_STROKE_WIDTH, Prefs.DEFAULT_EDGE_STROKE_WIDTH).coerceIn(0f, 8f),
+                    highlightEnhance = Prefs.readFloatCompat(
+                        prefs,
+                        Prefs.KEY_HIGHLIGHT_ENHANCE,
+                        if (Prefs.DEFAULT_HIGHLIGHT_ENHANCE) 1f else 0f,
+                    ),
                 )
             } catch (t: Throwable) {
                 Lg.e(TAG, "launcher material: prefs float read failed, use defaults", t)
@@ -4136,21 +4228,6 @@ object LauncherHook {
             // 参数真正变化才重录一次宿主：设置页调参后桌面无需等下一次交互才跟随
             if (previous != null && previous != it) postMaterialInvalidate()
         }
-    }
-
-    /** 高光增强开关（KEY_HIGHLIGHT_ENHANCE，500ms TTL）：开 = 所有玻璃元素统一精修细高光带。 */
-    private fun highlightEnhanceEnabled(): Boolean {
-        val now = SystemClock.uptimeMillis()
-        if (now - highlightEnhanceCachedAtMs < 500L) return highlightEnhanceValue
-        highlightEnhanceValue = try {
-            api?.let { Prefs.read(it).getBoolean(Prefs.KEY_HIGHLIGHT_ENHANCE, Prefs.DEFAULT_HIGHLIGHT_ENHANCE) }
-                ?: Prefs.DEFAULT_HIGHLIGHT_ENHANCE
-        } catch (t: Throwable) {
-            Lg.w(TAG, "prefs read highlight_enhance failed, default true", t)
-            Prefs.DEFAULT_HIGHLIGHT_ENHANCE
-        }
-        highlightEnhanceCachedAtMs = now
-        return highlightEnhanceValue
     }
 
     private fun buildParams(width: Float, height: Float, cornerRadius: Float, elementId: Int = 0): LiquidGlassShader.Params {
@@ -4197,8 +4274,8 @@ object LauncherHook {
                 lightAngleDegrees = pick(Prefs.KEY_LIGHT_ANGLE, m.lightAngleDegrees),
                 parallaxX = pick(Prefs.KEY_PARALLAX_X, m.parallaxX),
                 parallaxY = pick(Prefs.KEY_PARALLAX_Y, m.parallaxY),
-                // 高光增强：开 = 细高光带随元素尺寸收敛，关 = 按 highlight_width 的固定宽带
-                surfacePolish = highlightEnhanceEnabled(),
+                // 高光增强：按玻璃类各自设定（预设参数，未配默认增强）
+                surfacePolish = pick(Prefs.KEY_HIGHLIGHT_ENHANCE, m.highlightEnhance) > 0.5f,
                 edgeStroke = pick(Prefs.KEY_EDGE_STROKE, m.edgeStroke).coerceIn(0f, 1f),
                 edgeStrokeWidth = pick(Prefs.KEY_EDGE_STROKE_WIDTH, m.edgeStrokeWidth).coerceIn(0f, 8f),
             )
@@ -4223,8 +4300,14 @@ object LauncherHook {
         } catch (t: Throwable) {
             Lg.e(TAG, "launcher taskG+: trackHostViewMotion error", t)
         }
-        // 连续静止即停帧回调（不再永久占每帧 VSYNC）：宿主登记/位移会重新武装
-        if (motionIdleFrames >= MOTION_IDLE_FRAMES) return@FrameCallback
+        // 动态壁纸在播：帧回调保持武装（动画播放期）。画面在动→每帧入队（节流仍走配置键）；
+        // 画面连续未变→按 50ms 步进退让、上限 200ms，一旦有变化 liveStillFrames 归零立即回满速。
+        val live = liveWallpaperActive()
+        if (live) {
+            val ease = (liveStillFrames * 50).coerceAtMost(200)
+            if (ease == 0 || SystemClock.uptimeMillis() - lastSnapshotCaptureAtMs >= ease) enqueueSnapshotCapture()
+        }
+        if (motionIdleFrames >= MOTION_IDLE_FRAMES && !live) return@FrameCallback
         var hasLive = false
         synchronized(this) {
             for (entry in registeredHostViews) {
@@ -4247,7 +4330,30 @@ object LauncherHook {
         }
         registeredHostViews.add(HostEntry(view))
         motionIdleFrames = 0
+        ensureScrollTracking(view)
         kickMotionTracker()
+        // 登记早于绘制：先请求背景源，尽量在首帧绘制前就绪，避免先画一帧系统白模糊
+        requestScreenSnapshotAsync()
+    }
+
+    /**
+     * 挂滚动监听：桌面左右滑动时宿主自身会被平移/滚动，getLocationOnScreen 未必变化，
+     * 只靠逐帧比对会误判静止而停掉运动追踪 → 玻璃内容冻结。
+     * 滚动事件（页面切换、工作区滚动）一到就清零静止计数并重新武装。
+     */
+    private fun ensureScrollTracking(view: View) {
+        if (scrollTrackingAttached) return
+        try {
+            val vto = view.viewTreeObserver ?: return
+            vto.addOnScrollChangedListener {
+                motionIdleFrames = 0
+                kickMotionTracker()
+            }
+            scrollTrackingAttached = true
+            Lg.i(TAG, "launcher motion: scroll listener attached")
+        } catch (t: Throwable) {
+            Lg.w(TAG, "launcher motion: attach scroll listener failed", t)
+        }
     }
 
     /** 启动/续跑帧回调（主线程调用；惰性获取 Choreographer，任何失败静默不崩） */
@@ -4275,6 +4381,7 @@ object LauncherHook {
         if (registeredHostViews.isEmpty()) return false
         var moved = false
         val loc = IntArray(2)
+        val mvals = FloatArray(9)
         val it = registeredHostViews.iterator()
         while (it.hasNext()) {
             val entry = it.next()
@@ -4288,12 +4395,34 @@ object LauncherHook {
                 v.getLocationOnScreen(loc)
                 val w = v.width
                 val h = v.height
+                v.matrix.getValues(mvals)
+                val scrollX = v.scrollX
+                val scrollY = v.scrollY
                 if (entry.lastX == Int.MIN_VALUE) {
                     entry.lastX = loc[0]; entry.lastY = loc[1]; entry.lastW = w; entry.lastH = h
+                    entry.lastScrollX = scrollX; entry.lastScrollY = scrollY
+                    mvals.copyInto(entry.lastMatrix)
+                    entry.lastMatrixValid = true
                     continue
                 }
-                if (entry.lastX != loc[0] || entry.lastY != loc[1] || entry.lastW != w || entry.lastH != h) {
+                var changed = entry.lastX != loc[0] || entry.lastY != loc[1] ||
+                    entry.lastW != w || entry.lastH != h
+                if (!changed) {
+                    for (i in 0 until 9) {
+                        if (entry.lastMatrix[i] != mvals[i]) {
+                            changed = true
+                            break
+                        }
+                    }
+                }
+                if (!changed && (entry.lastScrollX != scrollX || entry.lastScrollY != scrollY)) {
+                    changed = true
+                }
+                if (changed) {
                     entry.lastX = loc[0]; entry.lastY = loc[1]; entry.lastW = w; entry.lastH = h
+                    entry.lastScrollX = scrollX; entry.lastScrollY = scrollY
+                    mvals.copyInto(entry.lastMatrix)
+                    entry.lastMatrixValid = true
                     moved = true
                     // 移动/尺寸变化：invalidate 宿主 → 重录 → 映射更新（移动只更新 srcRect 折算，不重抓背景）
                     try {
@@ -4371,6 +4500,157 @@ object LauncherHook {
         }
     }
 
+    // ------------------------------------------------------------ 点按位置发光 ------------------------------------------------------------
+
+    private val pressGlowStates = HashMap<Int, PressGlow.State>()
+    private var pressGlowMounted = false
+    private var pressGlowPumpRunning = false
+    @Volatile private var pressGlowEnabledValue = Prefs.DEFAULT_PRESS_GLOW
+    @Volatile private var pressGlowEnabledAtMs = 0L
+    @Volatile private var pressGlowStrengthValue = Prefs.DEFAULT_PRESS_GLOW_STRENGTH
+    @Volatile private var pressGlowStrengthAtMs = 0L
+
+    /** 元素级判定：所属玻璃配置的覆盖值优先（0/1），未配置回落全局开关。 */
+    private fun pressGlowEnabledFor(id: Int): Boolean {
+        val ov = GlassRegistry.overridesFor(id)?.get(Prefs.KEY_PRESS_GLOW)
+        if (ov != null) return ov > 0.5f
+        return pressGlowEnabled()
+    }
+
+    private fun pressGlowStrengthFor(id: Int): Float {
+        val ov = GlassRegistry.overridesFor(id)?.get(Prefs.KEY_PRESS_GLOW_STRENGTH)
+        return (ov ?: pressGlowStrength()).coerceIn(0f, 1f)
+    }
+
+    private fun pressGlowEnabled(): Boolean {
+        val now = SystemClock.uptimeMillis()
+        if (now - pressGlowEnabledAtMs < 500L) return pressGlowEnabledValue
+        pressGlowEnabledAtMs = now
+        pressGlowEnabledValue = try {
+            api?.let {
+                Prefs.readFloatCompat(Prefs.read(it), Prefs.KEY_PRESS_GLOW, if (Prefs.DEFAULT_PRESS_GLOW) 1f else 0f) > 0.5f
+            } ?: Prefs.DEFAULT_PRESS_GLOW
+        } catch (t: Throwable) {
+            Prefs.DEFAULT_PRESS_GLOW
+        }
+        return pressGlowEnabledValue
+    }
+
+    private fun pressGlowStrength(): Float {
+        val now = SystemClock.uptimeMillis()
+        if (now - pressGlowStrengthAtMs < 500L) return pressGlowStrengthValue
+        pressGlowStrengthAtMs = now
+        pressGlowStrengthValue = try {
+            api?.let {
+                Prefs.readFloatCompat(Prefs.read(it), Prefs.KEY_PRESS_GLOW_STRENGTH, Prefs.DEFAULT_PRESS_GLOW_STRENGTH)
+            } ?: Prefs.DEFAULT_PRESS_GLOW_STRENGTH
+        } catch (t: Throwable) {
+            Prefs.DEFAULT_PRESS_GLOW_STRENGTH
+        }.coerceIn(0f, 1f)
+        return pressGlowStrengthValue
+    }
+
+    /** 触摸源：全局 dispatchTouchEvent，快路径只认「已登记玻璃宿主自身」，其余 View 两次查表即放行。 */
+    private fun mountPressGlow(api: XposedInterface) {
+        if (pressGlowMounted) return
+        try {
+            val method = View::class.java.getDeclaredMethod("dispatchTouchEvent", MotionEvent::class.java)
+            api.hook(method)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .intercept { chain ->
+                    val result = chain.proceed()
+                    try {
+                        notePressGlowTouch(chain.getThisObject() as? View, chain.getArg(0) as? MotionEvent)
+                    } catch (t: Throwable) {
+                        logOncePerSecond("pressGlowTouchErr") { Lg.w(TAG, "press-glow: touch note failed", t) }
+                    }
+                    result
+                }
+            pressGlowMounted = true
+            Lg.i(TAG, "press-glow: dispatchTouchEvent source mounted")
+        } catch (t: Throwable) {
+            Lg.w(TAG, "press-glow: touch source mount FAILED", t)
+        }
+    }
+
+    private fun notePressGlowTouch(view: View?, ev: MotionEvent?) {
+        if (view == null || ev == null) return
+        val id = System.identityHashCode(view)
+        val active = pressGlowStates[id]
+        if (active == null) {
+            if (ev.actionMasked != MotionEvent.ACTION_DOWN) return
+            if (!pressGlowEnabledFor(id) || isPowerSaveGlassOff()) return
+            val entry = screenRegionMap[id] ?: return
+            if (entry.hostViewRef.get() !== view) return
+            if (view.width <= 0 || view.height <= 0) return
+            pressGlowStates[id] = PressGlow.State(SystemClock.uptimeMillis(), null, ev.x, ev.y)
+            if (pressGlowStates.size > 16) pressGlowStates.clear()
+            logOncePerSecond("pressGlowDown") {
+                Lg.i(TAG, "press-glow: down id=$id host=${entry.hostViewName} at=(${ev.x.toInt()},${ev.y.toInt()})")
+            }
+        } else {
+            when (ev.actionMasked) {
+                MotionEvent.ACTION_MOVE -> pressGlowStates[id] = active.copy(x = ev.x, y = ev.y)
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    pressGlowStates[id] = active.copy(upAtMs = SystemClock.uptimeMillis())
+                    logOncePerSecond("pressGlowUp") { Lg.i(TAG, "press-glow: up id=$id") }
+                }
+            }
+        }
+        view.invalidate()
+        pumpPressGlowFrames()
+    }
+
+    /** 动画期帧泵：表空即停；省电/开关关立即清表（下一绘制帧强度归 0）。 */
+    private fun pumpPressGlowFrames() {
+        if (pressGlowPumpRunning || pressGlowStates.isEmpty()) return
+        pressGlowPumpRunning = true
+        try {
+            Choreographer.getInstance().postFrameCallback(object : Choreographer.FrameCallback {
+                override fun doFrame(frameTimeNanos: Long) {
+                    try {
+                        val now = SystemClock.uptimeMillis()
+                        if (!pressGlowEnabled() || isPowerSaveGlassOff()) {
+                            pressGlowStates.clear()
+                        } else {
+                            val it = pressGlowStates.entries.iterator()
+                            while (it.hasNext()) {
+                                val e = it.next()
+                                if (PressGlow.finished(e.value, now)) {
+                                    it.remove()
+                                }
+                                screenRegionMap[e.key]?.hostViewRef?.get()?.invalidate()
+                            }
+                        }
+                    } catch (t: Throwable) {
+                        Lg.e(TAG, "press-glow: pump tick failed", t)
+                    }
+                    if (pressGlowStates.isNotEmpty()) {
+                        Choreographer.getInstance().postFrameCallback(this)
+                    } else {
+                        pressGlowPumpRunning = false
+                        logOncePerSecond("pressGlowPumpDone") { Lg.i(TAG, "press-glow: frame pump done") }
+                    }
+                }
+            })
+        } catch (t: Throwable) {
+            pressGlowPumpRunning = false
+            Lg.e(TAG, "press-glow: spawn frame pump failed", t)
+        }
+    }
+
+    /** 绘制收口统一调用：把该元素当前光斑强度/位置/半径喂给 shader（无状态 = 强度 0 防残留）。 */
+    private fun applyPressGlowUniforms(shader: RuntimeShader, id: Int, w: Int, h: Int) {
+        val s = pressGlowStates[id]
+        val k = if (s == null || !pressGlowEnabledFor(id)) 0f
+        else PressGlow.intensity(s, SystemClock.uptimeMillis()) * pressGlowStrengthFor(id)
+        if (k > 0f && s != null) {
+            LiquidGlassShader.setPressGlowUniforms(shader, k, s.x, s.y, PressGlow.radiusPx(minOf(w, h).toFloat()))
+        } else {
+            LiquidGlassShader.setPressGlowUniforms(shader, 0f, 0f, 0f, 1f)
+        }
+    }
+
     // ------------------------------------------------------------ [spec/85 补接 / spec/90 #3] 门控辅助
 
     /** [spec/85 补接] 省电模式判定：`PowerManager.isPowerSaveMode` + 500ms TTL（同 SystemUI 侧）。
@@ -4420,6 +4700,42 @@ object LauncherHook {
             Lg.i(TAG, "power-save: broadcast receiver registered (on=${isPowerSaveGlassOff()})")
         } catch (t: Throwable) {
             Lg.e(TAG, "power-save: register broadcast receiver failed", t)
+        }
+    }
+
+    /** 壁纸变更（含动态↔静态切换）：清 TTL 缓存 + 触发一次背景刷新（事件驱动，无周期）。
+     *  换静态时 refreshWallpaperSourceIfChanged 判 id 变化重解码；换动态时清静态源回退抓屏。 */
+    private fun registerWallpaperChangedReceiver() {
+        val ctx = launcherAppContext
+        if (ctx == null) {
+            Lg.w(TAG, "bg-wallpaper-changed: receiver skipped, context null")
+            return
+        }
+        try {
+            val filter = android.content.IntentFilter(android.content.Intent.ACTION_WALLPAPER_CHANGED)
+            val receiver = object : android.content.BroadcastReceiver() {
+                override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+                    try {
+                        liveWallpaperCachedAtMs = 0L
+                        wallpaperDecodePending = true
+                        val live = liveWallpaperActive()
+                        logOncePerSecond("wallpaperChanged") {
+                            Lg.i(TAG, "bg-wallpaper-changed: live=$live decodePending=true, background refresh enqueued")
+                        }
+                        triggerBackgroundCapture(force = true)
+                    } catch (t: Throwable) {
+                        Lg.e(TAG, "bg-wallpaper-changed: onReceive error", t)
+                    }
+                }
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                ctx.applicationContext.registerReceiver(receiver, filter, android.content.Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                ctx.applicationContext.registerReceiver(receiver, filter)
+            }
+            Lg.i(TAG, "bg-wallpaper-changed: receiver registered")
+        } catch (t: Throwable) {
+            Lg.e(TAG, "bg-wallpaper-changed: register receiver failed", t)
         }
     }
 

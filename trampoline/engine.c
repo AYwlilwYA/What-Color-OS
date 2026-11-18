@@ -26,7 +26,7 @@
 #include "lginternal.h"
 
 #define TAG_E "LG-GLASS"
-#define CONF_PATH "/data/local/tmp/lg_glass.conf"
+#define CONF_PATH "/system_ext/lib64/oplusex/lg_glass.conf"
 #define CODE_MAX 16384
 #define KEY_MAX 96
 #define CPU_CHECK_MS 5000
@@ -34,6 +34,7 @@
 #define CPU_LIMIT 0.8f
 #define STAT_EVERY 100
 #define INSTALL_RETRY_MAX 30
+#define LG_BOOT_GATE_S 30
 
 #define M_MAKE_FOR_SHADER "_ZN15SkRuntimeEffect13MakeForShaderE8SkStringRKNS_7OptionsE"
 #define M_EFFECT_MKSHADER "_ZNK15SkRuntimeEffect10makeShaderE5sk_spIK6SkDataEPS0_I8SkShaderEmPK8SkMatrix"
@@ -44,6 +45,7 @@
 #define M_RENDER_TARGET "_ZN10SkSurfaces12RenderTargetEP18GrRecordingContextN5skgpu8BudgetedERK11SkImageInfoi15GrSurfaceOriginPK14SkSurfacePropsbb"
 #define M_GET_CANVAS "_ZN9SkSurface9getCanvasEv"
 #define M_DRAW_IMAGE "_ZN8SkCanvas9drawImageEPK7SkImageffRK17SkSamplingOptionsPK7SkPaint"
+#define M_DRAW_IMAGE_RECT "_ZN8SkCanvas13drawImageRectEPK7SkImageRK6SkRectRK17SkSamplingOptionsPK7SkPaint"
 #define M_DRAW_PAINT "_ZN8SkCanvas9drawPaintERK7SkPaint"
 #define M_SNAPSHOT "_ZN9SkSurface17makeImageSnapshotEv"
 #define M_PAINT_C1 "_ZN7SkPaintC1Ev"
@@ -61,6 +63,26 @@
 
 struct lg_cfg g_cfg = {0, 0, 1, 60, 60, 500, 300, 60, 100, 10, 28.0f, 0.0f, 0.5f, 45.0f, 1.5f, 0.0f};
 
+// 启动期门：SF primeCache 预热窗口内外部 shader 编译必崩，so 加载起 30s 内 generate 一律纯直通
+static long g_load_mono;
+__attribute__((constructor)) static void lg_engine_ctor(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    g_load_mono = ts.tv_sec;
+}
+
+static int lg_boot_gate_open(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    if (ts.tv_sec - g_load_mono < LG_BOOT_GATE_S) return 0;
+    static int logged;
+    if (!logged) {
+        logged = 1;
+        lg_logf("%s boot-gate open after %ds", TAG_E, LG_BOOT_GATE_S);
+    }
+    return 1;
+}
+
 void lg_cfg_reset_defaults(void) {
     g_cfg = (struct lg_cfg){0, 0, 1, 60, 60, 500, 300, 60, 100, 10, 28.0f, 0.0f, 0.5f, 45.0f, 1.5f, 0.0f};
 }
@@ -71,7 +93,23 @@ static _Atomic long g_q[8];
 static _Atomic int g_over_streak;
 static _Atomic long g_stat_calls;
 static float g_last_rect[4];
-static int g_first_rect;
+
+#if defined(__aarch64__) && !defined(LG_HOST_TEST)
+#define LG_RGEN_N 7
+// B 路 generate 家族候选（sf_bin 内偏移，vaddr==file offset）
+// C15: Kawase/Gaussian/IBlurUtilsExt（vtable+spec150 交叉实锤）；C16: 原四候选
+static const unsigned long k_rgen_off[LG_RGEN_N] = {
+    0x418a70UL, 0x640b24UL, 0x8d2194UL,
+    0x4de8b0UL, 0x7150e0UL, 0x715ad8UL, 0x9c9678UL};
+static void *g_rorig[LG_RGEN_N];
+static void *g_rtramp[LG_RGEN_N];
+static _Atomic int g_rdone[LG_RGEN_N];
+static _Atomic int g_region_n;
+static _Atomic long g_r_calls, g_r_hit, g_r_fb;
+static _Atomic long g_r_site[LG_RGEN_N];
+static float g_r_last[4];
+static int g_r_first;
+#endif
 
 static float cl_def(float v, float lo, float hi, float dflt) {
     if (!(v == v)) return dflt;
@@ -104,7 +142,7 @@ void cfg_reload(void) {
     g_cfg.ms = t;
 #ifdef __ANDROID__
     char val[PROP_VALUE_MAX] = {0};
-    __system_property_get("vendor.debug.lg.glass", val);
+    __system_property_get("debug.lg.glass", val);
     g_cfg.prop_on = (val[0] == '1');
 #endif
     FILE *f = fopen(conf_path(), "r");
@@ -345,6 +383,8 @@ struct lg_eng_syms {
     void *data_copy;
 };
 static struct lg_eng_syms E;
+// 可选件：miss 不计入 arm 失败（有 draw_image 兜底）
+static void *g_draw_image_rect;
 
 static void *g_orig;
 static void *g_effect;
@@ -362,6 +402,7 @@ int lg_engine_resolve_syms(void) {
     E.render_target = (void *)dlsym(h, M_RENDER_TARGET);
     E.get_canvas = (void *)dlsym(h, M_GET_CANVAS);
     E.draw_image = (void *)dlsym(h, M_DRAW_IMAGE);
+    g_draw_image_rect = (void *)dlsym(h, M_DRAW_IMAGE_RECT);
     E.draw_paint = (void *)dlsym(h, M_DRAW_PAINT);
     E.snapshot = (void *)dlsym(h, M_SNAPSHOT);
     E.paint_c1 = (void *)dlsym(h, M_PAINT_C1);
@@ -378,25 +419,24 @@ int lg_engine_resolve_syms(void) {
         lg_logf("%s-SYM makeFs prologue mismatch %p", TAG_E, E.make_for_shader);
         miss++;
     }
-    lg_logf("%s-SYMS miss=%d makeFs=%p rt=%p mk32=%p effMK=%p imgMK=%p empty=%p copy=%p",
+    lg_logf("%s-SYMS miss=%d makeFs=%p rt=%p mk32=%p effMK=%p imgMK=%p empty=%p copy=%p imgRect=%p",
             TAG_E, miss, (void *)E.make_for_shader, (void *)E.render_target, (void *)E.mk_n32,
             (void *)E.effect_mkshader, (void *)E.img_mkshader, (void *)E.data_empty,
-            E.data_copy);
+            E.data_copy, g_draw_image_rect);
     return miss ? -1 : 0;
 }
 
 static void *get_effect(void) {
+    // 几何 uniform 化后 shader 编译一次永用
     char key[KEY_MAX];
-    snprintf(key, sizeof(key), "%.1f|%.1f|%.1f|%.1f|%.1f",
-             g_cfg.bx, g_cfg.by, g_cfg.bw, g_cfg.bh, g_cfg.br);
+    snprintf(key, sizeof(key), "static");
     if (g_effect && strcmp(key, g_key) == 0) return g_effect;
     if (g_effect) {
         sk_unref(g_effect);
         g_effect = NULL;
     }
     char code[CODE_MAX];
-    int n = snprintf(code, sizeof(code), lg_glass_tpl(),
-                     g_cfg.bx, g_cfg.by, g_cfg.bw, g_cfg.bh, g_cfg.br);
+    int n = snprintf(code, sizeof(code), "%s", lg_glass_tpl());
     if (n <= 0 || n >= (int)sizeof(code)) {
         fb_log("code-overflow");
         return NULL;
@@ -404,7 +444,10 @@ static void *get_effect(void) {
     char strbuf[128];
     memset(strbuf, 0, sizeof(strbuf));
     E.str_c1(strbuf, code);
-    unsigned long opts[2] = {0, 0};
+    // Options 实收 ≥0x24 字节，源码 string_view 内嵌于 +0x8(data)/+0x10(size)，其余字段零默认
+    unsigned long opts[8] = {0};
+    opts[1] = (unsigned long)(uintptr_t)code;
+    opts[2] = (unsigned long)n;
     void *sret[2] = {0, 0};
     const void *mfs_args[2] = {strbuf, opts};
     x8_call(sret, E.make_for_shader, mfs_args, 2);
@@ -440,13 +483,16 @@ static int render_glass(void *ctx, void *img, int w, int h, void *sret) {
         fb_log("mkshader-img");
         return -1;
     }
-    float ubuf[6];
+    float ubuf[9];
     ubuf[0] = g_cfg.rf;
     ubuf[1] = g_cfg.ds;
     ubuf[2] = g_cfg.hg;
     ubuf[3] = g_cfg.agDeg * 0.017453292519943295f;
     ubuf[4] = g_cfg.vb;
     ubuf[5] = g_cfg.ib;
+    ubuf[6] = (float)w;
+    ubuf[7] = (float)h;
+    ubuf[8] = g_cfg.br;
     void *uni[2] = {0, 0};
     const void *ud_args[2] = {ubuf, (void *)(uintptr_t)(sizeof ubuf)};
     x8_call(uni, E.data_copy, ud_args, 2);
@@ -492,7 +538,14 @@ static int render_glass(void *ctx, void *img, int w, int h, void *sret) {
     memset(paint, 0, sizeof(paint));
     E.paint_c1(paint);
     E.set_shader(paint, glass);
-    x8_draw_image(E.draw_image, canvas, img, 0.0f, 0.0f, sampling, NULL);
+    if (g_draw_image_rect) {
+        // 底图按 dst 拉伸铺满 region 画布（系统源常为降采样小图，原始尺寸绘制会缩在左上）
+        float dst[4] = {0.0f, 0.0f, (float)w, (float)h};
+        const void *dr_args[5] = {canvas, img, dst, sampling, NULL};
+        x8_call(NULL, g_draw_image_rect, dr_args, 5);
+    } else {
+        x8_draw_image(E.draw_image, canvas, img, 0.0f, 0.0f, sampling, NULL);
+    }
     E.draw_paint(canvas, paint);
 
     void *snap[2] = {0, 0};
@@ -528,6 +581,29 @@ __attribute__((naked)) static void lg_call_orig(void *fn, void *a0, void *a1, vo
 
 static void lg_stat_print(void) {
     g_stat_calls = 0;
+    cfg_reload();
+#if defined(__aarch64__) && !defined(LG_HOST_TEST)
+    lg_logf("%s-STAT calls=%ld ok=%ld fb=%ld err=%d hit=%ld rej=%ld over=%ld "
+            "streak=%d rect=(%.0f,%.0f,%.0f,%.0f) q=[%ld,%ld,%ld,%ld,%ld] "
+            "R calls=%ld rhit=%ld rfb=%ld rsites=[%ld,%ld,%ld,%ld,%ld,%ld,%ld] "
+            "Rrect=(%.0f,%.0f,%.0f,%.0f) "
+            "gate=%d prop=%d file=%d alive=%d untried=%d region_n=%d",
+            TAG_E, atomic_load(&g_calls), atomic_load(&g_ok), atomic_load(&g_fb),
+            lg_guard_err_count(), atomic_load(&g_hit), atomic_load(&g_reject),
+            atomic_load(&g_over), atomic_load(&g_over_streak),
+            g_last_rect[0], g_last_rect[1], g_last_rect[2], g_last_rect[3],
+            atomic_load(&g_q[2]), atomic_load(&g_q[3]), atomic_load(&g_q[4]),
+            atomic_load(&g_q[5]), atomic_load(&g_q[1]),
+            atomic_load(&g_r_calls), atomic_load(&g_r_hit), atomic_load(&g_r_fb),
+            atomic_load(&g_r_site[0]), atomic_load(&g_r_site[1]),
+            atomic_load(&g_r_site[2]), atomic_load(&g_r_site[3]),
+            atomic_load(&g_r_site[4]), atomic_load(&g_r_site[5]),
+            atomic_load(&g_r_site[6]),
+            g_r_last[0], g_r_last[1], g_r_last[2], g_r_last[3],
+            lg_boot_gate_open() ? 1 : 0, g_cfg.prop_on, g_cfg.file_on,
+            lg_glass_engine_alive() ? 1 : 0, lg_glass_arm_untried() ? 1 : 0,
+            atomic_load(&g_region_n));
+#else
     lg_logf("%s-STAT calls=%ld ok=%ld fb=%ld err=%d hit=%ld rej=%ld over=%ld "
             "streak=%d rect=(%.0f,%.0f,%.0f,%.0f) q=[%ld,%ld,%ld,%ld,%ld]",
             TAG_E, atomic_load(&g_calls), atomic_load(&g_ok), atomic_load(&g_fb),
@@ -536,79 +612,28 @@ static void lg_stat_print(void) {
             g_last_rect[0], g_last_rect[1], g_last_rect[2], g_last_rect[3],
             atomic_load(&g_q[2]), atomic_load(&g_q[3]), atomic_load(&g_q[4]),
             atomic_load(&g_q[5]), atomic_load(&g_q[1]));
+#endif
 }
 
 static void lg_hook_inner(void *a0, void *a1, unsigned a2, void *a3, void *a4, int a5,
                           void *sret) {
     int do_engine = 0;
-    if (lg_glass_engine_alive() || lg_glass_arm_untried()) {
+    if (lg_boot_gate_open() && (lg_glass_engine_alive() || lg_glass_arm_untried())) {
         cfg_reload();
         if (g_cfg.prop_on && g_cfg.file_on) do_engine = lg_glass_arm_engine();
     }
-
-    float l = 0, t = 0, rr = 0, b = 0;
-    float *r = (float *)a4;
-    if (do_engine && !r) do_engine = 0;
-    if (do_engine) {
-        l = r[0];
-        t = r[1];
-        rr = r[2];
-        b = r[3];
-        double tx1 = g_cfg.bx + g_cfg.bw, ty1 = g_cfg.by + g_cfg.bh;
-        if (rr < g_cfg.bx || l > tx1 || b < g_cfg.by || t > ty1) {
-            do_engine = 0;
-            atomic_fetch_add(&g_reject, 1);
-        } else {
-            atomic_fetch_add(&g_hit, 1);
-            g_last_rect[0] = l;
-            g_last_rect[1] = t;
-            g_last_rect[2] = rr;
-            g_last_rect[3] = b;
-        }
-    }
-
     lg_call_orig(g_orig, a0, a1, (void *)(uintptr_t)a2, a3, a4, (void *)(uintptr_t)a5, sret);
-    if (!do_engine) return;
-
-    void *img = *(void **)sret;
-    if (!img) {
-        atomic_fetch_add(&g_fb, 1);
-        fb_log("null-img");
-        return;
+    float *r = (float *)a4;
+    if (r) {
+        g_last_rect[0] = r[0];
+        g_last_rect[1] = r[1];
+        g_last_rect[2] = r[2];
+        g_last_rect[3] = r[3];
+        atomic_fetch_add(&g_hit, 1);
     }
-    int w = (int)(rr - l + 0.5f), h = (int)(b - t + 0.5f);
-    if (!g_first_rect) {
-        g_first_rect = 1;
-        lg_logf("%s-FIRST rect=(%.0f,%.0f,%.0f,%.0f) w=%d h=%d q=%d img=%p",
-                TAG_E, l, t, rr, b, w, h, a5, img);
-    }
-    if (w < 64 || h < 64 || w > 8192 || h > 8192) {
-        atomic_fetch_add(&g_fb, 1);
-        fb_log("rect-range");
-        return;
-    }
-
-    long t0 = lg_now_ms();
-    int rc = render_glass(a1, img, w, h, sret);
-    long elapsed = lg_now_ms() - t0;
-    if (rc == 0) {
-        atomic_fetch_add(&g_ok, 1);
-        if (atomic_load(&g_ok) == 1) lg_logf("%s-RENDER-OK first", TAG_E);
-    } else {
-        lg_guard_note_error();
-        atomic_fetch_add(&g_fb, 1);
-    }
-    if (g_cfg.timeout_ms <= 0 || elapsed > g_cfg.timeout_ms) {
-        atomic_fetch_add(&g_over, 1);
-        int streak = atomic_fetch_add(&g_over_streak, 1) + 1;
-        if (streak >= g_cfg.overtrip) {
-            lg_guard_trip_now("frame-timeout");
-            return;
-        }
-    } else {
-        atomic_store(&g_over_streak, 0);
-    }
-    cpu_check_lazy();
+    // A 路停渲只透传（rect 恒全屏层 bounds，全屏自渲即「仍然全屏」根因）；玻璃归 B 路 region
+    (void)do_engine;
+    (void)sret;
 }
 
 void lg_hook_worker(void *a0, void *a1, unsigned a2, void *a3, void *a4, int a5,
@@ -634,7 +659,328 @@ __attribute__((naked)) void lg_hook_entry(void) {
         "b lg_hook_worker\n");
 }
 
-static int try_install_once(const char **step) {
+#ifdef __aarch64__
+// maps 找 surfaceflinger 主程序首段（vaddr==offset 的 bias）与其 r-xp 段范围
+static int lg_sfbin_from_maps(const char *maps_path, unsigned long *bias_out,
+                              char *path_out, size_t n,
+                              unsigned long *rx_s, unsigned long *rx_e) {
+    FILE *f = fopen(maps_path, "r");
+    if (!f) return -1;
+    char line[512];
+    int rc = -1;
+    int have_bias = 0;
+    *rx_s = 0;
+    *rx_e = 0;
+    while (fgets(line, sizeof(line), f)) {
+        if (!strstr(line, "surfaceflinger")) continue;
+        unsigned long start = 0, end = 0, off = 0, ino = 0;
+        char perms[16], dev[16], path[256];
+        int nconv = sscanf(line, "%lx-%lx %15s %lx %15s %lu %255s",
+                           &start, &end, perms, &off, dev, &ino, path);
+        if (nconv != 7) continue;
+        if (!have_bias && off == 0) {
+            *bias_out = start;
+            snprintf(path_out, n, "%s", path);
+            rc = 0;
+            have_bias = 1;
+            if (strchr(perms, 'x')) {
+                *rx_s = start;
+                *rx_e = end;
+            }
+            continue;
+        }
+        if (have_bias && *rx_e == 0 && strchr(perms, 'x') &&
+            strcmp(path, path_out) == 0) {
+            *rx_s = start;
+            *rx_e = end;
+            break;
+        }
+    }
+    fclose(f);
+    return rc;
+}
+
+// 写 n 字节进可执行地址：/proc/self/mem FOLL_FORCE 优先（不掉执行位），mprotect 兜底；写后清 I-cache
+static int lg_write_text(unsigned long addr, const void *src, size_t n, int restore_prot) {
+    int fd = open("/proc/self/mem", O_WRONLY);
+    if (fd >= 0) {
+        ssize_t w = -1;
+        if (lseek(fd, (off_t)addr, SEEK_SET) != (off_t)-1)
+            w = write(fd, src, n);
+        close(fd);
+        if (w == (ssize_t)n) {
+            __builtin___clear_cache((char *)addr, (char *)addr + n);
+            return 0;
+        }
+    }
+    unsigned long page = addr & ~0xfffUL;
+    if (mprotect((void *)page, 4096, PROT_READ | PROT_WRITE) == 0) {
+        memcpy((void *)addr, src, n);
+        if (mprotect((void *)page, 4096, restore_prot) != 0)
+            lg_logf("%s-INL restore-fail addr=%p（页执行位可能丢失）", TAG_E, (void *)addr);
+        __builtin___clear_cache((char *)addr, (char *)addr + n);
+        return 0;
+    }
+    return -1;
+}
+
+// RX 段页尾零填充洞（filesz→页界，页已 RX）；C15/C16 filesz 不同，按 maps rx_e 反推
+#define LG_CAVE_SLOT 48
+#define LG_CAVE_USED 40
+
+static int lg_find_cave(unsigned long bias, int idx, unsigned long rx_e,
+                        unsigned long *out) {
+    (void)bias;
+    unsigned long total = (unsigned long)LG_RGEN_N * LG_CAVE_SLOT;
+    if (rx_e < total) return -1;
+    unsigned long base = rx_e - total;
+    unsigned long a = base + (unsigned long)idx * LG_CAVE_SLOT;
+    if (a + LG_CAVE_USED > rx_e) return -1;
+    const unsigned char *p = (const unsigned char *)a;
+    for (int i = 0; i < LG_CAVE_USED; i++)
+        if (p[i]) return -1;
+    *out = a;
+    return 0;
+}
+
+static void lg_region_worker(int site, void *a0, void *a1, unsigned a2,
+                             void *a3, void *a4, void *sret);
+// used：跳板汇编按名引用，编译器 C 视角看不到会 DCE
+__attribute__((used)) static void lg_region_w0(void *a0, void *a1, unsigned a2, void *a3, void *a4, void *sret) {
+    lg_region_worker(0, a0, a1, a2, a3, a4, sret);
+}
+__attribute__((used)) static void lg_region_w1(void *a0, void *a1, unsigned a2, void *a3, void *a4, void *sret) {
+    lg_region_worker(1, a0, a1, a2, a3, a4, sret);
+}
+__attribute__((used)) static void lg_region_w2(void *a0, void *a1, unsigned a2, void *a3, void *a4, void *sret) {
+    lg_region_worker(2, a0, a1, a2, a3, a4, sret);
+}
+__attribute__((used)) static void lg_region_w3(void *a0, void *a1, unsigned a2, void *a3, void *a4, void *sret) {
+    lg_region_worker(3, a0, a1, a2, a3, a4, sret);
+}
+__attribute__((used)) static void lg_region_w4(void *a0, void *a1, unsigned a2, void *a3, void *a4, void *sret) {
+    lg_region_worker(4, a0, a1, a2, a3, a4, sret);
+}
+__attribute__((used)) static void lg_region_w5(void *a0, void *a1, unsigned a2, void *a3, void *a4, void *sret) {
+    lg_region_worker(5, a0, a1, a2, a3, a4, sret);
+}
+__attribute__((used)) static void lg_region_w6(void *a0, void *a1, unsigned a2, void *a3, void *a4, void *sret) {
+    lg_region_worker(6, a0, a1, a2, a3, a4, sret);
+}
+
+// 入口跳板：sret x8 → x5（第6参），尾分支保调用方 lr；首条 bti jc 过间接跳转落地垫检查
+__attribute__((naked)) static void lg_rthunk0(void) {
+    __asm__ volatile("bti jc\n mov x5, x8\n b lg_region_w0");
+}
+__attribute__((naked)) static void lg_rthunk1(void) {
+    __asm__ volatile("bti jc\n mov x5, x8\n b lg_region_w1");
+}
+__attribute__((naked)) static void lg_rthunk2(void) {
+    __asm__ volatile("bti jc\n mov x5, x8\n b lg_region_w2");
+}
+__attribute__((naked)) static void lg_rthunk3(void) {
+    __asm__ volatile("bti jc\n mov x5, x8\n b lg_region_w3");
+}
+__attribute__((naked)) static void lg_rthunk4(void) {
+    __asm__ volatile("bti jc\n mov x5, x8\n b lg_region_w4");
+}
+__attribute__((naked)) static void lg_rthunk5(void) {
+    __asm__ volatile("bti jc\n mov x5, x8\n b lg_region_w5");
+}
+__attribute__((naked)) static void lg_rthunk6(void) {
+    __asm__ volatile("bti jc\n mov x5, x8\n b lg_region_w6");
+}
+
+static void *const g_rthunk[LG_RGEN_N] = {
+    (void *)lg_rthunk0, (void *)lg_rthunk1, (void *)lg_rthunk2, (void *)lg_rthunk3,
+    (void *)lg_rthunk4, (void *)lg_rthunk5, (void *)lg_rthunk6};
+
+static void lg_region_worker(int site, void *a0, void *a1, unsigned a2,
+                             void *a3, void *a4, void *sret) {
+    (void)a3;
+    atomic_fetch_add(&g_r_calls, 1);
+    if (site >= 0 && site < LG_RGEN_N) atomic_fetch_add(&g_r_site[site], 1);
+    if (atomic_fetch_add(&g_stat_calls, 1) + 1 >= STAT_EVERY) lg_stat_print();
+
+    void *orig = (site >= 0 && site < LG_RGEN_N) ? g_rorig[site] : NULL;
+    if (!orig) return;
+    if (g_reentry) {
+        lg_call_orig(orig, a0, a1, (void *)(uintptr_t)a2, a3, a4, NULL, sret);
+        return;
+    }
+    g_reentry = 1;
+    int do_engine = 0;
+    if (lg_boot_gate_open() && (lg_glass_engine_alive() || lg_glass_arm_untried())) {
+        cfg_reload();
+        if (g_cfg.prop_on && g_cfg.file_on) do_engine = lg_glass_arm_engine();
+    }
+    float l = 0, t = 0, rr = 0, b = 0;
+    float *r = (float *)a4;
+    if (do_engine && r) {
+        l = r[0];
+        t = r[1];
+        rr = r[2];
+        b = r[3];
+        if (!(l == l && t == t && rr == rr && b == b) || !(rr > l) || !(b > t))
+            do_engine = 0;
+    } else {
+        do_engine = 0;
+    }
+
+    lg_call_orig(orig, a0, a1, (void *)(uintptr_t)a2, a3, a4, NULL, sret);
+    if (!do_engine) {
+        g_reentry = 0;
+        return;
+    }
+
+    void *img = *(void **)sret;
+    if (!img) {
+        atomic_fetch_add(&g_r_fb, 1);
+        fb_log("r-null-img");
+        g_reentry = 0;
+        return;
+    }
+    int w = (int)(rr - l + 0.5f), h = (int)(b - t + 0.5f);
+    if (w < 4 || h < 4 || w > 8192 || h > 8192) {
+        atomic_fetch_add(&g_r_fb, 1);
+        fb_log("r-rect-range");
+        g_reentry = 0;
+        return;
+    }
+
+    atomic_fetch_add(&g_r_hit, 1);
+    if (l != g_r_last[0] || t != g_r_last[1] ||
+        rr != g_r_last[2] || b != g_r_last[3]) {
+        lg_logf("%s-RREGION site=%d (%.0f,%.0f,%.0f,%.0f)", TAG_E, site, l, t, rr, b);
+        g_r_last[0] = l;
+        g_r_last[1] = t;
+        g_r_last[2] = rr;
+        g_r_last[3] = b;
+    }
+    if (!g_r_first) {
+        g_r_first = 1;
+        lg_logf("%s-RFIRST site=%d rect=(%.0f,%.0f,%.0f,%.0f) w=%d h=%d img=%p",
+                TAG_E, site, l, t, rr, b, w, h, img);
+    }
+
+    long t0 = lg_now_ms();
+    int rc = render_glass(a1, img, w, h, sret);
+    long elapsed = lg_now_ms() - t0;
+    if (rc == 0) {
+        atomic_fetch_add(&g_ok, 1);
+        if (atomic_load(&g_ok) == 1) lg_logf("%s-RENDER-OK first", TAG_E);
+    } else {
+        lg_guard_note_error();
+        atomic_fetch_add(&g_r_fb, 1);
+    }
+    if (g_cfg.timeout_ms <= 0 || elapsed > g_cfg.timeout_ms) {
+        atomic_fetch_add(&g_over, 1);
+        int streak = atomic_fetch_add(&g_over_streak, 1) + 1;
+        if (streak >= g_cfg.overtrip) {
+            lg_guard_trip_now("frame-timeout");
+            g_reentry = 0;
+            return;
+        }
+    } else {
+        atomic_store(&g_over_streak, 0);
+    }
+    cpu_check_lazy();
+    g_reentry = 0;
+}
+
+// 七候选逐站点装（BTI+PAC 保护：所有间接跳转目标首条必须是落地垫 bti jc / paciasp）：
+// 入口 24B = bti jc + ldr x17,#8 + br x17 + thunk + 桥 bti jc（覆盖原指令 0..5），
+// cave 40B = bti jc + 原指令 0..4 重放 + ldr/br → 桥（bti jc）→ 原指令 6 起原位续跑；
+// worker 调原函数 = br 进 cave（重放 paciasp 与保存序，g_rorig 指 cave 不指 addr+16）
+static int install_region_sites(const char **step) {
+    if (atomic_load(&g_region_n) >= LG_RGEN_N) {
+        *step = "already";
+        return 0;
+    }
+    unsigned long bias = 0, rx_s = 0, rx_e = 0;
+    char exe[256];
+    if (lg_sfbin_from_maps("/proc/self/maps", &bias, exe, sizeof(exe),
+                           &rx_s, &rx_e) != 0) {
+        *step = "sf-no-maps";
+        return -1;
+    }
+    int got = 0;
+    for (int i = 0; i < LG_RGEN_N; i++) {
+        if (atomic_load(&g_rdone[i])) {
+            got++;
+            continue;
+        }
+        unsigned long addr = bias + k_rgen_off[i];
+        if (addr < rx_s || addr + 24 > rx_e) {
+            lg_logf("%s-INL site=%d addr=%p 超出 RX 段 [%p,%p) 跳过",
+                    TAG_E, i, (void *)addr, (void *)rx_s, (void *)rx_e);
+            *step = "out-of-rx";
+            continue;
+        }
+        unsigned pro = *(const unsigned *)addr;
+        if (pro != 0xd503233fu) {
+            lg_logf("%s-INL site=%d addr=%p pro=%08x 非 paciasp 跳过",
+                    TAG_E, i, (void *)addr, pro);
+            continue;
+        }
+        unsigned char orig24[24];
+        memcpy(orig24, (const void *)addr, 24);
+        unsigned long cave = 0;
+        if (lg_find_cave(bias, i, rx_e, &cave) != 0) {
+            lg_logf("%s-INL site=%d cave 槽非零或越界 rx_e=%p", TAG_E, i, (void *)rx_e);
+            *step = "cave-find";
+            continue;
+        }
+        unsigned int w_bti = 0xd50324dfu, w_ldr = 0x58000051u, w_br = 0xd61f0220u;
+        unsigned long bridge = addr + 20;
+        unsigned char cavebuf[LG_CAVE_USED];
+        memset(cavebuf, 0, sizeof(cavebuf));
+        memcpy(cavebuf, &w_bti, 4);
+        memcpy(cavebuf + 4, orig24, 20);
+        memcpy(cavebuf + 24, &w_ldr, 4);
+        memcpy(cavebuf + 28, &w_br, 4);
+        memcpy(cavebuf + 32, &bridge, 8);
+        if (lg_write_text(cave, cavebuf, LG_CAVE_USED, PROT_READ | PROT_EXEC) != 0 ||
+            memcmp((const void *)cave, cavebuf, LG_CAVE_USED) != 0) {
+            lg_logf("%s-INL site=%d cave-write fail cave=%p", TAG_E, i, (void *)cave);
+            *step = "cave-write";
+            continue;
+        }
+
+        unsigned long thunk = (unsigned long)g_rthunk[i];
+        unsigned char ent[24];
+        memset(ent, 0, sizeof(ent));
+        memcpy(ent, &w_bti, 4);
+        memcpy(ent + 4, &w_ldr, 4);
+        memcpy(ent + 8, &w_br, 4);
+        memcpy(ent + 12, &thunk, 8);
+        memcpy(ent + 20, &w_bti, 4);
+        g_rorig[i] = (void *)cave;
+        g_rtramp[i] = (void *)bridge;
+        if (lg_write_text(addr, ent, 24, PROT_READ | PROT_EXEC) != 0 ||
+            memcmp((const void *)addr, ent, 24) != 0) {
+            lg_logf("%s-INL site=%d entry-patch fail，回退原指令", TAG_E, i);
+            lg_write_text(addr, orig24, 24, PROT_READ | PROT_EXEC);
+            g_rorig[i] = NULL;
+            *step = "entry-patch";
+            continue;
+        }
+        atomic_store(&g_rdone[i], 1);
+        atomic_fetch_add(&g_region_n, 1);
+        got++;
+        lg_logf("%s-INL site=%d bias=%p off=0x%lx addr=%p thunk=%p cave=%p",
+                TAG_E, i, (void *)bias, k_rgen_off[i], (void *)addr,
+                g_rthunk[i], (void *)cave);
+    }
+    if (got > 0) {
+        *step = "ok";
+        return 0;
+    }
+    return -1;
+}
+#endif /* __aarch64__ */
+
+static int install_got(const char **step) {
     if (atomic_load(&g_hook_ready)) {
         *step = "already";
         return 0;
@@ -677,10 +1023,48 @@ static int try_install_once(const char **step) {
     return 0;
 }
 
+// 总装：B 路 region inline = 玻璃真身（必须）；A 路 GOT = 透传+统计（辅）
+static int try_install_once(const char **step) {
+    const char *a_step = "?";
+    int a_ok = atomic_load(&g_hook_ready) != 0;
+    if (!a_ok) a_ok = install_got(&a_step) == 0;
+#ifdef __aarch64__
+    const char *r_step = "?";
+    install_region_sites(&r_step);
+    int r_ok = atomic_load(&g_region_n) > 0;
+    if (r_ok) {
+        *step = "ok";
+        return 0;
+    }
+    lg_logf("%s-INL 装配结果 a_ok=%d a_step=%s r_step=%s（B 路 0 站点=本会话无模块玻璃）",
+            TAG_E, a_ok, a_step, r_step);
+    if (strcmp(a_step, "no-maps") == 0) {
+        *step = a_step;
+        return -1;
+    }
+    *step = r_step;
+    return -1;
+#else
+    if (a_ok) {
+        *step = "ok";
+        return 0;
+    }
+    *step = a_step;
+    return -1;
+#endif
+}
+
 static void *install_retry_thread(void *arg) {
     (void)arg;
     const char *step = "?";
-    for (int i = 1; i <= INSTALL_RETRY_MAX && !atomic_load(&g_hook_ready); i++) {
+    for (int i = 1; i <= INSTALL_RETRY_MAX; i++) {
+        int b_done =
+#ifdef __aarch64__
+            atomic_load(&g_region_n) > 0;
+#else
+            atomic_load(&g_hook_ready) != 0;
+#endif
+        if (b_done) return NULL;
         sleep(1);
         if (try_install_once(&step) == 0) {
             lg_logf("%s-HOOK ok after retry i=%d", TAG_E, i);
@@ -689,21 +1073,31 @@ static void *install_retry_thread(void *arg) {
         if (i == 1 || i == 5 || i == 10 || i == INSTALL_RETRY_MAX)
             lg_log_throttled("hookretry", "%s-HOOK retry i=%d step=%s", TAG_E, i, step);
     }
+#ifdef __aarch64__
+    if (atomic_load(&g_region_n) == 0)
+        lg_logf("%s-HOOK give-up step=%s（B 路 0 站点，本会话无玻璃）", TAG_E, step);
+#else
     if (!atomic_load(&g_hook_ready))
         lg_logf("%s-HOOK give-up step=%s（本会话无玻璃，纯转发）", TAG_E, step);
+#endif
     return NULL;
 }
 
 int lg_engine_try_install(const char **step) {
     int rc = try_install_once(step);
     if (rc == 0) return 0;
-    if (strcmp(*step, "no-maps") == 0) {
+    int need_retry = (strcmp(*step, "no-maps") == 0 ||
+                      strcmp(*step, "sf-no-maps") == 0);
+#ifdef __aarch64__
+    need_retry = need_retry || atomic_load(&g_region_n) == 0;
+#endif
+    if (need_retry) {
         static _Atomic int spawned;
         if (!atomic_exchange(&spawned, 1)) {
             pthread_t th;
             if (pthread_create(&th, NULL, install_retry_thread, NULL) == 0)
                 pthread_detach(th);
-            lg_logf("%s-HOOK deferred step=%s（RE-ext 未映射，起重试线程 %d×1s 上限）",
+            lg_logf("%s-HOOK deferred step=%s（起重试线程 %d×1s 上限）",
                     TAG_E, *step, INSTALL_RETRY_MAX);
         }
     }

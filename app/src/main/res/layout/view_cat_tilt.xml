@@ -11,7 +11,7 @@
         android:orientation="vertical"
         android:padding="16dp">
 
-        <Switch android:id="@+id/switchNotificationDissolve" android:layout_width="match_parent"
+        <com.coloros16.liquidglass.ui.LgSwitch android:id="@+id/switchNotificationDissolve" android:layout_width="match_parent"
             android:layout_height="wrap_content" android:text="@string/settings_notification_dissolve"
                     android:thumb="@drawable/lg_sw_thumb"
                     android:track="@drawable/lg_sw_track"
@@ -36,7 +36,7 @@
                     />
         
 
-        <Switch
+        <com.coloros16.liquidglass.ui.LgSwitch
             android:id="@+id/switchAnimTilt"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -138,7 +138,7 @@
 
         <!-- [doc/spec/112] 通知卡倾斜：弹出/收回动画驱动（与上面 spec/65 桌面动态倾斜互不影响）。
              [审查 V-112 m-3 修复] 删全仓库唯一的 listDivider 分隔线——其余二级页一律标题+间距分节 -->
-        <Switch
+        <com.coloros16.liquidglass.ui.LgSwitch
             android:id="@+id/switchNotifTilt"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

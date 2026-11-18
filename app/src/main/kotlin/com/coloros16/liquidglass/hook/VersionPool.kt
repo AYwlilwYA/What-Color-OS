@@ -239,6 +239,7 @@ object VersionPool {
             minorPoints = listOf(
                 MinorPoint(159913L, Profiles.SYSTEMUI_15),
                 MinorPoint(160009L, Profiles.SYSTEMUI_16),
+                MinorPoint(160012L, Profiles.SYSTEMUI_16),
                 MinorPoint(160014L, Profiles.SYSTEMUI_16),
                 MinorPoint(169906L, Profiles.SYSTEMUI_16),
                 MinorPoint(169912L, Profiles.SYSTEMUI_16_MODERN),

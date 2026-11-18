@@ -30,6 +30,10 @@ object AodStyleCatalog {
     const val ID_PORTRAIT = "aod.portrait"
     const val ID_SAIL = "aod.sail"
     const val ID_STARMOON = "aod.starmoon"
+    const val ID_LEAVE_LIGHT = "aod.leave_light"
+    const val ID_DOOR = "aod.door"
+    const val ID_MOUNTAIN = "aod.mountain"
+    const val ID_GALAXY = "aod.galaxy"
 
     val styles: List<AodStyle> = listOf(
         AodStyle(ID_FULLSCREEN, R.string.aod_style_fullscreen, AodForm.FULL, 0xFF8FA6C4.toInt(), AodTransition.MASK),
@@ -37,7 +41,11 @@ object AodStyleCatalog {
         AodStyle(ID_TEXT, R.string.aod_style_text, AodForm.PARTIAL, 0xFFA9D3C2.toInt(), AodTransition.MASK),
         AodStyle(ID_PORTRAIT, R.string.aod_style_portrait, AodForm.PARTIAL, 0xFFC4B4E0.toInt(), AodTransition.MASK),
         AodStyle(ID_SAIL, R.string.aod_style_sail, AodForm.PARTIAL, 0xFFC9A227.toInt(), AodTransition.MASK),
+        AodStyle(ID_LEAVE_LIGHT, R.string.aod_style_leave_light, AodForm.PARTIAL, 0xFFD8C39A.toInt(), AodTransition.SCENE),
         AodStyle(ID_STARMOON, R.string.aod_style_starmoon, AodForm.PARTIAL, 0xFF9CC0FF.toInt(), AodTransition.SCENE),
+        AodStyle(ID_DOOR, R.string.aod_style_door, AodForm.PARTIAL, 0xFFC8B48C.toInt(), AodTransition.SCENE),
+        AodStyle(ID_MOUNTAIN, R.string.aod_style_mountain, AodForm.PARTIAL, 0xFF9CB8A8.toInt(), AodTransition.SCENE),
+        AodStyle(ID_GALAXY, R.string.aod_style_galaxy, AodForm.PARTIAL, 0xFFA8BCE0.toInt(), AodTransition.SCENE),
     )
 
     private val byId: Map<String, AodStyle> = styles.associateBy { it.id }

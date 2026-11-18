@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="0.58"
+        android:background="#000000"
+        android:minHeight="220dp">
+
+        <com.coloros16.liquidglass.ui.aod.AodEditView
+            android:id="@+id/aodEditCanvas"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+    </FrameLayout>
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="0.42"
+        android:background="?android:attr/colorBackground"
+        android:fillViewport="false">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingHorizontal="16dp"
+            android:paddingTop="10dp"
+            android:paddingBottom="18dp">
+
+            <TextView
+                android:id="@+id/aodEditHint"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="10dp"
+                android:textColor="@color/lg_ink_400"
+                android:textSize="12sp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_plate"
+                android:orientation="vertical"
+                android:paddingHorizontal="16dp"
+                android:paddingVertical="12dp">
+
+                <com.coloros16.liquidglass.ui.LgSwitch
+                    android:id="@+id/aodEditSnap"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="0dp"
+                    android:text="@string/settings_aod_edit_snap"
+                    android:textColor="@color/lg_ink_100"
+                    android:textSize="15sp"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="@string/settings_aod_edit_snap_desc"
+                    android:textColor="@color/lg_ink_400"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <LinearLayout style="@style/ShellGroupHead">
+                <TextView
+                    style="@style/ShellGroupTitle"
+                    android:text="@string/settings_aod_edit_widgets" />
+                <View style="@style/ShellGroupRule" />
+            </LinearLayout>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="6dp"
+                android:text="@string/settings_aod_edit_widgets_desc"
+                android:textColor="@color/lg_ink_400"
+                android:textSize="12sp" />
+
+            <LinearLayout
+                android:id="@+id/aodEditWidgetBox"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_plate"
+                android:divider="@drawable/bg_seam_line_inset"
+                android:dividerHeight="1dp"
+                android:orientation="vertical"
+                android:showDividers="middle" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:background="@drawable/bg_plate"
+                android:divider="@drawable/bg_seam_line_inset"
+                android:dividerHeight="1dp"
+                android:orientation="vertical"
+                android:showDividers="middle">
+
+                <include
+                    android:id="@+id/aodEditPreviewRow"
+                    layout="@layout/item_row"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+
+                <include
+                    android:id="@+id/aodEditResetRow"
+                    layout="@layout/item_row"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+        </LinearLayout>
+    </ScrollView>
+</LinearLayout>

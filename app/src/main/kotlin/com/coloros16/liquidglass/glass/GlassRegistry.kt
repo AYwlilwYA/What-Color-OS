@@ -60,6 +60,15 @@ object GlassRegistry {
         Prefs.KEY_MASK_GLASS_DIM,
         Prefs.KEY_EDGE_STROKE,
         Prefs.KEY_EDGE_STROKE_WIDTH,
+        Prefs.KEY_HIGHLIGHT_ENHANCE,
+        Prefs.KEY_PRESS_GLOW,
+        Prefs.KEY_PRESS_GLOW_STRENGTH,
+        // 遮罩与文字可读性（0/1 浮点编码布尔；hook 侧按元素/区域覆盖，未设键回落全局）
+        Prefs.KEY_MASK_ENABLE,
+        Prefs.KEY_MASK_ALPHA,
+        Prefs.KEY_MASK_DIM_FOLLOW_MASK,
+        Prefs.KEY_TEXT_CONTRAST_ENABLE,
+        Prefs.KEY_TEXT_FORCE_WHITE_ENABLE,
     )
 
     // ------------------------------------------------------------ JSON 编解码（两端共用） ------------------------------------------------------------
@@ -298,6 +307,13 @@ object GlassRegistry {
 
     /** 按元素 identityHashCode 取卡片语义类（如通知卡/磁贴）；未登记或无语义类 → null。 */
     fun cardClassOf(elementId: Int): String? = bound[elementId]?.cardClass
+
+    /** 按类名直查预设覆盖表（文字/遮罩等无 drawable id 的场景用；命中顺序同 [overridesFor]）。 */
+    fun overridesForClass(cls: String?): Map<String, Float>? {
+        if (cls.isNullOrEmpty()) return null
+        val map = snapshotOverrides()
+        return map[cls]
+    }
 
     /** 预设命中状态行（调试面板用）：status ∈ UNBOUND/HIT_CARD/HIT_CLASS/FALLBACK。
      *  判据与 [overridesFor] 的 hit 逻辑同源；无副作用（不写审计表、不打日志）。 */

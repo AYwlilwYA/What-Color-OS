@@ -30,6 +30,19 @@ object TextScopeMatcher {
         return false
     }
 
+    /** 命中的玻璃区域宿主类名（文字链按元素预设覆盖用）；未命中 → null。判定同 [isOverGlassRegion]。 */
+    fun glassRegionHostAt(screenX: Int, screenY: Int): String? {
+        val sb = statusBarBottom()
+        if (sb > 0 && screenY < sb) return null
+        for (entry in BlurDrawHook.screenRegionMap.values) {
+            val r = entry.region
+            if (screenX >= r.left && screenX <= r.right && screenY >= r.top && screenY <= r.bottom) {
+                return entry.hostViewName
+            }
+        }
+        return null
+    }
+
     /** 状态栏区域底边（物理 px）：framework `status_bar_height` dimen（Resources.getSystem()，
      *  设备密度生效）。首次调用缓存到 [statusBarBottomPx]；解析失败返回 -1（不启用排除，回退现状）。 */
     private fun statusBarBottom(): Int {

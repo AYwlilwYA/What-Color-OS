@@ -1,6 +1,8 @@
 package com.coloros16.liquidglass.ui
 
+import android.app.WallpaperManager
 import android.content.ClipData
+import android.content.ComponentName
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
@@ -64,7 +66,12 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.coloros16.liquidglass.App
 import com.coloros16.liquidglass.R
+import com.coloros16.liquidglass.config.EffectConfigStore
+import com.coloros16.liquidglass.config.LayoutConfigStore
 import com.coloros16.liquidglass.config.Prefs
+import com.coloros16.liquidglass.engine.CameraPathSpec
+import com.coloros16.liquidglass.engine.CameraPaths
+import com.coloros16.liquidglass.engine.effect.EffectSettings
 import com.coloros16.liquidglass.debug.RootBallLauncher
 import com.coloros16.liquidglass.glass.GlassRegistry
 import com.coloros16.liquidglass.hook.statusbar.StatusBarSettings
@@ -73,9 +80,17 @@ import com.coloros16.liquidglass.log.Lg
 import com.coloros16.liquidglass.sf.SfGlassChannel
 import com.coloros16.liquidglass.log.LogCapture
 import com.coloros16.liquidglass.ui.aod.AodConfigsController
+import com.coloros16.liquidglass.engine.edit.EditSurface
+import com.coloros16.liquidglass.engine.edit.LockLayoutSettings
 import com.coloros16.liquidglass.ui.aod.AodDisplayController
+import com.coloros16.liquidglass.ui.aod.AodEditController
 import com.coloros16.liquidglass.ui.aod.AodMenuController
+import com.coloros16.liquidglass.ui.aod.AodSettingsController
+import com.coloros16.liquidglass.ui.aod.AodSettingsPages
 import com.coloros16.liquidglass.update.UpdateChecker
+import com.coloros16.liquidglass.wallpaper.Lg2DWallpaperService
+import com.coloros16.liquidglass.wallpaper.Lg3DWallpaperService
+import com.coloros16.liquidglass.wallpaper.WallpaperSettings
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -170,6 +185,7 @@ class SettingsActivity : AppCompatActivity() {
         // 其他组件：音量条 + 第三方 App（相册/计算器/智能侧边栏）的组件级玻璃开关
         Category("components", R.string.cat_components, R.string.cat_components_desc, R.layout.view_cat_components),
         Category("statusbar", R.string.cat_statusbar, R.string.cat_statusbar_desc, R.layout.view_cat_statusbar),
+        Category("wallpaper", R.string.cat_wallpaper, R.string.cat_wallpaper_desc, R.layout.view_cat_wallpaper),
         // [2026-09-17] 追踪器分类页已删除（追踪器整体移除，无存活控件）
         Category("log", R.string.cat_log, R.string.cat_log_desc, R.layout.view_cat_log),
         Category("config", R.string.cat_config, R.string.cat_config_desc, R.layout.view_cat_config),
@@ -202,6 +218,10 @@ class SettingsActivity : AppCompatActivity() {
             ScreenDef("glass", NavColumn.FUNC, R.string.settings_func_glass, R.layout.view_shell_glass),
         )
         put(
+            "preset-picker",
+            ScreenDef("preset-picker", NavColumn.FUNC, R.string.settings_preset_ios, R.layout.view_preset_picker),
+        )
+        put(
             "glass-sampling",
             ScreenDef(
                 "glass-sampling", NavColumn.FUNC,
@@ -215,6 +235,10 @@ class SettingsActivity : AppCompatActivity() {
         put(
             "deskobj",
             ScreenDef("deskobj", NavColumn.FUNC, R.string.settings_obj_desktop, R.layout.view_obj_desktop),
+        )
+        put(
+            "lockscreen",
+            ScreenDef("lockscreen", NavColumn.FUNC, R.string.settings_obj_lockscreen, R.layout.view_obj_lockscreen),
         )
         put(
             "deskedit",
@@ -302,6 +326,15 @@ class SettingsActivity : AppCompatActivity() {
         categories.forEach { cat ->
             put("cat/${cat.id}", ScreenDef("cat/${cat.id}", NavColumn.FUNC, cat.titleRes, cat.layoutRes, cat.id))
         }
+        AodSettingsPages.ids.forEach { pageId ->
+            val id = "aodui/$pageId"
+            val layout = if (AodSettingsPages.isEditPage(pageId)) {
+                R.layout.view_shell_aod_edit
+            } else {
+                R.layout.view_shell_aod_settings
+            }
+            put(id, ScreenDef(id, NavColumn.FUNC, AodSettingsPages.titleOf(pageId), layout))
+        }
         put("cat/anim-params", ScreenDef("cat/anim-params", NavColumn.FUNC, 0, R.layout.view_anim_params))
     }
 
@@ -315,8 +348,11 @@ class SettingsActivity : AppCompatActivity() {
     /** 当前所在栏。 */
     private var currentTab = NavColumn.HOME
 
+    /** 已赞助名单条目：首字母 / 名字 / 头像资源名（空=用首字母圆底）。 */
+    private data class Sponsor(val initial: String, val name: String, val avatar: String)
+
     /** 已赞助名单内存缓存（null=未拉取过；失败不缓存，下次进主页重试）。 */
-    private var sponsorCache: List<Pair<String, String>>? = null
+    private var sponsorCache: List<Sponsor>? = null
 
     private fun stack(): MutableList<String> = stacks.getValue(currentTab)
 
@@ -384,8 +420,12 @@ class SettingsActivity : AppCompatActivity() {
         // [2026-10-10] 服务死亡（null 回调）→ 提示用户自愈方式（binder 只在进程启动注入一次，无重连）。
         App.addServiceStateListener(object : App.ServiceStateListener {
             override fun onServiceStateChanged(service: XposedService?) {
-                if (service != null) bindCurrentPage()
-                else showServiceLostNotice()
+                // 框架 binder 回调可能落在非主线程；页面绑定含 Switch 动画，必须回主线程
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    if (service != null) bindCurrentPage()
+                    else showServiceLostNotice()
+                }
             }
         }, false)
 
@@ -614,7 +654,15 @@ class SettingsActivity : AppCompatActivity() {
 
     /** 主页：效果预览、总开关、Root 状态、快捷跳转、已赞助人员、系统信息。 */
     private fun bindHome(view: View) {
-        view.findViewById<LiquidGlassPreviewView>(R.id.homePreview)?.let { applyPreviewParams(it) }
+        view.findViewById<LiquidGlassPreviewView>(R.id.homePreview)?.let { pv ->
+            applyPreviewParams(pv)
+            pv.onLightBgToggle = { lb ->
+                writePrefBoolean(Prefs.KEY_PREVIEW_LIGHT_BG, lb)
+                applyHeroTint(view, lb)
+                Lg.i(TAG_NAV, "home preview bg -> ${if (lb) "light" else "dark"}")
+            }
+            applyHeroTint(view, pv.lightBg)
+        }
 
         val masterSwitch = view.findViewById<Switch>(R.id.homeMasterSwitch)
         val stateChip = view.findViewById<TextView>(R.id.homeMasterState)
@@ -679,8 +727,19 @@ class SettingsActivity : AppCompatActivity() {
             view.findViewById(R.id.homeVersionPoolRow),
             getString(R.string.settings_home_version_pool),
             getString(R.string.settings_home_version_pool_desc),
-            getString(R.string.settings_home_version_pool_value),
+            getString(
+                R.string.settings_home_version_pool_value,
+                hostVersionName("com.android.systemui"),
+                hostVersionName("com.android.launcher"),
+            ),
         )
+    }
+
+    /** 宿主版本名；未安装或读失败返回占位符。 */
+    private fun hostVersionName(pkg: String): String = try {
+        packageManager.getPackageInfo(pkg, 0).versionName ?: "—"
+    } catch (t: Throwable) {
+        "—"
     }
 
     /** 群组选择：QQ 复制群号并拉起，Telegram 直接跳频道。 */
@@ -720,7 +779,7 @@ class SettingsActivity : AppCompatActivity() {
         val head = view.findViewById<View>(R.id.homeSponsorsHead)
         val card = view.findViewById<View>(R.id.homeSponsorsCard)
         val list = view.findViewById<LinearLayout>(R.id.homeSponsorsList)
-        fun render(rows: List<Pair<String, String>>) {
+        fun render(rows: List<Sponsor>) {
             if (!view.isAttachedToWindow) return
             if (rows.isEmpty()) {
                 head.visibility = View.GONE
@@ -731,12 +790,21 @@ class SettingsActivity : AppCompatActivity() {
             val colors = intArrayOf(
                 R.drawable.bg_avatar_blue, R.drawable.bg_avatar_gold, R.drawable.bg_avatar_red,
             )
-            rows.forEachIndexed { i, (initial, name) ->
+            rows.forEachIndexed { i, row ->
                 val col = layoutInflater.inflate(R.layout.item_sponsor, list, false)
                 val initialView = col.findViewById<TextView>(R.id.sponsorInitial)
-                initialView.text = initial
+                initialView.text = row.initial
                 initialView.setBackgroundResource(colors[i % colors.size])
-                col.findViewById<TextView>(R.id.sponsorName).text = name
+                val avatarView = col.findViewById<ImageView>(R.id.sponsorAvatar)
+                val res = if (row.avatar.isEmpty()) 0 else resources.getIdentifier(
+                    row.avatar, "drawable", packageName
+                )
+                if (res != 0) {
+                    avatarView.setImageResource(res)
+                    avatarView.visibility = View.VISIBLE
+                    initialView.visibility = View.GONE
+                }
+                col.findViewById<TextView>(R.id.sponsorName).text = row.name
                 list.addView(col)
             }
             head.visibility = View.VISIBLE
@@ -751,8 +819,9 @@ class SettingsActivity : AppCompatActivity() {
         }.start()
     }
 
-    /** 拉 GitHub raw 名单；null=网络失败（不缓存，下次进主页重试）。 */
-    private fun fetchSponsors(): List<Pair<String, String>>? = try {
+    /** 拉 GitHub raw 名单；null=网络失败（不缓存，下次进主页重试）。
+     *  行格式：首字母|名字 或 首字母|名字|头像资源名（第三段可省）。 */
+    private fun fetchSponsors(): List<Sponsor>? = try {
         val conn = URL(SPONSORS_URL).openConnection() as HttpURLConnection
         conn.connectTimeout = 5000
         conn.readTimeout = 5000
@@ -762,8 +831,12 @@ class SettingsActivity : AppCompatActivity() {
                 if (t.isEmpty() || t.startsWith("#")) {
                     null
                 } else {
-                    val p = t.split('|', limit = 2)
-                    if (p.size == 2 && p[0].trim().isNotEmpty()) p[0].trim() to p[1].trim() else null
+                    val p = t.split('|')
+                    if (p.size >= 2 && p[0].trim().isNotEmpty()) {
+                        Sponsor(p[0].trim(), p[1].trim(), p.getOrNull(2)?.trim().orEmpty())
+                    } else {
+                        null
+                    }
                 }
             }
         }.also { Lg.i(TAG_NAV, "sponsors fetched n=${it.size}") }
@@ -810,6 +883,11 @@ class SettingsActivity : AppCompatActivity() {
                 R.string.settings_func_statusbar, R.string.settings_func_statusbar_desc,
                 "状态栏 时钟 信号 电量 wifi 5G 图标 排序 双卡 statusbar clock signal",
             ),
+            FuncEntry(
+                R.id.funcRowWallpaper, "cat/wallpaper",
+                R.string.settings_func_wallpaper, R.string.settings_func_wallpaper_desc,
+                "壁纸 3d 相机 曲线 视差 2d 静态 视频 特效 wallpaper camera video",
+            ),
         )
         val devText = getString(R.string.settings_in_development)
         entries.forEachIndexed { index, entry ->
@@ -843,6 +921,10 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         val search = view.findViewById<EditText>(R.id.funcSearch)
+        val groupHead = view.findViewById<View>(R.id.funcGroupHead)
+        val groupList = view.findViewById<View>(R.id.funcGroupList)
+        val resultsHead = view.findViewById<View>(R.id.funcResultsHead)
+        val results = view.findViewById<LinearLayout>(R.id.funcResults)
         search.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
@@ -856,7 +938,32 @@ class SettingsActivity : AppCompatActivity() {
                     view.findViewById<View>(entry.rowId).visibility = if (match) View.VISIBLE else View.GONE
                     if (match) visible++
                 }
-                logNavThrottled("func-search", "func search q=\"$query\" visible=$visible")
+                results.removeAllViews()
+                var subVisible = 0
+                if (query.isNotEmpty()) {
+                    funcSubs.forEach { sub ->
+                        val haystack = getString(sub.titleRes) + " " + sub.keywords
+                        if (haystack.lowercase().contains(query)) {
+                            val row = layoutInflater.inflate(R.layout.item_row, results, false)
+                            val targetTitle = screens[sub.target]?.titleRes
+                                ?.takeIf { it != 0 }?.let { getString(it) }
+                            setupRow(row, getString(sub.titleRes), targetTitle, null)
+                            row.setOnClickListener { pushScreen(sub.target) }
+                            results.addView(row)
+                            subVisible++
+                        }
+                    }
+                }
+                val showResults = subVisible > 0
+                resultsHead.visibility = if (showResults) View.VISIBLE else View.GONE
+                results.visibility = if (showResults) View.VISIBLE else View.GONE
+                val showGroup = query.isEmpty() || visible > 0
+                groupHead.visibility = if (showGroup) View.VISIBLE else View.GONE
+                groupList.visibility = if (showGroup) View.VISIBLE else View.GONE
+                logNavThrottled(
+                    "func-search",
+                    "func search q=\"$query\" visible=$visible sub=$subVisible",
+                )
             }
         })
     }
@@ -869,6 +976,95 @@ class SettingsActivity : AppCompatActivity() {
         val descRes: Int,
         val keywords: String,
         val devBadge: Boolean = false,
+    )
+
+    /** 功能页小类搜索条目（标题 / 深链目标屏 / 补充关键词）。 */
+    private data class FuncSub(val titleRes: Int, val target: String, val keywords: String)
+
+    /** 小类索引：搜索命中的行渲染到结果区，点击深链到所在屏。 */
+    private val funcSubs = listOf(
+        FuncSub(R.string.settings_glass_group_control, "glass", "总开关 渲染模式 应用级 系统级"),
+        FuncSub(R.string.settings_glass_group_preset, "glass", "高画质 省电"),
+        FuncSub(R.string.settings_glass_group_config, "glass", "配置1 新建 重命名"),
+        FuncSub(R.string.settings_class_assign_glass, "classassign", "类名 分配"),
+        FuncSub(R.string.settings_obj_system, "sysobj", "通知中心 控制中心 音量条"),
+        FuncSub(R.string.settings_obj_desktop, "deskobj", "dock 卡片 搜索栏"),
+        FuncSub(R.string.settings_obj_desktop_edit, "deskedit", "整理 工具条"),
+        FuncSub(R.string.settings_glass_group_readability, "glass", "文字 遮罩"),
+        FuncSub(R.string.settings_mask, "glass", "遮罩 不透明度 mask"),
+        FuncSub(R.string.settings_text_force_white, "glass", "文字 白"),
+        FuncSub(R.string.settings_text_contrast, "glass", "反色 文字"),
+        FuncSub(R.string.settings_heads_up_text_follow, "glass", "横幅 通知文字"),
+        FuncSub(R.string.settings_text_force_refresh_interval, "glass", "刷新 文字"),
+        FuncSub(R.string.settings_glass_sampling_entry, "glass-sampling", "背景 采样 抓屏"),
+        FuncSub(R.string.cat_material, "cat/material", "材质 折射 色散 高光 模糊 深度 角度"),
+        FuncSub(R.string.settings_render_mode, "glass", "应用级 系统级 sf"),
+        FuncSub(R.string.settings_sf_get_module, "glass", "模块"),
+        FuncSub(R.string.settings_preset_appearance, "glass", "预设 高画质"),
+        FuncSub(R.string.settings_preset_battery, "glass", "预设 省电"),
+        FuncSub(R.string.settings_gallery_glass, "glass", "相册 gallery"),
+        FuncSub(R.string.settings_calculator_glass, "glass", "计算器"),
+        FuncSub(R.string.settings_smart_sidebar_glass, "glass", "侧边栏"),
+        FuncSub(R.string.settings_assistant_screen_glass, "glass", "负一屏 速览 assistant"),
+        FuncSub(R.string.settings_quick_search_glass, "glass", "搜索弹窗"),
+        FuncSub(R.string.settings_glass_group_fluid, "glass", "流体云 灵动岛 小胶囊 卡片"),
+        FuncSub(R.string.settings_fluid_card_glass, "glass", "流体云 卡片 展开"),
+        FuncSub(R.string.settings_fluid_capsule_glass, "glass", "流体云 小胶囊 小岛 折叠"),
+        FuncSub(R.string.settings_fluid_no_original_color, "glass", "流体云 颜色"),
+        FuncSub(R.string.settings_corner_group_config, "cornerconfig", "圆角 配置 半径"),
+        FuncSub(R.string.settings_corner_class_assign, "classassign-corner", "圆角 类名 分配"),
+        FuncSub(R.string.settings_notification_popup_glass, "panel", "通知 长按"),
+        FuncSub(R.string.settings_notification_dissolve, "panel", "飘散 粒子 删除"),
+        FuncSub(R.string.settings_notif_tilt_enabled, "panel", "倾斜 飞入 通知"),
+        FuncSub(R.string.settings_keep_system_cc_blur, "panel", "控制中心 模糊 保留"),
+        FuncSub(R.string.settings_remove_panel_mix_color, "panel", "灰底 控制中心"),
+        FuncSub(R.string.settings_cc_blur_strength, "panel", "控制中心 模糊 强度"),
+        FuncSub(R.string.settings_volume_seekbar_glass, "sysobj", "音量 volume 进度条"),
+        FuncSub(R.string.settings_volume_panel_clean, "panel", "音量 进度条 亮白"),
+        FuncSub(R.string.settings_volume_panel_backdrop, "panel", "音量 遮罩 背景"),
+        FuncSub(R.string.settings_control_progress_fill, "sysobj", "控制中心 进度条"),
+        FuncSub(R.string.settings_qs_hide_secondary_glass, "sysobj", "控制中心 二级"),
+        FuncSub(R.string.settings_dock_glass, "deskobj", "dock 栏"),
+        FuncSub(R.string.settings_page_indicator_glass, "deskobj", "搜索栏 圆点 问小布"),
+        FuncSub(R.string.settings_card_glass, "deskobj", "小组件 widget 卡片"),
+        FuncSub(R.string.settings_popup_menu_glass, "deskobj", "长按菜单"),
+        FuncSub(R.string.settings_clear_all_btn_glass, "deskobj", "最近任务 清除"),
+        FuncSub(R.string.settings_edit_toolbar_glass, "deskedit", "整理 完成"),
+        FuncSub(R.string.settings_edit_toolbtn_glass, "deskedit", "工具条"),
+        FuncSub(R.string.settings_anim_open_enabled, "launcher", "动画 打开"),
+        FuncSub(R.string.settings_anim_close_enabled, "launcher", "动画 关闭"),
+        FuncSub(R.string.settings_anim_break_enabled, "launcher", "动画 打断"),
+        FuncSub(R.string.settings_anim_enable_custom, "cat/anim-params", "动画参数 弹性 阻尼 刚度 预设"),
+        FuncSub(R.string.settings_anim_tilt_enabled, "launcher", "倾斜 透视 tilt"),
+        FuncSub(R.string.settings_aod_screen, "aod", "息屏 aod alive 熄屏"),
+        FuncSub(R.string.settings_aod_lock_show, "aod", "锁屏"),
+        FuncSub(R.string.settings_alive_aod_handoff, "cat/components", "息屏 锁屏 连贯 过渡 衔接 handoff"),
+        FuncSub(R.string.settings_alive_aod_style, "cat/components", "息屏 样式 时钟 动效 style"),
+        FuncSub(R.string.settings_alive_aod_glass, "cat/components", "息屏 玻璃 折射 色散 高光 glass"),
+        FuncSub(R.string.settings_seedling_expand_ratio, "cat/seedling", "流体云 展开 判定 高度 阈值 seedling expand"),
+        FuncSub(R.string.settings_seedling_corner_ratio, "cat/seedling", "流体云 展开 圆角 系数 seedling corner"),
+        FuncSub(R.string.settings_aod_display_title, "aod-display", "息屏 显示 三态 壁纸"),
+        FuncSub(R.string.settings_aod_configs_title, "aod-configs", "息屏 配置"),
+        FuncSub(R.string.sb_enable, "cat/statusbar", "状态栏 总开关"),
+        FuncSub(R.string.sb_simplify, "cat/statusbar", "状态栏 简化"),
+        FuncSub(R.string.sb_order, "cat/statusbar", "状态栏 图标 排序"),
+        FuncSub(R.string.sb_duo, "cat/statusbar", "状态栏 双卡 三合一"),
+        FuncSub(R.string.wp_3d_section, "cat/wallpaper", "壁纸 3d 相机 曲线 视差"),
+        FuncSub(R.string.wp_2d_section, "cat/wallpaper", "壁纸 2d 静态 视频 特效"),
+        FuncSub(R.string.settings_capture_retry_enabled, "glass-sampling", "抓屏 重试"),
+        FuncSub(R.string.settings_bg_region_capture_experimental, "glass-sampling", "抓屏 区域"),
+        FuncSub(R.string.settings_panel_capture_hz, "glass-sampling", "抓屏 频率 hz"),
+        FuncSub(R.string.settings_capture_scale, "glass-sampling", "抓屏 缩放 清晰度"),
+        FuncSub(R.string.settings_periodic_capture_interval, "glass-sampling", "抓屏 间隔 周期"),
+        FuncSub(R.string.settings_enable_logs, "logpage", "日志 log"),
+        FuncSub(R.string.settings_engine_full_log, "logpage", "日志 引擎"),
+        FuncSub(R.string.settings_capture_include_all, "logpage", "日志 采集"),
+        FuncSub(R.string.settings_element_glass, "diagpage", "点选 诊断"),
+        FuncSub(R.string.settings_clip_bypass_mask, "diagpage", "旁路 裁切"),
+        FuncSub(R.string.settings_clip_bypass_shape, "diagpage", "旁路 裁切"),
+        FuncSub(R.string.settings_clip_bypass_canvas, "diagpage", "旁路 裁切"),
+        FuncSub(R.string.settings_gallery_shader_probe, "diagpage", "探针 相册"),
+        FuncSub(R.string.settings_root_ball_start, "diagpage", "悬浮球 球"),
     )
 
     /** 统一填充一行（标题 + 说明 + 右侧值），返回该行便于接点击。 */
@@ -926,30 +1122,94 @@ class SettingsActivity : AppCompatActivity() {
         preview.highlightWidth = prefFloat(Prefs.KEY_HIGHLIGHT_WIDTH, Prefs.DEFAULT_HIGHLIGHT_WIDTH)
         preview.highlightFloor = prefFloat(Prefs.KEY_HIGHLIGHT_FLOOR, Prefs.DEFAULT_HIGHLIGHT_FLOOR)
         preview.highlightInnerAtt = prefFloat(Prefs.KEY_HIGHLIGHT_INNER_ATT, Prefs.DEFAULT_HIGHLIGHT_INNER_ATT)
-        preview.surfacePolish = prefBoolean(Prefs.KEY_HIGHLIGHT_ENHANCE, Prefs.DEFAULT_HIGHLIGHT_ENHANCE)
+        preview.surfacePolish =
+            prefFloat(Prefs.KEY_HIGHLIGHT_ENHANCE, if (Prefs.DEFAULT_HIGHLIGHT_ENHANCE) 1f else 0f) > 0.5f
         preview.innerGlow = prefFloat(Prefs.KEY_INNER_GLOW, Prefs.DEFAULT_INNER_GLOW)
         preview.edgeStroke = prefFloat(Prefs.KEY_EDGE_STROKE, Prefs.DEFAULT_EDGE_STROKE)
         preview.edgeStrokeWidth = prefFloat(Prefs.KEY_EDGE_STROKE_WIDTH, Prefs.DEFAULT_EDGE_STROKE_WIDTH)
         preview.maskGlassDim = prefFloat(Prefs.KEY_MASK_GLASS_DIM, Prefs.DEFAULT_MASK_GLASS_DIM)
         preview.lightAngle = prefFloat(Prefs.KEY_LIGHT_ANGLE, Prefs.DEFAULT_LIGHT_ANGLE)
+        preview.lightBg = prefBoolean(Prefs.KEY_PREVIEW_LIGHT_BG, Prefs.DEFAULT_PREVIEW_LIGHT_BG)
+        preview.onLightBgToggle = { lb ->
+            writePrefBoolean(Prefs.KEY_PREVIEW_LIGHT_BG, lb)
+            Lg.i(TAG_NAV, "preview bg -> ${if (lb) "light" else "dark"}")
+        }
         preview.refresh()
     }
 
-    /** 读浮点配置：框架侧优先，回退本地 XML。 */
+    /** 主页预览文案随底色切深/浅字（白底用深字无阴影，深底用白字带阴影）。 */
+    private fun applyHeroTint(view: View, lightBg: Boolean) {
+        val meta = view.findViewById<TextView>(R.id.heroMeta)
+        val title = view.findViewById<TextView>(R.id.heroTitle)
+        val desc = view.findViewById<TextView>(R.id.heroDesc)
+        if (meta == null || title == null || desc == null) return
+        if (lightBg) {
+            meta.setTextColor(0xB310151C.toInt())
+            title.setTextColor(0xFF10151C.toInt())
+            desc.setTextColor(0xCC10151C.toInt())
+            title.setShadowLayer(0f, 0f, 0f, 0)
+            desc.setShadowLayer(0f, 0f, 0f, 0)
+        } else {
+            meta.setTextColor(0xB3ECEFF3.toInt())
+            title.setTextColor(0xFFECEFF3.toInt())
+            desc.setTextColor(0xD9ECEFF3.toInt())
+            title.setShadowLayer(6f, 0f, 1f, 0x80000000.toInt())
+            desc.setShadowLayer(6f, 0f, 1f, 0x80000000.toInt())
+        }
+    }
+
+    /** 读浮点配置：框架侧优先，回退本地 XML；类型不匹配（存量脏值）时逐级回退。 */
     private fun prefFloat(key: String, default: Float): Float =
-        frameworkPrefs()?.getFloat(key, default) ?: xmlPrefs.getFloat(key, default)
+        try {
+            frameworkPrefs()?.let { Prefs.readFloatCompat(it, key, default) }
+                ?: Prefs.readFloatCompat(xmlPrefs, key, default)
+        } catch (t: ClassCastException) {
+            Lg.w(TAG, "prefFloat type mismatch: $key", t)
+            try {
+                xmlPrefs.getFloat(key, default)
+            } catch (t2: ClassCastException) {
+                default
+            }
+        }
 
-    /** 读整型配置：框架侧优先，回退本地 XML。 */
+    /** 读整型配置：框架侧优先，回退本地 XML；类型不匹配（存量脏值）时逐级回退。 */
     private fun prefInt(key: String, default: Int): Int =
-        frameworkPrefs()?.getInt(key, default) ?: xmlPrefs.getInt(key, default)
+        try {
+            frameworkPrefs()?.getInt(key, default) ?: xmlPrefs.getInt(key, default)
+        } catch (t: ClassCastException) {
+            Lg.w(TAG, "prefInt type mismatch: $key", t)
+            try {
+                xmlPrefs.getInt(key, default)
+            } catch (t2: ClassCastException) {
+                default
+            }
+        }
 
-    /** 读字符串配置：框架侧优先，回退本地 XML。 */
+    /** 读字符串配置：框架侧优先，回退本地 XML；类型不匹配（存量脏值）时逐级回退。 */
     private fun prefString(key: String, default: String): String =
-        frameworkPrefs()?.getString(key, default) ?: xmlPrefs.getString(key, default) ?: default
+        try {
+            frameworkPrefs()?.getString(key, default) ?: xmlPrefs.getString(key, default) ?: default
+        } catch (t: ClassCastException) {
+            Lg.w(TAG, "prefString type mismatch: $key", t)
+            try {
+                xmlPrefs.getString(key, default) ?: default
+            } catch (t2: ClassCastException) {
+                default
+            }
+        }
 
-    /** 读布尔配置：框架侧优先，回退本地 XML。 */
+    /** 读布尔配置：框架侧优先，回退本地 XML；类型不匹配（存量脏值）时逐级回退。 */
     private fun prefBoolean(key: String, default: Boolean): Boolean =
-        frameworkPrefs()?.getBoolean(key, default) ?: xmlPrefs.getBoolean(key, default)
+        try {
+            frameworkPrefs()?.getBoolean(key, default) ?: xmlPrefs.getBoolean(key, default)
+        } catch (t: ClassCastException) {
+            Lg.w(TAG, "prefBoolean type mismatch: $key", t)
+            try {
+                xmlPrefs.getBoolean(key, default)
+            } catch (t2: ClassCastException) {
+                default
+            }
+        }
 
     // ------------------------------------------------------------ 玻璃页 / 玻璃化对象 ------------------------------------------------------------
 
@@ -982,18 +1242,10 @@ class SettingsActivity : AppCompatActivity() {
 
         setupRow(
             view.findViewById(R.id.presetAppearanceRow),
-            getString(R.string.settings_preset_appearance),
-            getString(R.string.settings_preset_appearance_desc),
-            getString(R.string.settings_preset_apply),
-        ).setOnClickListener { applyQualityPreset(highQuality = true) }
+            getString(R.string.settings_preset_ios),
+            getString(R.string.settings_preset_ios_desc),
+        ).setOnClickListener { pushScreen("preset-picker") }
         setRowIcon(view.findViewById(R.id.presetAppearanceRow), R.drawable.ic_row_sparkle)
-        setupRow(
-            view.findViewById(R.id.presetBatteryRow),
-            getString(R.string.settings_preset_battery),
-            getString(R.string.settings_preset_battery_desc),
-            getString(R.string.settings_preset_apply),
-        ).setOnClickListener { applyQualityPreset(highQuality = false) }
-        setRowIcon(view.findViewById(R.id.presetBatteryRow), R.drawable.ic_row_sparkle)
         setupRow(
             view.findViewById(R.id.presetCustomRow),
             getString(R.string.settings_preset_custom),
@@ -1074,6 +1326,12 @@ class SettingsActivity : AppCompatActivity() {
             getString(R.string.settings_obj_desktop_desc),
         ).setOnClickListener { pushScreen("deskobj") }
         setRowIcon(view.findViewById(R.id.glassObjDesktopRow), R.drawable.ic_row_launcher)
+        setupRow(
+            view.findViewById(R.id.glassObjLockscreenRow),
+            getString(R.string.settings_obj_lockscreen),
+            getString(R.string.settings_obj_lockscreen_desc),
+        ).setOnClickListener { pushScreen("lockscreen") }
+        setRowIcon(view.findViewById(R.id.glassObjLockscreenRow), R.drawable.ic_row_phone)
 
         bindGlassSwitch(view, R.id.switchGalleryGlass, Prefs.KEY_GALLERY_GLASS, Prefs.DEFAULT_GALLERY_GLASS)
         bindGlassSwitch(
@@ -1084,18 +1342,42 @@ class SettingsActivity : AppCompatActivity() {
         bindGlassSwitch(view, R.id.switchCalculatorGlass, Prefs.KEY_CALCULATOR_GLASS, Prefs.DEFAULT_CALCULATOR_GLASS)
         bindGlassSwitch(view, R.id.switchSmartSidebarGlass, Prefs.KEY_SMART_SIDEBAR_GLASS, Prefs.DEFAULT_SMART_SIDEBAR_GLASS)
 
-        val objSwitchIds = listOf(
-            R.id.switchGalleryGlass, R.id.switchAssistantScreenGlass, R.id.switchQuickSearchGlass,
-            R.id.switchCalculatorGlass, R.id.switchSmartSidebarGlass,
+        // 分组子屏（系统对象/桌面对象/桌面编辑）开关不随本页膨胀：本页找得到就拨开关，找不到直接写 Pref（进页绑定时读回）
+        val objSwitches = listOf(
+            R.id.switchGalleryGlass to Prefs.KEY_GALLERY_GLASS,
+            R.id.switchAssistantScreenGlass to Prefs.KEY_ASSISTANT_SCREEN_GLASS,
+            R.id.switchQuickSearchGlass to Prefs.KEY_QUICK_SEARCH_GLASS,
+            R.id.switchCalculatorGlass to Prefs.KEY_CALCULATOR_GLASS,
+            R.id.switchSmartSidebarGlass to Prefs.KEY_SMART_SIDEBAR_GLASS,
+            R.id.switchVolumeSeekBarGlass to Prefs.KEY_VOLUME_SEEKBAR_GLASS,
+            R.id.switchVolumePanelClean to Prefs.KEY_VOLUME_PANEL_CLEAN,
+            R.id.switchControlProgressFill to Prefs.KEY_CONTROL_PROGRESS_FILL,
+            R.id.switchQsHideSecondaryGlass to Prefs.KEY_QS_HIDE_SECONDARY_GLASS,
+            R.id.switchDockGlass to Prefs.KEY_DOCK_GLASS_ENABLE,
+            R.id.switchCardGlass to Prefs.KEY_CARD_GLASS_ENABLE,
+            R.id.switchPageIndicatorGlass to Prefs.KEY_PAGE_INDICATOR_GLASS,
+            R.id.switchPopupMenuGlass to Prefs.KEY_POPUP_MENU_GLASS_ENABLE,
+            R.id.switchClearAllBtnGlass to Prefs.KEY_CLEAR_ALL_BTN_GLASS,
+            R.id.switchEditToolbarGlass to Prefs.KEY_EDIT_TOOLBAR_GLASS,
+            R.id.switchEditToolBtnGlass to Prefs.KEY_EDIT_TOOLBTN_GLASS,
         )
-        view.findViewById<View>(R.id.glassObjAllOn).setOnClickListener {
-            objSwitchIds.forEach { id -> view.findViewById<Switch>(id)?.isChecked = true }
-            Lg.i(TAG_NAV, "glass obj all on")
+        fun setObjectAll(checked: Boolean) {
+            var direct = 0
+            var pref = 0
+            objSwitches.forEach { (id, key) ->
+                val sw = view.findViewById<Switch>(id)
+                if (sw != null) {
+                    sw.isChecked = checked
+                    direct++
+                } else {
+                    writePrefBoolean(key, checked)
+                    pref++
+                }
+            }
+            Lg.i(TAG_NAV, "glass obj all ${if (checked) "on" else "off"} direct=$direct pref=$pref")
         }
-        view.findViewById<View>(R.id.glassObjAllOff).setOnClickListener {
-            objSwitchIds.forEach { id -> view.findViewById<Switch>(id)?.isChecked = false }
-            Lg.i(TAG_NAV, "glass obj all off")
-        }
+        view.findViewById<View>(R.id.glassObjAllOn).setOnClickListener { setObjectAll(true) }
+        view.findViewById<View>(R.id.glassObjAllOff).setOnClickListener { setObjectAll(false) }
 
         bindGlassSwitch(
             view, R.id.switchSeedlingCardGlass,
@@ -1120,23 +1402,79 @@ class SettingsActivity : AppCompatActivity() {
         ).setOnClickListener { pushScreen("glass-sampling") }
     }
 
-    /** 一键预设：高画质 = 满帧率 + 满采样；省电 = 低帧率 + 低采样 + 拉长抓屏间隔。 */
-    private fun applyQualityPreset(highQuality: Boolean) {
-        val hz = if (highQuality) Prefs.PANEL_CAPTURE_HZ_MAX else Prefs.PANEL_CAPTURE_HZ_MIN
-        val scale = if (highQuality) 1.0f else 0.25f
-        val interval = if (highQuality) 500 else 1000
+    /** 预设三档：性能 / 平衡 / 外观。 */
+    private enum class PresetTier { PERFORMANCE, BALANCE, APPEARANCE }
+
+    /** 套用预设档位：写抓屏帧率 / 采样比例 / 定时抓屏间隔 / 高光精修 / 色散五键。 */
+    private fun applyQualityPreset(tier: PresetTier) {
+        val (hz, scale, interval) = when (tier) {
+            PresetTier.PERFORMANCE -> Triple(Prefs.PANEL_CAPTURE_HZ_MIN, 0.25f, 1000)
+            PresetTier.BALANCE -> Triple(Prefs.DEFAULT_PANEL_CAPTURE_HZ, 0.5f, 750)
+            PresetTier.APPEARANCE -> Triple(Prefs.PANEL_CAPTURE_HZ_MAX, 1.0f, 500)
+        }
+        val (enhance, dispersion) = when (tier) {
+            PresetTier.PERFORMANCE -> 0f to 0f
+            PresetTier.BALANCE -> 1f to Prefs.DEFAULT_DISPERSION
+            PresetTier.APPEARANCE -> 1f to 0.5f
+        }
         writePrefInt(Prefs.KEY_PANEL_CAPTURE_HZ, hz)
         writePrefFloat(Prefs.KEY_BG_CAPTURE_SCALE, scale)
         writePrefInt(Prefs.KEY_BG_PERIODIC_CAPTURE_INTERVAL_MS, interval)
-        Lg.i(TAG_NAV, "quality preset applied: high=$highQuality hz=$hz scale=$scale interval=$interval")
+        writePrefFloat(Prefs.KEY_HIGHLIGHT_ENHANCE, enhance)
+        writePrefFloat(Prefs.KEY_DISPERSION, dispersion)
+        Lg.i(TAG_NAV, "quality preset applied: tier=$tier hz=$hz scale=$scale interval=$interval enhance=$enhance dispersion=$dispersion")
         Toast.makeText(
             this,
-            getString(
-                if (highQuality) R.string.settings_preset_appearance_applied
-                else R.string.settings_preset_battery_applied
-            ),
+            getString(R.string.settings_preset_tier_applied, getString(tierTitleRes(tier))),
             Toast.LENGTH_SHORT,
         ).show()
+    }
+
+    private fun tierTitleRes(tier: PresetTier): Int = when (tier) {
+        PresetTier.PERFORMANCE -> R.string.settings_preset_tier_performance
+        PresetTier.BALANCE -> R.string.settings_preset_tier_balance
+        PresetTier.APPEARANCE -> R.string.settings_preset_tier_appearance
+    }
+
+    private fun tierDescRes(tier: PresetTier): Int = when (tier) {
+        PresetTier.PERFORMANCE -> R.string.settings_preset_tier_performance_desc
+        PresetTier.BALANCE -> R.string.settings_preset_tier_balance_desc
+        PresetTier.APPEARANCE -> R.string.settings_preset_tier_appearance_desc
+    }
+
+    /** 当前档由三键值推断；都不匹配 = 未选过（返回 null）。 */
+    private fun currentPresetTier(): PresetTier? {
+        val hz = prefInt(Prefs.KEY_PANEL_CAPTURE_HZ, Prefs.DEFAULT_PANEL_CAPTURE_HZ)
+        val scale = prefFloat(Prefs.KEY_BG_CAPTURE_SCALE, Prefs.DEFAULT_BG_CAPTURE_SCALE)
+        val interval = prefInt(Prefs.KEY_BG_PERIODIC_CAPTURE_INTERVAL_MS, Prefs.DEFAULT_BG_PERIODIC_CAPTURE_INTERVAL_MS)
+        return when {
+            hz == Prefs.PANEL_CAPTURE_HZ_MIN && scale == 0.25f && interval == 1000 -> PresetTier.PERFORMANCE
+            hz == Prefs.DEFAULT_PANEL_CAPTURE_HZ && scale == 0.5f && interval == 750 -> PresetTier.BALANCE
+            hz == Prefs.PANEL_CAPTURE_HZ_MAX && scale == 1.0f && interval == 500 -> PresetTier.APPEARANCE
+            else -> null
+        }
+    }
+
+    /** 预设二级页：三档行，命中当前档的行显示「当前」chip。 */
+    private fun bindPresetPicker(view: View) {
+        val current = currentPresetTier()
+        listOf(
+            PresetTier.PERFORMANCE to R.id.presetTierPerformance,
+            PresetTier.BALANCE to R.id.presetTierBalance,
+            PresetTier.APPEARANCE to R.id.presetTierAppearance,
+        ).forEach { (tier, rowId) ->
+            val row = view.findViewById<View>(rowId)
+            setupRow(
+                row,
+                getString(tierTitleRes(tier)),
+                getString(tierDescRes(tier)),
+                if (tier == current) getString(R.string.settings_preset_tier_current) else null,
+            ).setOnClickListener {
+                applyQualityPreset(tier)
+                bindCurrentPage()
+            }
+            setRowIcon(row, R.drawable.ic_row_sparkle)
+        }
     }
 
     /** 玻璃化对象·系统界面：音量条玻璃（通知中心/控制中心跟随玻璃总开关）。 */
@@ -1160,6 +1498,15 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     /** 玻璃化对象·桌面：Dock / 卡片 / 搜索界面 / 长按菜单 / 最近任务 + 编辑界面入口。 */
+    /** 锁屏玻璃：总开关 + 时钟 / 日期 / 小组件 / 底部圆钮。 */
+    private fun bindObjLockscreen(view: View) {
+        bindGlassSwitch(view, R.id.switchKgGlass, Prefs.KEY_KEYGUARD_GLASS, Prefs.DEFAULT_KEYGUARD_GLASS)
+        bindGlassSwitch(view, R.id.switchKgClock, Prefs.KEY_KEYGUARD_GLASS_CLOCK, Prefs.DEFAULT_KEYGUARD_GLASS_CLOCK)
+        bindGlassSwitch(view, R.id.switchKgDate, Prefs.KEY_KEYGUARD_GLASS_DATE, Prefs.DEFAULT_KEYGUARD_GLASS_DATE)
+        bindGlassSwitch(view, R.id.switchKgCards, Prefs.KEY_KEYGUARD_GLASS_CARDS, Prefs.DEFAULT_KEYGUARD_GLASS_CARDS)
+        bindGlassSwitch(view, R.id.switchKgShortcuts, Prefs.KEY_KEYGUARD_GLASS_SHORTCUTS, Prefs.DEFAULT_KEYGUARD_GLASS_SHORTCUTS)
+    }
+
     private fun bindObjDesktop(view: View) {
         bindGlassSwitch(view, R.id.switchDockGlass, Prefs.KEY_DOCK_GLASS_ENABLE, Prefs.DEFAULT_DOCK_GLASS_ENABLE)
         bindGlassSwitch(view, R.id.switchCardGlass, Prefs.KEY_CARD_GLASS_ENABLE, Prefs.DEFAULT_CARD_GLASS_ENABLE)
@@ -1837,12 +2184,14 @@ class SettingsActivity : AppCompatActivity() {
             "func" -> bindFunc(view)
             "glass" -> bindGlassPage(view)
             "glass-sampling" -> bindSampling(view)
+            "preset-picker" -> bindPresetPicker(view)
             "corner" -> bindCornerPage(view)
             "cornerconfig" -> bindCornerConfig(view)
             "classassign" -> bindClassAssign(view, AssignMode.GLASS)
             "classassign-corner" -> bindClassAssign(view, AssignMode.CORNER)
             "sysobj" -> bindObjSystem(view)
             "deskobj" -> bindObjDesktop(view)
+            "lockscreen" -> bindObjLockscreen(view)
             "deskedit" -> bindObjDesktopEdit(view)
             "panel" -> bindPanel(view)
             "launcher" -> bindLauncherPage(view)
@@ -1867,6 +2216,13 @@ class SettingsActivity : AppCompatActivity() {
             }
             else -> if (id.startsWith("cat/")) {
                 bindCategory(id.removePrefix("cat/"))
+            } else if (id.startsWith("aodui/")) {
+                val pageId = id.removePrefix("aodui/")
+                if (AodSettingsPages.isEditPage(pageId)) {
+                    bindAodEditPage(view, pageId)
+                } else {
+                    bindAodSettingsPage(view, pageId)
+                }
             } else {
                 logNavThrottled("bind-skip", "bind skipped: screen $id has no binder")
             }
@@ -1893,6 +2249,7 @@ class SettingsActivity : AppCompatActivity() {
             "desktop" -> bindDesktop(view)
             "components" -> bindComponents(view)
             "statusbar" -> bindStatusBar(view)
+            "wallpaper" -> bindWallpaper(view)
             "log" -> bindLog(view)
             "config" -> bindConfig(view)
             "about" -> bindAbout(view)
@@ -1955,6 +2312,13 @@ class SettingsActivity : AppCompatActivity() {
         // [spec/89] 顶部实时效果预览：滑杆拖动中即时刷新（落盘仍走 onStopTrackingTouch，配置写入时机不变）。
         // 视差 X/Y 不喂预览 —— 它会把采样区整体移出预览框，画面会变成空白玻璃（见 doc/spec/89）。
         val preview: LiquidGlassPreviewView? = view.findViewById(R.id.materialPreview)
+        preview?.let { pv ->
+            pv.lightBg = prefBoolean(Prefs.KEY_PREVIEW_LIGHT_BG, Prefs.DEFAULT_PREVIEW_LIGHT_BG)
+            pv.onLightBgToggle = { lb ->
+                writePrefBoolean(Prefs.KEY_PREVIEW_LIGHT_BG, lb)
+                Lg.i(TAG_NAV, "material preview bg -> ${if (lb) "light" else "dark"}")
+            }
+        }
 
         // 顶栏预设：选中预设后下方滑杆改读/改写该预设的参数键，未设的键回落全局值
         val glassPresets = readGlassPresets()
@@ -2119,17 +2483,20 @@ class SettingsActivity : AppCompatActivity() {
             format = { v -> getString(R.string.settings_highlight_floor_value, (v * 100f).roundToInt()) },
             onChanged = { v -> preview?.let { it.highlightFloor = v; it.refresh() } },
         )
-        // highlightInnerAtt：0~100 → 0~1（默认 0=现状）。内侧高光向玻璃深处再衰减。
+        // 高光增强属当前配置的参数：配置页选中哪套配置就写哪套，默认配置写全局键
         val switchHighlightEnhance = view.findViewById<Switch>(R.id.switchHighlightEnhance)
-        val highlightEnhanceListener = CompoundButton.OnCheckedChangeListener { _, checked ->
-            writePrefBoolean(Prefs.KEY_HIGHLIGHT_ENHANCE, checked)
+        val enhanceDefault = if (Prefs.DEFAULT_HIGHLIGHT_ENHANCE) 1f else 0f
+        val currentEnhance = presetParams?.get(Prefs.KEY_HIGHLIGHT_ENHANCE)
+            ?: frameworkPrefs()?.let { Prefs.readFloatCompat(it, Prefs.KEY_HIGHLIGHT_ENHANCE, enhanceDefault) }
+            ?: Prefs.readFloatCompat(xmlPrefs, Prefs.KEY_HIGHLIGHT_ENHANCE, enhanceDefault)
+        switchHighlightEnhance.isChecked = currentEnhance > 0.5f
+        preview?.let { it.surfacePolish = currentEnhance > 0.5f; it.refresh() }
+        switchHighlightEnhance.setOnCheckedChangeListener { _, checked ->
+            val value = if (checked) 1f else 0f
+            if (presetId != null) writeGlassPresetParam(presetId, Prefs.KEY_HIGHLIGHT_ENHANCE, value)
+            else writePrefFloat(Prefs.KEY_HIGHLIGHT_ENHANCE, value)
             preview?.let { it.surfacePolish = checked; it.refresh() }
         }
-        switchHighlightEnhance.setOnCheckedChangeListener(highlightEnhanceListener)
-        refreshBooleanSwitch(
-            switchHighlightEnhance, highlightEnhanceListener,
-            Prefs.KEY_HIGHLIGHT_ENHANCE, Prefs.DEFAULT_HIGHLIGHT_ENHANCE
-        )
         bindFloatSeekBar(
             seek = view.findViewById(R.id.seekHighlightInnerAtt), valueText = view.findViewById(R.id.highlightInnerAttValue),
             key = Prefs.KEY_HIGHLIGHT_INNER_ATT, default = Prefs.DEFAULT_HIGHLIGHT_INNER_ATT,
@@ -2138,6 +2505,26 @@ class SettingsActivity : AppCompatActivity() {
             toProgress = { v -> (v * 100f).roundToInt().coerceIn(0, 100) },
             format = { v -> getString(R.string.settings_highlight_inner_att_value, (v * 100f).roundToInt()) },
             onChanged = { v -> preview?.let { it.highlightInnerAtt = v; it.refresh() } },
+        )
+        // 点按发光：属当前玻璃配置的参数（默认关）；选中配置写配置，默认配置写全局键
+        val switchPressGlow = view.findViewById<Switch>(R.id.switchPressGlow)
+        val pressGlowDefault = if (Prefs.DEFAULT_PRESS_GLOW) 1f else 0f
+        val currentPressGlow = presetParams?.get(Prefs.KEY_PRESS_GLOW)
+            ?: frameworkPrefs()?.let { Prefs.readFloatCompat(it, Prefs.KEY_PRESS_GLOW, pressGlowDefault) }
+            ?: Prefs.readFloatCompat(xmlPrefs, Prefs.KEY_PRESS_GLOW, pressGlowDefault)
+        switchPressGlow.isChecked = currentPressGlow > 0.5f
+        switchPressGlow.setOnCheckedChangeListener { _, checked ->
+            val value = if (checked) 1f else 0f
+            if (presetId != null) writeGlassPresetParam(presetId, Prefs.KEY_PRESS_GLOW, value)
+            else writePrefFloat(Prefs.KEY_PRESS_GLOW, value)
+        }
+        bindFloatSeekBar(
+            seek = view.findViewById(R.id.seekPressGlowStrength), valueText = view.findViewById(R.id.pressGlowStrengthValue),
+            key = Prefs.KEY_PRESS_GLOW_STRENGTH, default = Prefs.DEFAULT_PRESS_GLOW_STRENGTH,
+            presetParams = presetParams, presetId = presetId,
+            fromProgress = { p -> p / 100f },
+            toProgress = { v -> (v * 100f).roundToInt().coerceIn(0, 100) },
+            format = { v -> getString(R.string.settings_press_glow_strength_value, (v * 100f).roundToInt()) },
         )
         // innerGlow：0~100 → 0~1（默认 0=关）。边缘向中心的全向发光（复用折射环带宽度）。
         bindFloatSeekBar(
@@ -2214,11 +2601,20 @@ class SettingsActivity : AppCompatActivity() {
     /** 会话内预设缓存：读改写都留在设置页进程内，避开远程存储读写往返取到旧值。 */
     private var glassPresetsCache: List<GlassRegistry.Preset>? = null
 
-    /** 读预设列表（框架侧优先，回退本地 XML）。 */
+    /** 读预设列表（框架侧优先，回退本地 XML）；缺失的出厂风格档一次性补种落盘。 */
     private fun readGlassPresets(): List<GlassRegistry.Preset> {
         glassPresetsCache?.let { return it }
         val src = frameworkPrefs() ?: xmlPrefs
         val parsed = GlassRegistry.parsePresets(src.getString(Prefs.KEY_GLASS_PRESETS, null))
+        val seeded = com.coloros16.liquidglass.glass.BuiltinGlassPresets.seedInto(parsed)
+        if (seeded.size != parsed.size) {
+            glassPresetsCache = seeded
+            Lg.i(TAG, "builtin presets seeded +${seeded.size - parsed.size}")
+            putConfig(Prefs.KEY_GLASS_PRESETS) {
+                it.putString(Prefs.KEY_GLASS_PRESETS, GlassRegistry.encodePresets(seeded)).apply()
+            }
+            return seeded
+        }
         glassPresetsCache = parsed
         return parsed
     }
@@ -2261,6 +2657,13 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun selectGlassPreset(id: String) {
         xmlPrefs.edit().putString(Prefs.KEY_UI_GLASS_PRESET, id).apply()
+        // 套用出厂风格档：玻璃对象开关默认全开（用户随后可单独关）
+        if (com.coloros16.liquidglass.glass.BuiltinGlassPresets.isBuiltin(id)) {
+            for (key in com.coloros16.liquidglass.glass.BuiltinGlassPresets.OBJECT_SWITCH_KEYS) {
+                writePrefBoolean(key, true)
+            }
+            Lg.i(TAG, "preset applied, object switches all on: $id")
+        }
     }
 
     /** 新预设序号：取历史序号与现存 id 数字后缀的较大者再加一，保证 id 不与旧预设复用。 */
@@ -2299,6 +2702,10 @@ class SettingsActivity : AppCompatActivity() {
 
     /** 删除预设；被它占用的类自动回到默认效果，选中态若指向它则回落默认。 */
     private fun deleteGlassPreset(id: String) {
+        if (com.coloros16.liquidglass.glass.BuiltinGlassPresets.isBuiltin(id)) {
+            Toast.makeText(this, R.string.glass_preset_builtin_locked, Toast.LENGTH_SHORT).show()
+            return
+        }
         var removed: String? = null
         val ok = editGlassPresets { list ->
             val idx = list.indexOfFirst { it.id == id }
@@ -2399,6 +2806,10 @@ class SettingsActivity : AppCompatActivity() {
     /** 预设管理页：逐条列出「预设名: 已应用类」，底部可新增预设。 */
     /** 重命名玻璃预设（配置管理行与预设管理弹窗长按入口）。 */
     private fun showPresetRenameDialog(presetId: String, after: (() -> Unit)? = null) {
+        if (com.coloros16.liquidglass.glass.BuiltinGlassPresets.isBuiltin(presetId)) {
+            Toast.makeText(this, R.string.glass_preset_builtin_locked, Toast.LENGTH_SHORT).show()
+            return
+        }
         val preset = readGlassPresets().firstOrNull { it.id == presetId } ?: return
         val input = EditText(this).apply {
             inputType = InputType.TYPE_CLASS_TEXT
@@ -2884,6 +3295,12 @@ class SettingsActivity : AppCompatActivity() {
             format = { v -> getString(R.string.settings_mask_alpha_value, v) },
         )
 
+        // 跟随控制中心压暗：开=独立压暗+控制中心遮罩浓度叠加，收起归 0
+        bindGlassSwitch(
+            view, R.id.switchMaskDimFollow,
+            Prefs.KEY_MASK_DIM_FOLLOW_MASK, Prefs.DEFAULT_MASK_DIM_FOLLOW_MASK,
+        )
+
         // 遮罩下文字颜色 spinner（纯白/浅灰/灰 → ARGB int）
         bindMaskTextColorSpinner(view)
     }
@@ -3359,9 +3776,109 @@ class SettingsActivity : AppCompatActivity() {
             writeBoolean = { key, value -> writePrefBoolean(key, value) },
             openDisplay = { pushScreen("aod-display") },
             openConfigs = { pushScreen("aod-configs") },
+            openPage = { pageId -> pushScreen("aodui/$pageId") },
         )
         view.tag = controller
         controller.bind()
+    }
+
+    /** 息屏 / 锁屏 / 桌面 分组设置页：按声明式清单建控件，改动写回效果配置文本。 */
+    private fun bindAodSettingsPage(view: View, pageId: String) {
+        val existing = view.tag as? AodSettingsController
+        if (existing != null) {
+            existing.refresh()
+            return
+        }
+        val page = AodSettingsPages.of(this, pageId)
+        if (page == null) {
+            logNavThrottled("aodui-missing", "aod settings page missing: $pageId")
+            return
+        }
+        val controller = AodSettingsController(
+            context = this,
+            root = view,
+            page = page,
+            readSettings = { readEffectSettings() },
+            writeSettings = { settings -> writeEffectSettings(settings) },
+            readBool = { key, default -> prefBoolean(key, default) },
+            writeBool = { key, value -> writePrefBoolean(key, value) },
+            push = { screenId -> pushScreen(screenId) },
+            scene3dActive = {
+                try {
+                    android.app.WallpaperManager.getInstance(this).wallpaperInfo != null
+                } catch (t: Throwable) {
+                    false
+                }
+            },
+            pickPhoto = { frame -> launchAodPhotoPicker(frame) },
+        )
+        view.tag = controller
+        controller.bind()
+    }
+
+    /** 锁屏 / 息屏编辑页：画布手势 + 布局配置落盘。 */
+    private fun bindAodEditPage(view: View, pageId: String) {
+        val existing = view.tag as? AodEditController
+        if (existing != null) {
+            existing.refresh()
+            return
+        }
+        val surface = if (pageId == AodSettingsPages.PAGE_AOD_EDIT) EditSurface.AOD else EditSurface.LOCK
+        val controller = AodEditController(
+            context = this,
+            root = view,
+            surface = surface,
+            readLayout = { target -> readLayoutSettings(target) },
+            writeLayout = { target, settings -> writeLayoutSettings(target, settings) },
+            openPreview = { pushScreen("aod-display") },
+        )
+        view.tag = controller
+        controller.bind()
+    }
+
+    /** 编辑配置读取：框架侧优先、回退本地 XML。 */
+    private fun readLayoutSettings(surface: EditSurface): LockLayoutSettings {
+        val fw = frameworkPrefs()
+        return if (fw != null) {
+            if (surface == EditSurface.AOD) LayoutConfigStore.readAod(fw) else LayoutConfigStore.readLock(fw)
+        } else {
+            if (surface == EditSurface.AOD) LayoutConfigStore.readAod(this) else LayoutConfigStore.readLock(this)
+        }
+    }
+
+    /** 编辑配置写入：本地权威 + 框架在线同步。 */
+    private fun writeLayoutSettings(surface: EditSurface, settings: LockLayoutSettings) {
+        val local = Prefs.read(this)
+        if (surface == EditSurface.AOD) {
+            LayoutConfigStore.writeAod(local, settings)
+        } else {
+            LayoutConfigStore.writeLock(local, settings)
+        }
+        val fw = frameworkPrefs() ?: return
+        try {
+            if (surface == EditSurface.AOD) {
+                LayoutConfigStore.writeAod(fw, settings)
+            } else {
+                LayoutConfigStore.writeLock(fw, settings)
+            }
+        } catch (t: Throwable) {
+            Lg.w(TAG, "layout config push failed", t)
+        }
+    }
+
+    /** 效果配置读取：框架侧优先、回退本地 XML；走 [EffectConfigStore] 单一入口（布尔总闸优先）。 */
+    private fun readEffectSettings(): EffectSettings =
+        EffectConfigStore.read(frameworkPrefs() ?: xmlPrefs)
+
+    /** 效果配置写入：本地权威 + 框架在线同步（配置文本与布尔总闸一次写完）。 */
+    private fun writeEffectSettings(settings: EffectSettings) {
+        EffectConfigStore.write(Prefs.read(this), settings)
+        val fw = frameworkPrefs() ?: return
+        try {
+            EffectConfigStore.write(fw, settings)
+        } catch (t: Throwable) {
+            Lg.w(TAG, "effect config push failed", t)
+        }
     }
 
     /** 显示设置：三态编辑器（预览 + 三态条 + 样式/壁纸/效果三钮）。 */
@@ -3380,6 +3897,12 @@ class SettingsActivity : AppCompatActivity() {
             writeString = { key, value -> writePrefString(key, value) },
             writeBoolean = { key, value -> writePrefBoolean(key, value) },
             close = { navigateUp() },
+            readSettings = { readEffectSettings() },
+            writeSettings = { settings -> writeEffectSettings(settings) },
+            readLayout = { target -> readLayoutSettings(target) },
+            writeLayout = { target, settings -> writeLayoutSettings(target, settings) },
+            pickPhoto = { frame -> launchAodPhotoPicker(frame) },
+            openScreen = { screenId -> pushScreen(screenId) },
         )
         view.tag = controller
         controller.bind()
@@ -3537,6 +4060,353 @@ class SettingsActivity : AppCompatActivity() {
         ActivityResultContracts.OpenDocument(),
     ) { uri -> uri?.let { confirmImport(it) } }
 
+    /** 壁纸素材导入当前请求的类型（image/video）。 */
+    private var pendingWallpaperImport: String? = null
+
+    private val wallpaperImportLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        val kind = pendingWallpaperImport
+        pendingWallpaperImport = null
+        if (uri != null && kind != null) importWallpaperMedia(uri, kind)
+    }
+
+    /** 息屏照片选择：true=相框前景照片，false=样式背景照片。 */
+    private var pendingAodPhotoFrame = false
+
+    private val aodPhotoLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri == null) return@registerForActivityResult
+        try {
+            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } catch (_: Throwable) {
+        }
+        val settings = readEffectSettings()
+        if (pendingAodPhotoFrame) settings.aodFramePhoto = uri.toString() else settings.aodPhoto = uri.toString()
+        writeEffectSettings(settings)
+        Lg.i(TAG, "aod photo picked frame=$pendingAodPhotoFrame uri=$uri")
+    }
+
+    private fun launchAodPhotoPicker(frame: Boolean) {
+        pendingAodPhotoFrame = frame
+        try {
+            aodPhotoLauncher.launch(arrayOf("image/*"))
+        } catch (t: Throwable) {
+            Lg.w(TAG, "aod photo picker failed", t)
+        }
+    }
+
+    // ------------------------------------------------------------ 壁纸服务 ------------------------------------------------------------
+
+    /** 壁纸分类：3D 相机曲线、2D 模式/特效与素材导入。 */
+    private fun bindWallpaper(view: View) {
+        view.findViewById<TextView>(R.id.infoWp3d)?.text = getString(R.string.wp_3d_desc)
+        view.findViewById<TextView>(R.id.infoWp2d)?.text = getString(R.string.wp_2d_desc)
+
+        view.findViewById<View>(R.id.btnSetWallpaper3d)?.setOnClickListener {
+            launchWallpaperPicker(Lg3DWallpaperService::class.java.name)
+        }
+        view.findViewById<View>(R.id.btnSetWallpaper2d)?.setOnClickListener {
+            launchWallpaperPicker(Lg2DWallpaperService::class.java.name)
+        }
+
+        val curveIds = listOf(
+            CameraPaths.ORBIT,
+            CameraPaths.DOLLY,
+            CameraPaths.RISE,
+            CameraPaths.DRIFT,
+            CameraPaths.STILL,
+            CameraPaths.CUSTOM,
+        )
+        val curveLabels = listOf(
+            getString(R.string.wp_curve_orbit),
+            getString(R.string.wp_curve_dolly),
+            getString(R.string.wp_curve_rise),
+            getString(R.string.wp_curve_drift),
+            getString(R.string.wp_curve_still),
+            getString(R.string.wp_curve_custom),
+        )
+        val curveSpinner = view.findViewById<Spinner>(R.id.spinnerCameraCurve)
+        curveSpinner.adapter = ArrayAdapter(
+            this@SettingsActivity,
+            android.R.layout.simple_spinner_item,
+            curveLabels,
+        ).apply {
+            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        }
+        val storedCurve = frameworkPrefs()?.getString(Prefs.KEY_WALLPAPER_3D_CURVE, Prefs.DEFAULT_WALLPAPER_3D_CURVE)
+            ?: xmlPrefs.getString(Prefs.KEY_WALLPAPER_3D_CURVE, Prefs.DEFAULT_WALLPAPER_3D_CURVE)
+        curveSpinner.setSelection(curveIds.indexOf(storedCurve).coerceAtLeast(0))
+        curveSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, selected: View?, position: Int, id: Long) {
+                val curveId = curveIds[position]
+                if (curveId == CameraPaths.CUSTOM) {
+                    val text = frameworkPrefs()?.getString(Prefs.KEY_WALLPAPER_3D_CUSTOM, null)
+                        ?: xmlPrefs.getString(Prefs.KEY_WALLPAPER_3D_CUSTOM, null)
+                    if (CameraPathSpec.parse(text) == null) {
+                        Toast.makeText(this@SettingsActivity, R.string.wp_3d_need_custom, Toast.LENGTH_SHORT).show()
+                    }
+                }
+                writePrefString(Prefs.KEY_WALLPAPER_3D_CURVE, curveId)
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) {
+            }
+        }
+
+        bindIntSeekBarStep(
+            view.findViewById(R.id.seek3dCycle),
+            view.findViewById(R.id.tv3dCycleValue),
+            Prefs.KEY_WALLPAPER_3D_CYCLE_MS,
+            Prefs.DEFAULT_WALLPAPER_3D_CYCLE_MS,
+            (Prefs.WALLPAPER_3D_CYCLE_MAX_MS - Prefs.WALLPAPER_3D_CYCLE_MIN_MS) / 1000,
+            1000,
+            Prefs.WALLPAPER_3D_CYCLE_MIN_MS,
+        ) { "${it / 1000} 秒" }
+
+        bindFloatSeekBar(
+            view.findViewById(R.id.seek3dSpeed),
+            view.findViewById(R.id.tv3dSpeedValue),
+            Prefs.KEY_WALLPAPER_3D_SPEED,
+            Prefs.DEFAULT_WALLPAPER_3D_SPEED,
+            { 0.25f + it * 0.025f },
+            { ((it - 0.25f) / 0.025f).toInt().coerceIn(0, 110) },
+            { "%.2fx".format(it) },
+        )
+
+        bindFloatSeekBar(
+            view.findViewById(R.id.seek3dParallax),
+            view.findViewById(R.id.tv3dParallaxValue),
+            Prefs.KEY_WALLPAPER_3D_PARALLAX,
+            Prefs.DEFAULT_WALLPAPER_3D_PARALLAX,
+            { it / 100f },
+            { (it * 100f).toInt().coerceIn(0, 100) },
+            { "${(it * 100).toInt()}%" },
+        )
+
+        view.findViewById<View>(R.id.btnEditCameraPath)?.setOnClickListener {
+            showCameraPathEditor(curveSpinner)
+        }
+        view.findViewById<View>(R.id.btnResetCameraPath)?.setOnClickListener {
+            writePrefString(Prefs.KEY_WALLPAPER_3D_CUSTOM, CameraPathSpec.format(CameraPaths.orbit()))
+            writePrefString(Prefs.KEY_WALLPAPER_3D_CURVE, CameraPaths.ORBIT)
+            curveSpinner.setSelection(0)
+        }
+
+        val modeIds = listOf(
+            WallpaperSettings.MODE_IMAGE,
+            WallpaperSettings.MODE_VIDEO,
+            WallpaperSettings.MODE_EFFECT,
+        )
+        val modeLabels = listOf(
+            getString(R.string.wp_mode_image),
+            getString(R.string.wp_mode_video),
+            getString(R.string.wp_mode_effect),
+        )
+        val modeSpinner = view.findViewById<Spinner>(R.id.spinner2dMode)
+        modeSpinner.adapter = ArrayAdapter(
+            this@SettingsActivity,
+            android.R.layout.simple_spinner_item,
+            modeLabels,
+        ).apply {
+            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        }
+        val storedMode = frameworkPrefs()?.getString(Prefs.KEY_WALLPAPER_2D_MODE, Prefs.DEFAULT_WALLPAPER_2D_MODE)
+            ?: xmlPrefs.getString(Prefs.KEY_WALLPAPER_2D_MODE, Prefs.DEFAULT_WALLPAPER_2D_MODE)
+        modeSpinner.setSelection(modeIds.indexOf(storedMode).coerceAtLeast(0))
+        modeSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, selected: View?, position: Int, id: Long) {
+                writePrefString(Prefs.KEY_WALLPAPER_2D_MODE, modeIds[position])
+                refreshWallpaperSourceText(view)
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) {
+            }
+        }
+
+        val effectIds = listOf(
+            WallpaperSettings.EFFECT_AURORA,
+            WallpaperSettings.EFFECT_STARFIELD,
+            WallpaperSettings.EFFECT_FLOW,
+        )
+        val effectLabels = listOf(
+            getString(R.string.wp_effect_aurora),
+            getString(R.string.wp_effect_starfield),
+            getString(R.string.wp_effect_flow),
+        )
+        val effectSpinner = view.findViewById<Spinner>(R.id.spinner2dEffect)
+        effectSpinner.adapter = ArrayAdapter(
+            this@SettingsActivity,
+            android.R.layout.simple_spinner_item,
+            effectLabels,
+        ).apply {
+            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        }
+        val storedEffect = frameworkPrefs()?.getString(Prefs.KEY_WALLPAPER_2D_EFFECT, Prefs.DEFAULT_WALLPAPER_2D_EFFECT)
+            ?: xmlPrefs.getString(Prefs.KEY_WALLPAPER_2D_EFFECT, Prefs.DEFAULT_WALLPAPER_2D_EFFECT)
+        effectSpinner.setSelection(effectIds.indexOf(storedEffect).coerceAtLeast(0))
+        effectSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, selected: View?, position: Int, id: Long) {
+                writePrefString(Prefs.KEY_WALLPAPER_2D_EFFECT, effectIds[position])
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) {
+            }
+        }
+
+        view.findViewById<View>(R.id.btnImportImage)?.setOnClickListener {
+            pendingWallpaperImport = WallpaperSettings.MODE_IMAGE
+            wallpaperImportLauncher.launch(arrayOf("image/*"))
+        }
+        view.findViewById<View>(R.id.btnImportVideo)?.setOnClickListener {
+            pendingWallpaperImport = WallpaperSettings.MODE_VIDEO
+            wallpaperImportLauncher.launch(arrayOf("video/*"))
+        }
+
+        bindFloatSeekBar(
+            view.findViewById(R.id.seek2dParallax),
+            view.findViewById(R.id.tv2dParallaxValue),
+            Prefs.KEY_WALLPAPER_2D_PARALLAX,
+            Prefs.DEFAULT_WALLPAPER_2D_PARALLAX,
+            { it / 100f },
+            { (it * 100f).toInt().coerceIn(0, 100) },
+            { "${(it * 100).toInt()}%" },
+        )
+
+        refreshWallpaperSourceText(view)
+    }
+
+    private fun launchWallpaperPicker(serviceClassName: String) {
+        val component = ComponentName(this, serviceClassName)
+        val direct = Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER).apply {
+            putExtra(WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT, component)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        try {
+            startActivity(direct)
+            Lg.i(TAG, "wallpaper picker direct $serviceClassName")
+            return
+        } catch (t: Throwable) {
+            Lg.w(TAG, "wallpaper picker direct failed: ${t.message}")
+        }
+        try {
+            startActivity(Intent(WallpaperManager.ACTION_LIVE_WALLPAPER_CHOOSER).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            Lg.i(TAG, "wallpaper picker chooser")
+        } catch (t: Throwable) {
+            Lg.e(TAG, "wallpaper picker unavailable", t)
+            Toast.makeText(this, R.string.wp_picker_failed, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun refreshWallpaperSourceText(view: View) {
+        val target = view.findViewById<TextView>(R.id.tv2dSource) ?: return
+        val path = frameworkPrefs()?.getString(Prefs.KEY_WALLPAPER_2D_SOURCE, null)
+            ?: xmlPrefs.getString(Prefs.KEY_WALLPAPER_2D_SOURCE, null)
+        val file = path?.let { File(it) }?.takeIf { it.isFile }
+        if (file == null) {
+            target.text = getString(R.string.wp_2d_source_none)
+            return
+        }
+        val mode = frameworkPrefs()?.getString(Prefs.KEY_WALLPAPER_2D_MODE, Prefs.DEFAULT_WALLPAPER_2D_MODE)
+            ?: xmlPrefs.getString(Prefs.KEY_WALLPAPER_2D_MODE, Prefs.DEFAULT_WALLPAPER_2D_MODE)
+        val modeLabel = when (mode) {
+            WallpaperSettings.MODE_IMAGE -> getString(R.string.wp_mode_image)
+            WallpaperSettings.MODE_VIDEO -> getString(R.string.wp_mode_video)
+            else -> getString(R.string.wp_mode_effect)
+        }
+        val sizeMb = file.length() / (1024f * 1024f)
+        target.text = getString(R.string.wp_2d_source_fmt, "$modeLabel · ${"%.1f".format(sizeMb)} MB")
+    }
+
+    private fun importWallpaperMedia(uri: Uri, kind: String) {
+        val dir = File(filesDir, "wallpaper2d")
+        if (!dir.isDirectory && !dir.mkdirs()) {
+            Toast.makeText(this, R.string.wp_import_fail, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val target = File(dir, "source.bin")
+        val temp = File(dir, "source.tmp")
+        Thread {
+            val ok = try {
+                val copied = contentResolver.openInputStream(uri)?.use { input ->
+                    temp.outputStream().use { output -> input.copyTo(output) }
+                    true
+                } ?: false
+                if (copied && temp.isFile && temp.length() > 0L) {
+                    if (target.exists() && !target.delete()) {
+                        temp.delete()
+                        false
+                    } else {
+                        temp.renameTo(target) && target.isFile
+                    }
+                } else {
+                    temp.delete()
+                    false
+                }
+            } catch (t: Throwable) {
+                Lg.e(TAG, "wallpaper media import failed", t)
+                temp.delete()
+                false
+            }
+            runOnUiThread {
+                if (ok) {
+                    putConfig(Prefs.KEY_WALLPAPER_2D_SOURCE) {
+                        it.putString(Prefs.KEY_WALLPAPER_2D_SOURCE, target.absolutePath)
+                            .putString(Prefs.KEY_WALLPAPER_2D_MODE, kind)
+                            .apply()
+                    }
+                    Lg.i(TAG, "wallpaper media imported kind=$kind path=${target.absolutePath} size=${target.length()}")
+                    Toast.makeText(this, R.string.wp_import_ok, Toast.LENGTH_SHORT).show()
+                    currentPage()?.let { page ->
+                        refreshWallpaperSourceText(page)
+                        val modeIds = listOf(
+                            WallpaperSettings.MODE_IMAGE,
+                            WallpaperSettings.MODE_VIDEO,
+                            WallpaperSettings.MODE_EFFECT,
+                        )
+                        page.findViewById<Spinner>(R.id.spinner2dMode)?.setSelection(modeIds.indexOf(kind).coerceAtLeast(0))
+                    }
+                } else {
+                    Toast.makeText(this, R.string.wp_import_fail, Toast.LENGTH_SHORT).show()
+                }
+            }
+        }.start()
+    }
+
+    private fun showCameraPathEditor(curveSpinner: Spinner) {
+        val stored = frameworkPrefs()?.getString(Prefs.KEY_WALLPAPER_3D_CUSTOM, null)
+            ?: xmlPrefs.getString(Prefs.KEY_WALLPAPER_3D_CUSTOM, null)
+        val seed = if (CameraPathSpec.parse(stored) != null) stored!! else CameraPathSpec.format(CameraPaths.orbit())
+        val pad = (16 * resources.displayMetrics.density).toInt()
+        val input = EditText(this).apply {
+            setText(seed)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            minLines = 8
+            gravity = Gravity.TOP or Gravity.START
+            setPadding(pad, pad, pad, pad)
+            typeface = Typeface.MONOSPACE
+            textSize = 12f
+        }
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.wp_3d_edit_title)
+            .setMessage(R.string.wp_3d_edit_hint)
+            .setView(input)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                val text = input.text?.toString().orEmpty()
+                if (CameraPathSpec.parse(text) == null) {
+                    Toast.makeText(this, R.string.wp_3d_edit_invalid, Toast.LENGTH_SHORT).show()
+                } else {
+                    writePrefString(Prefs.KEY_WALLPAPER_3D_CUSTOM, text)
+                    writePrefString(Prefs.KEY_WALLPAPER_3D_CURVE, CameraPaths.CUSTOM)
+                    curveSpinner.setSelection(5)
+                    Toast.makeText(this, R.string.wp_3d_edit_saved, Toast.LENGTH_SHORT).show()
+                }
+            }
+            .show()
+    }
+
     /** 配置分类：导出/导入两行按钮。 */
     private fun bindConfig(view: View) {
         view.findViewById<View>(R.id.configExportRow).setOnClickListener {
@@ -3664,6 +4534,18 @@ class SettingsActivity : AppCompatActivity() {
 
     /** 状态栏定制：总控 / 图标显隐 / 双卡与边距 / 时钟与排序（键族 Prefs.KEY_STATUSBAR_*）。 */
     private fun bindStatusBar(view: View) {
+        view.findViewById<View>(R.id.infoSbControl)?.setOnClickListener {
+            showConceptInfo(R.string.sb_group_control, R.string.info_sb_control)
+        }
+        view.findViewById<View>(R.id.infoSbIcons)?.setOnClickListener {
+            showConceptInfo(R.string.sb_group_icons, R.string.info_sb_icons)
+        }
+        view.findViewById<View>(R.id.infoSbDual)?.setOnClickListener {
+            showConceptInfo(R.string.sb_group_dual, R.string.info_sb_dual)
+        }
+        view.findViewById<View>(R.id.infoSbClock)?.setOnClickListener {
+            showConceptInfo(R.string.sb_group_clock, R.string.info_sb_clock)
+        }
         bindGlassSwitch(view, R.id.switchSbEnable, Prefs.KEY_STATUSBAR_ENABLE, Prefs.DEFAULT_STATUSBAR_ENABLE)
         val simplifyPreset = listOf(
             Prefs.KEY_STATUSBAR_HIDE_NOTIFICATION_ICONS,
@@ -3760,7 +4642,7 @@ class SettingsActivity : AppCompatActivity() {
 
     /** 图标排序：全量真实槽横滑浏览，长按拖动换位、松手吸附写回；空串 = 系统顺序。 */
     private fun bindStatusBarOrder(view: View) {
-        val defaults = listOf("wifi", "mobile", "alarm_clock", "accessibility", "safe", "mute", "battery")
+        val defaults = listOf("wifi", "mobile", "alarm_clock", "accessibility", "safe", "mute")
         val nameRes = mapOf(
             "wifi" to R.string.sb_slot_wifi,
             "mobile" to R.string.sb_slot_mobile,
@@ -3768,7 +4650,6 @@ class SettingsActivity : AppCompatActivity() {
             "accessibility" to R.string.sb_slot_accessibility,
             "safe" to R.string.sb_slot_safe,
             "mute" to R.string.sb_slot_mute,
-            "battery" to R.string.sb_slot_battery,
             "block_banner" to R.string.sb_slot_block_banner,
             "satellite" to R.string.sb_slot_satellite,
             "logging" to R.string.sb_slot_logging,
@@ -3795,14 +4676,13 @@ class SettingsActivity : AppCompatActivity() {
             "accessibility" to R.drawable.ic_sb_slot_accessibility,
             "safe" to R.drawable.ic_sb_slot_safe,
             "mute" to R.drawable.ic_sb_slot_mute,
-            "battery" to R.drawable.ic_sb_slot_battery,
         )
         val current = (frameworkPrefs()?.getString(KEY_SB_ICON_ORDER_CURRENT, null)
             ?: xmlPrefs.getString(KEY_SB_ICON_ORDER_CURRENT, null)).orEmpty()
         val stored = (frameworkPrefs()?.getString(Prefs.KEY_STATUSBAR_ICON_ORDER, null)
             ?: xmlPrefs.getString(Prefs.KEY_STATUSBAR_ICON_ORDER, null)).orEmpty()
-        val curSeq = StatusBarSettings.parseOrder(current)
-        val storedSeq = StatusBarSettings.parseOrder(stored)
+        val curSeq = StatusBarSettings.parseOrder(current).filter { it != "battery" }
+        val storedSeq = StatusBarSettings.parseOrder(stored).filter { it != "battery" }
         val base = storedSeq.ifEmpty { curSeq }
         val order: MutableList<String> = if (base.isEmpty()) {
             defaults.toMutableList()
@@ -3903,9 +4783,10 @@ class SettingsActivity : AppCompatActivity() {
                 rebuild()
             }.start()
         }
-        strip.setOnTouchListener { _, event ->
+        hsv.setOnTouchListener { _, event ->
             when (event.actionMasked) {
                 android.view.MotionEvent.ACTION_DOWN -> {
+                    strip.parent?.requestDisallowInterceptTouchEvent(true)
                     downX = event.x
                     downY = event.y
                     scrollStart = hsv.scrollX
@@ -3975,6 +4856,7 @@ class SettingsActivity : AppCompatActivity() {
                     scrolling = false
                     if (dragView != null) endDrag(commit = true)
                     else cancelPending()
+                    strip.parent?.requestDisallowInterceptTouchEvent(false)
                 }
             }
             true
@@ -4061,6 +4943,14 @@ class SettingsActivity : AppCompatActivity() {
         bindGlassSwitch(
             view, R.id.switchSettingsEnableLogs,
             Prefs.KEY_ENABLE_LOGS, Prefs.DEFAULT_ENABLE_LOGS,
+        )
+        bindGlassSwitch(
+            view, R.id.switchTileOnBlueGlass,
+            Prefs.KEY_TILE_ON_BLUE_GLASS, Prefs.DEFAULT_TILE_ON_BLUE_GLASS,
+        )
+        bindGlassSwitch(
+            view, R.id.switchDoubleLayerGlass,
+            Prefs.KEY_DOUBLE_LAYER_GLASS, Prefs.DEFAULT_DOUBLE_LAYER_GLASS,
         )
 
         val configRow = setupRow(
@@ -4312,6 +5202,12 @@ class SettingsActivity : AppCompatActivity() {
         valueText.text = format(initial)
         onChanged?.invoke(initial)
         seek.syncTrackLevel()
+        seek.post {
+            val before = seek.progressDrawable?.level ?: -1
+            seek.syncTrackLevel()
+            val after = seek.progressDrawable?.level ?: -1
+            if (before != after) Lg.i(TAG, "seek level corrected: $before -> $after progress=${seek.progress}")
+        }
         seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(sb: SeekBar, progress: Int, fromUser: Boolean) {
                 sb.syncTrackLevel()
@@ -4413,6 +5309,12 @@ class SettingsActivity : AppCompatActivity() {
         seek.progress = progress
         valueText.text = format(progress * step + offset)
         seek.syncTrackLevel()
+        seek.post {
+            val before = seek.progressDrawable?.level ?: -1
+            seek.syncTrackLevel()
+            val after = seek.progressDrawable?.level ?: -1
+            if (before != after) Lg.i(TAG, "seek level corrected: $before -> $after progress=${seek.progress}")
+        }
         seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(sb: SeekBar, progress: Int, fromUser: Boolean) {
                 sb.syncTrackLevel()
@@ -4580,15 +5482,37 @@ class LiquidGlassPreviewView @JvmOverloads constructor(
     var highlightWidth = Prefs.DEFAULT_HIGHLIGHT_WIDTH
     var highlightFloor = Prefs.DEFAULT_HIGHLIGHT_FLOOR
     var highlightInnerAtt = Prefs.DEFAULT_HIGHLIGHT_INNER_ATT
-    var surfacePolish = Prefs.DEFAULT_HIGHLIGHT_ENHANCE
+    var surfacePolish = true
     var innerGlow = Prefs.DEFAULT_INNER_GLOW
     var edgeStroke = Prefs.DEFAULT_EDGE_STROKE
     var edgeStrokeWidth = Prefs.DEFAULT_EDGE_STROKE_WIDTH
     var maskGlassDim = Prefs.DEFAULT_MASK_GLASS_DIM
     var lightAngle = Prefs.DEFAULT_LIGHT_ANGLE
 
+    /** 浅色底开关：切换时重建背景样图（size 未定则等 onSizeChanged 带上当前值重建）。 */
+    var lightBg: Boolean = false
+        set(value) {
+            if (field == value) return
+            field = value
+            if (width > 0 && height > 0) buildBackground(width, height)
+            invalidate()
+        }
+
+    /** 点击预览窗切底时通知外部（写 Pref / 刷新兄弟文字色）。 */
+    var onLightBgToggle: ((Boolean) -> Unit)? = null
+
+    init {
+        isClickable = true
+    }
+
     /** 参数变了由外部调 [refresh] 重绘；背景滚动则由 [onDraw] 自续帧驱动。 */
     fun refresh() = invalidate()
+
+    override fun performClick(): Boolean {
+        lightBg = !lightBg
+        onLightBgToggle?.invoke(lightBg)
+        return super.performClick()
+    }
 
     private val density = resources.displayMetrics.density
     private val bgPaint = Paint(Paint.FILTER_BITMAP_FLAG)
@@ -4751,9 +5675,8 @@ class LiquidGlassPreviewView @JvmOverloads constructor(
         val base = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             shader = LinearGradient(
                 0f, 0f, bw.toFloat(), h.toFloat(),
-                intArrayOf(
-                    0xFF1A2038.toInt(), 0xFF0C0E14.toInt(),
-                ),
+                if (lightBg) intArrayOf(0xFFF3F5F9.toInt(), 0xFFDDE2EA.toInt())
+                else intArrayOf(0xFF1A2038.toInt(), 0xFF0C0E14.toInt()),
                 null, Shader.TileMode.CLAMP,
             )
         }
@@ -4774,7 +5697,7 @@ class LiquidGlassPreviewView @JvmOverloads constructor(
         }
 
         val grid = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = 0x22FFFFFF
+            color = if (lightBg) 0x22000000 else 0x22FFFFFF
             strokeWidth = 2f
         }
         val step = (h * 0.25f).coerceAtLeast(8f)

@@ -32,6 +32,9 @@ object Prefs {
     /** 模块总开关，默认关闭（false = 模块完全不生效） */
     const val KEY_MASTER = "master_enabled"
 
+    /** 循环崩守卫账本：窗口内到达安装点的 SystemUI pid 时间戳表（`ts,pid;ts,pid`），触发后清空。 */
+    const val KEY_CRASH_GUARD_PIDS = "crash_guard_pids"
+
     /** [2026-10-13] 玻璃渲染总开关：false = 自研液态玻璃 shader 完全不套（回退系统模糊），
      *  其余功能（倾斜/飞入/热重载等）不受影响。默认开（保持现行为）。500ms TTL 直读生效。 */
     const val KEY_GLASS_ENABLE = "glass_enable"
@@ -105,8 +108,7 @@ object Prefs {
      *  必然经过与光源垂直处 → 原实现该处高光精确归零（弧线约 60% 跨度消失）。保底后弧线保留
      *  基础亮度、不再断开；0 = 完全回退旧行为。详见 doc/spec/67。 */
     const val KEY_HIGHLIGHT_FLOOR = "highlight_floor"
-    /** 高光增强（默认开）：开 = 所有玻璃元素改用精修细高光带（宽度随元素短边收敛）；
-     *  关 = 回退按 highlight_width 的固定宽带。改动 ≤1s 生效（hook 端 TTL 缓存）。 */
+    /** 高光增强（配置参数，0/1）：精修细高光带 / 按 highlight_width 的固定宽带。 */
     const val KEY_HIGHLIGHT_ENHANCE = "highlight_enhance"
     const val DEFAULT_HIGHLIGHT_ENHANCE = true
     /** [2026-10-13] 内侧高光衰减（0~1，默认 0=现状）：band 内半向玻璃深处再衰减，1=只剩贴边亮线。 */
@@ -122,6 +124,12 @@ object Prefs {
     /** 外描边宽度 px（默认 1.2）：自可见边界向内渐隐的距离。 */
     const val KEY_EDGE_STROKE_WIDTH = "edge_stroke_width"
     const val DEFAULT_EDGE_STROKE_WIDTH = 1.2f
+    /** 点按位置发光总开关（默认关）：按住玻璃元素时触点处泛柔光，松手淡出。 */
+    const val KEY_PRESS_GLOW = "press_glow_enabled"
+    const val DEFAULT_PRESS_GLOW = false
+    /** 点按发光强度 0~1（默认 0.6）。 */
+    const val KEY_PRESS_GLOW_STRENGTH = "press_glow_strength"
+    const val DEFAULT_PRESS_GLOW_STRENGTH = 0.6f
     const val KEY_VIBRANCY = "vibrancy"
     const val KEY_LIGHT_ANGLE = "light_angle"
     const val KEY_PARALLAX_X = "parallax_x"
@@ -386,6 +394,17 @@ object Prefs {
     /** 玻璃内压暗默认值（0 = 不压暗，玻璃保持亮） */
     const val DEFAULT_MASK_GLASS_DIM = 0f
 
+    /** 压暗自动跟随遮罩（默认开）：true = 玻璃内压暗 × 遮罩浓度（behindScrimAlpha，
+     *  控制中心未下拉=0），非下拉控件不被意外压暗；false = 压暗恒定生效（旧行为）。 */
+    const val KEY_MASK_DIM_FOLLOW_MASK = "mask_dim_follow_mask"
+    /** 压暗自动跟随遮罩默认值（true = 跟随遮罩） */
+    const val DEFAULT_MASK_DIM_FOLLOW_MASK = true
+
+    /** 预览窗浅色底（默认 false = 深色底）：true = 白底样图，点击预览窗互切。 */
+    const val KEY_PREVIEW_LIGHT_BG = "preview_light_bg"
+    /** 预览窗浅色底默认值（false = 深色底） */
+    const val DEFAULT_PREVIEW_LIGHT_BG = false
+
     /** 遮罩下文字统一颜色（ARGB int，默认纯白 0xFFFFFFFF）。仅对中性色文字生效（app 彩色字尊重 app）。
      *  改动需重启 SystemUI 生效（hook 端 install 时读取并缓存）。 */
     const val KEY_MASK_TEXT_COLOR = "mask_text_color"
@@ -432,6 +451,16 @@ object Prefs {
     const val KEY_REMOVE_PANEL_MIX_COLOR = "remove_panel_mix_color"
     /** 移除面板材质底色默认值（true = 移除那层灰） */
     const val DEFAULT_REMOVE_PANEL_MIX_COLOR = true
+
+    // ---------- QS 磁贴玻璃两层渲染开关 ----------
+    /** 开启态蓝色透明：true = 开启状态磁贴保留系统半透明状态色覆盖层（蓝色透明），
+     *  false = 跳过该覆盖层只显玻璃（默认，与现状一致）。 */
+    const val KEY_TILE_ON_BLUE_GLASS = "tile_on_blue_glass"
+    const val DEFAULT_TILE_ON_BLUE_GLASS = false
+    /** 双层玻璃渲染：true = 允许磁贴内层玻璃与外层叠加渲染（默认，与现状一致）；
+     *  false = 内层不再走模块自绘玻璃，回退系统原样。 */
+    const val KEY_DOUBLE_LAYER_GLASS = "double_layer_glass"
+    const val DEFAULT_DOUBLE_LAYER_GLASS = true
 
     // ---------- 桌面 Dock 栏液态玻璃化（doc/spec/66，2026-09-16） ----------
     /** 桌面 Dock 栏（常驻图标条）液态玻璃背景。默认 **false**（与模块「默认全关」原则一致）。
@@ -590,6 +619,42 @@ object Prefs {
     const val KEY_ALIVE_AOD_CONFIGS = "alive_aod_configs"
     /** 当前选中的配置 id（模块本地 UI 态，不进框架侧）。 */
     const val KEY_ALIVE_AOD_CONFIG_ID = "alive_aod_config_id"
+
+    // ---------- 效果体系底层（doc/spec/166） ----------
+    /** 是否允许 AOD 动态变化：总闸，控制息屏旋转/混色/照片倾斜与锁屏特殊效果门槛。默认 false。 */
+    const val KEY_EFFECT_ALLOW_AOD_DYNAMIC = "effect_allow_aod_dynamic"
+    /** 允许 AOD 动态变化默认值（false = 静态）。 */
+    const val DEFAULT_EFFECT_ALLOW_AOD_DYNAMIC = false
+
+    /** 效果体系配置（版本化文本，见 EffectSettings.toText/parse）；空串 = 全默认。 */
+    const val KEY_EFFECT_CONFIG = "effect_config"
+    /** 效果体系配置默认值（空 = 默认）。 */
+    const val DEFAULT_EFFECT_CONFIG = ""
+
+    // ---------- 锁屏 / 息屏编辑（doc/spec/168） ----------
+    /** 锁屏编辑配置（版本化文本，见 LockLayoutSettings.toText/parse）；空串 = 全默认。 */
+    const val KEY_LOCK_LAYOUT_CONFIG = "lock_layout_config"
+    /** 息屏编辑配置（版本化文本，仅水平位置生效）；空串 = 全默认。 */
+    const val KEY_AOD_LAYOUT_CONFIG = "aod_layout_config"
+    /** 编辑配置默认值（空 = 默认）。 */
+    const val DEFAULT_LAYOUT_CONFIG = ""
+
+    // ---------- 锁屏玻璃：时钟字形 / 小组件卡片 / 底部圆钮 ----------
+    /** 锁屏玻璃总开关；关闭时锁屏恢复系统原生外观。 */
+    const val KEY_KEYGUARD_GLASS = "keyguard_glass_enable"
+    const val DEFAULT_KEYGUARD_GLASS = true
+    /** 锁屏时钟字形玻璃 */
+    const val KEY_KEYGUARD_GLASS_CLOCK = "keyguard_glass_clock"
+    const val DEFAULT_KEYGUARD_GLASS_CLOCK = true
+    /** 锁屏日期字形玻璃 */
+    const val KEY_KEYGUARD_GLASS_DATE = "keyguard_glass_date"
+    const val DEFAULT_KEYGUARD_GLASS_DATE = true
+    /** 锁屏小组件卡片玻璃 */
+    const val KEY_KEYGUARD_GLASS_CARDS = "keyguard_glass_cards"
+    const val DEFAULT_KEYGUARD_GLASS_CARDS = true
+    /** 底部快捷圆钮玻璃 */
+    const val KEY_KEYGUARD_GLASS_SHORTCUTS = "keyguard_glass_shortcuts"
+    const val DEFAULT_KEYGUARD_GLASS_SHORTCUTS = true
 
     // ---------- 第三方 App 玻璃化（相册/计算器/智能侧边栏） ----------
     /** 相册玻璃化：拦截 App 内的视图背景模糊（RenderEffect / 窗口模糊 drawable）改画液态玻璃。
@@ -860,6 +925,24 @@ object Prefs {
             try {
                 prefs.getFloat(key, default.toFloat()).toInt()
             } catch (t2: Throwable) {
+                default
+            }
+        }
+    }
+
+    /**
+     * float 配置兼容读取：先 getFloat；存量数据可能是 Boolean → getFloat 抛 ClassCastException
+     * → 回退 getBoolean 转 0/1。防单键脏值炸掉整段材质参数读取。
+     */
+    fun readFloatCompat(prefs: SharedPreferences, key: String, default: Float): Float {
+        return try {
+            prefs.getFloat(key, default)
+        } catch (t: Throwable) {
+            Lg.w(TAG, "prefs float type mismatch: $key, try boolean", t)
+            try {
+                if (prefs.getBoolean(key, default > 0.5f)) 1f else 0f
+            } catch (t2: Throwable) {
+                Lg.w(TAG, "prefs float read failed: $key, default $default", t2)
                 default
             }
         }
@@ -1471,4 +1554,35 @@ object Prefs {
     const val DEFAULT_STATUSBAR_DUO = false
     /** 只读回传：hook 侧实测的 statusIcons 当前 slot 顺序（逗号小写，与 KEY_STATUSBAR_ICON_ORDER 同格式）。 */
     const val KEY_STATUSBAR_ICON_ORDER_CURRENT = "statusbar_icon_order_current"
+
+    // ---------- 壁纸服务（3D 相机 / 2D） ----------
+    /** 3D 壁纸相机曲线 id：orbit/dolly/rise/drift/still/custom。 */
+    const val KEY_WALLPAPER_3D_CURVE = "wallpaper_3d_curve"
+    const val DEFAULT_WALLPAPER_3D_CURVE = "orbit"
+    /** 自定义相机曲线文本（每行 t,x,y,z,yaw,pitch,roll,fov）。 */
+    const val KEY_WALLPAPER_3D_CUSTOM = "wallpaper_3d_custom"
+    /** 相机曲线循环时长（毫秒）。 */
+    const val KEY_WALLPAPER_3D_CYCLE_MS = "wallpaper_3d_cycle_ms"
+    const val DEFAULT_WALLPAPER_3D_CYCLE_MS = 24000
+    const val WALLPAPER_3D_CYCLE_MIN_MS = 4000
+    const val WALLPAPER_3D_CYCLE_MAX_MS = 120000
+    /** 相机曲线播放速度倍率。 */
+    const val KEY_WALLPAPER_3D_SPEED = "wallpaper_3d_speed"
+    const val DEFAULT_WALLPAPER_3D_SPEED = 1.0f
+    const val WALLPAPER_3D_SPEED_MIN = 0.25f
+    const val WALLPAPER_3D_SPEED_MAX = 3.0f
+    /** 桌面滑动时相机横向视差强度（0..1）。 */
+    const val KEY_WALLPAPER_3D_PARALLAX = "wallpaper_3d_parallax"
+    const val DEFAULT_WALLPAPER_3D_PARALLAX = 0.6f
+    /** 2D 壁纸模式：image/video/effect。 */
+    const val KEY_WALLPAPER_2D_MODE = "wallpaper_2d_mode"
+    const val DEFAULT_WALLPAPER_2D_MODE = "effect"
+    /** 2D 动态特效：aurora/starfield/flow。 */
+    const val KEY_WALLPAPER_2D_EFFECT = "wallpaper_2d_effect"
+    const val DEFAULT_WALLPAPER_2D_EFFECT = "aurora"
+    /** 2D 壁纸素材的本地文件路径（导入后复制到应用私有目录）。 */
+    const val KEY_WALLPAPER_2D_SOURCE = "wallpaper_2d_source"
+    /** 2D 壁纸视差强度（0..1）。 */
+    const val KEY_WALLPAPER_2D_PARALLAX = "wallpaper_2d_parallax"
+    const val DEFAULT_WALLPAPER_2D_PARALLAX = 0.6f
 }

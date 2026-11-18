@@ -39,8 +39,10 @@ class SystemSceneMotionTest {
 
         SystemSceneMotion.sample(TransitionEdge.LOCK_TO_HOME, 0f, layers)
         assertEquals(SystemSceneMotion.WALLPAPER_SCALE_LOCK, layers.wallpaperScale, 0.0001f)
+        SystemSceneMotion.sample(TransitionEdge.LOCK_TO_HOME, 0.5f, layers)
+        assertEquals(SystemSceneMotion.WALLPAPER_SCALE_LOCK, layers.wallpaperScale, 0.0001f)
         SystemSceneMotion.sample(TransitionEdge.LOCK_TO_HOME, 1f, layers)
-        assertEquals(1f, layers.wallpaperScale, 0.0001f)
+        assertEquals(SystemSceneMotion.WALLPAPER_SCALE_LOCK, layers.wallpaperScale, 0.0001f)
 
         SystemSceneMotion.sample(TransitionEdge.AOD_TO_HOME, 0.5f, layers)
         assertEquals(1f, layers.wallpaperScale, 0.0001f)
@@ -79,7 +81,7 @@ class SystemSceneMotionTest {
         assertEquals(0f, layers.homeAlpha, 0.0001f)
 
         SystemSceneMotion.sampleTimeline(1f, layers)
-        assertEquals(1f, layers.wallpaperScale, 0.0001f)
+        assertEquals(SystemSceneMotion.WALLPAPER_SCALE_LOCK, layers.wallpaperScale, 0.0001f)
         assertEquals(1f, layers.homeAlpha, 0.0001f)
         assertEquals(0f, layers.lockAlpha, 0.0001f)
     }
@@ -89,7 +91,26 @@ class SystemSceneMotionTest {
         SystemSceneMotion.sampleTimeline(0.25f, layers)
         assertEquals(0.5f, layers.aodAlpha, 0.0001f)
         SystemSceneMotion.sampleTimeline(0.75f, layers)
-        assertEquals(1.05f, layers.wallpaperScale, 0.0001f)
+        assertEquals(SystemSceneMotion.WALLPAPER_SCALE_LOCK, layers.wallpaperScale, 0.0001f)
+    }
+
+    @Test
+    fun lockHomeWallpaperNeverScales() {
+        for (edge in listOf(TransitionEdge.LOCK_TO_HOME, TransitionEdge.HOME_TO_LOCK)) {
+            for (direct in listOf(false, true)) {
+                for (step in 0..20) {
+                    SystemSceneMotion.sample(edge, step / 20f, layers, direct)
+                    assertEquals(
+                        "$edge direct=$direct step=$step",
+                        SystemSceneMotion.WALLPAPER_SCALE_LOCK,
+                        layers.wallpaperScale,
+                        0.0001f,
+                    )
+                }
+            }
+        }
+        SystemSceneMotion.sampleTimeline(1f, layers)
+        assertEquals(SystemSceneMotion.WALLPAPER_SCALE_LOCK, layers.wallpaperScale, 0.0001f)
     }
 
     @Test

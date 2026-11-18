@@ -44,13 +44,12 @@
     <string name="settings_home_version">当前版本</string>
     <string name="settings_home_version_pool">适配版本池</string>
     <string name="settings_home_version_pool_desc">当前适配的系统版本</string>
-    <string name="settings_home_version_pool_value">C16 · C17</string>
+    <string name="settings_home_version_pool_value">系统界面 %1$s · 桌面 %2$s</string>
     <string name="settings_open_failed">打开失败，已复制链接</string>
 
     <!-- 功能页 -->
     <string name="settings_func_search_hint">搜索功能（中文名）</string>
     <string name="settings_func_group">功能分类</string>
-    <string name="settings_func_search_results">搜索结果</string>
     <string name="settings_func_hint">输入中文名即可快速找到功能。</string>
     <string name="settings_func_glass">玻璃</string>
     <string name="settings_func_glass_desc">绘制总控 · 预设 · 配置管理 · 组件分配 · 玻璃化对象</string>
@@ -91,6 +90,16 @@
     <string name="settings_preset_battery_desc">套用低画质参数，降低性能占用</string>
     <string name="settings_preset_apply">一键</string>
     <string name="settings_preset_appearance_applied">已套用高画质预设</string>
+    <string name="settings_preset_ios">iOS 预设</string>
+    <string name="settings_preset_ios_desc">点进选择性能 / 平衡 / 外观三档画质方案</string>
+    <string name="settings_preset_tier_performance">性能</string>
+    <string name="settings_preset_tier_performance_desc">低画质低占用，最流畅</string>
+    <string name="settings_preset_tier_balance">平衡</string>
+    <string name="settings_preset_tier_balance_desc">画质与性能折中</string>
+    <string name="settings_preset_tier_appearance">外观</string>
+    <string name="settings_preset_tier_appearance_desc">高画质与高采样，画面优先</string>
+    <string name="settings_preset_tier_applied">%1$s 档生效</string>
+    <string name="settings_preset_tier_current">当前</string>
     <string name="settings_preset_battery_applied">已套用省电预设</string>
     <string name="settings_preset_custom">自定义预设…</string>
     <string name="settings_preset_custom_desc">保存当前参数组合为新预设</string>
@@ -225,7 +234,11 @@
     <string name="settings_highlight_inner_att_value">%1$d%%</string>
     <string name="settings_highlight_inner_att_desc">控制高光向玻璃内部衰减的程度。0 为默认；越大，内侧高光越暗、内侧光越贴边。</string>
     <string name="settings_highlight_enhance">高光增强</string>
-    <string name="settings_highlight_enhance_desc">开启后所有玻璃改用更细的高光带，宽度随元素大小收敛；关闭则按高光宽度参数画固定宽带。</string>
+    <string name="settings_highlight_enhance_desc">当前配置是否使用增强高光（更细、随元素大小收敛）；关闭则按高光宽度参数画固定宽带。改动只作用于这套配置，使用其它配置的玻璃不受影响。</string>
+    <string name="settings_press_glow">点按发光</string>
+    <string name="settings_press_glow_desc">按住玻璃时，手指位置泛起柔光，松手淡出。</string>
+    <string name="settings_press_glow_strength">点按发光强度</string>
+    <string name="settings_press_glow_strength_value">%1$d%%</string>
     <string name="settings_inner_glow">内侧光</string>
     <string name="settings_inner_glow_value">%1$d%%</string>
     <string name="settings_inner_glow_desc">玻璃边缘向中心散发的柔光。0 表示关闭。</string>
@@ -303,6 +316,8 @@
     <string name="settings_mask_glass_dim">玻璃内压暗</string>
     <string name="settings_mask_glass_dim_value">%1$.2f</string>
     <string name="settings_mask_glass_dim_desc">玻璃内部背景的变暗程度。0 不变暗，1 全黑，默认 0。</string>
+    <string name="settings_mask_dim_follow">跟随控制中心压暗</string>
+    <string name="settings_mask_dim_follow_desc">只有下拉控制中心时才对控制中心的玻璃元素（含通知卡）应用压暗；收起后压暗归 0，不影响其它界面。</string>
     <string name="settings_mask_text_color">文字强制白颜色</string>
     <string name="settings_mask_text_color_white">纯白</string>
     <string name="settings_mask_text_color_lightgray">浅灰</string>
@@ -332,6 +347,10 @@
     <!-- 日志与诊断 -->
     <string name="settings_enable_logs">运行日志</string>
     <string name="settings_enable_logs_desc">关闭后 logcat 只保留错误日志。修改后需重启系统界面。</string>
+    <string name="settings_tile_on_blue_glass">开启态蓝色透明</string>
+    <string name="settings_tile_on_blue_glass_desc">开启状态的磁贴按半透明蓝色状态色叠加在玻璃上，呈现蓝色透明效果；关闭则只保留玻璃本身。</string>
+    <string name="settings_double_layer_glass">双层玻璃渲染</string>
+    <string name="settings_double_layer_glass_desc">允许卡片内外层玻璃叠加渲染（如卡片中嵌套卡片）；关闭后内层回退系统原样。</string>
     <string name="settings_engine_full_log">引擎全量日志</string>
     <string name="settings_engine_full_log_desc">排查引擎行为时打开，全量流水进 logcat，平时关闭省电防刷屏。</string>
     <string name="settings_ball_section">悬浮球</string>
@@ -512,6 +531,16 @@
     <string name="settings_alive_aod_glass">息屏玻璃效果</string>
     <string name="settings_alive_aod_glass_desc">息屏上的元素用液态玻璃质感呈现（折射、色散、高光）。</string>
 
+    <string name="settings_obj_lockscreen">锁屏</string>
+    <string name="settings_obj_lockscreen_desc">时钟 日期 小组件 底部圆钮</string>
+    <string name="settings_obj_lockscreen_hint">锁屏上的时钟数字、日期、小组件卡片与底部圆钮使用液态玻璃。关闭某项后该项恢复系统原生外观。</string>
+    <string name="settings_keyguard_glass">锁屏液态玻璃</string>
+    <string name="settings_keyguard_glass_desc">锁屏时钟数字、日期、小组件与底部圆钮换成液态玻璃。关闭后恢复系统原生外观。</string>
+    <string name="settings_keyguard_glass_clock">锁屏时钟</string>
+    <string name="settings_keyguard_glass_date">锁屏日期</string>
+    <string name="settings_keyguard_glass_cards">锁屏小组件</string>
+    <string name="settings_keyguard_glass_shortcuts">锁屏底部圆钮</string>
+
     <!-- 组件位置描述（类清单/管理对话框里「在哪里的」一句话） -->
     <string name="loc_blur_drawable">通知中心与控制中心的多类卡片共用背景</string>
     <string name="loc_base_drawable">桌面玻璃绘制基类</string>
@@ -587,6 +616,7 @@
     <string name="glass_preset_rename_title">重命名配置</string>
     <string name="glass_preset_renamed">已重命名</string>
     <string name="glass_preset_name_empty">名称不能为空</string>
+    <string name="glass_preset_builtin_locked">出厂风格档不可改名或删除，参数可自由调整。</string>
     <string name="glass_preset_class_hint">已被其他配置占用的类会置灰，需先在原配置取消勾选。</string>
     <string name="glass_preset_delete">删除配置</string>
     <string name="glass_preset_close">关闭</string>
@@ -640,7 +670,6 @@
     <string name="settings_aod_state_home">桌面</string>
     <string name="settings_aod_wallpaper">壁纸</string>
     <string name="settings_aod_style">样式</string>
-    <string name="settings_aod_effects">效果与其他</string>
     <string name="settings_aod_menu_group_takeover">接管</string>
     <string name="settings_aod_takeover_wallpaper">接管壁纸</string>
     <string name="settings_aod_takeover_wallpaper_desc">息屏与锁屏使用模块接管的壁纸。</string>
@@ -655,7 +684,7 @@
     <string name="settings_aod_configs_row_desc">管理保存过的配置</string>
     <string name="settings_aod_display_title">显示设置</string>
     <string name="settings_aod_configs_title">配置</string>
-    <string name="settings_aod_configs_hint">配置会保存在本机；点一下即应用，也可以重命名或删除。</string>
+    <string name="settings_aod_configs_hint">配置会保存在本机；点一下即应用，也可以重命名或删除。息屏、锁屏、桌面的效果、壁纸、样式与编辑都在「显示设置」预览页底部的圆钮里调整。</string>
     <string name="settings_aod_configs_add">＋ 新建配置</string>
     <string name="settings_aod_configs_empty">还没有配置。到显示设置点一条默认样式，就会新建一份配置。</string>
     <string name="settings_aod_config_current">当前</string>
@@ -682,19 +711,13 @@
     <string name="settings_aod_applied">已应用</string>
     <string name="settings_aod_restored">已恢复</string>
     <string name="settings_aod_import_unavailable">导入样式即将开放</string>
-    <string name="settings_aod_wallpaper_unavailable">壁纸设置即将开放</string>
-    <string name="settings_aod_effects_title">效果与其他</string>
-    <string name="settings_aod_effects_desc">页面内效果与其余设置</string>
-    <string name="settings_aod_wallpaper_title">壁纸</string>
-    <string name="settings_aod_wallpaper_desc">该态显示图片 / 背景素材</string>
-    <string name="settings_aod_wallpaper_static">跟随系统壁纸</string>
-    <string name="settings_aod_wallpaper_live">深色纯黑</string>
-    <string name="settings_aod_wallpaper_import">导入图片</string>
-    <string name="settings_aod_wallpaper_takeover_on">已接管系统壁纸</string>
-    <string name="settings_aod_wallpaper_takeover_off">已恢复原样</string>
     <string name="aod_style_fullscreen">全景息屏</string>
     <string name="aod_style_sail">启航</string>
     <string name="aod_style_starmoon">星月</string>
+    <string name="aod_style_leave_light">留光</string>
+    <string name="aod_style_door">轻启</string>
+    <string name="aod_style_mountain">山脉</string>
+    <string name="aod_style_galaxy">银河</string>
     <string name="aod_style_handpaint">手绘</string>
     <string name="aod_style_text">个性文字</string>
     <string name="aod_style_portrait">人像绘影</string>
@@ -762,10 +785,16 @@
     <string name="cat_statusbar_desc">时钟 · 图标显隐 · 双卡 · 排序</string>
     <string name="settings_func_statusbar">状态栏</string>
     <string name="settings_func_statusbar_desc">时钟 · 图标显隐 · 双卡堆叠 · 图标排序</string>
+    <string name="settings_func_wallpaper">壁纸服务</string>
+    <string name="settings_func_wallpaper_desc">3D 相机壁纸 · 2D 静态 / 视频 / 特效</string>
     <string name="sb_group_control">总控</string>
     <string name="sb_group_icons">图标显隐</string>
     <string name="sb_group_dual">双卡与边距</string>
     <string name="sb_group_clock">时钟与排序</string>
+    <string name="info_sb_control">状态栏定制的总闸：总开关打开才会生效（需与应用页的总开关同时开）；「一键简化」是懒人包，点一下把通知图标、网络类型、漫游、数据与 Wi-Fi 活动箭头这些零碎图标一次藏掉。</string>
+    <string name="info_sb_icons">逐项决定状态栏上每个图标露不露脸：通知图标、网络类型、漫游、移动数据箭头、Wi-Fi 箭头与技术标识、双卡 5G 显示等；还能把网络类型挪到信号右侧，或用「三合一图标」把电量、Wi-Fi、信号合成一个圆环图标。</string>
+    <string name="info_sb_dual">双卡信号的排布：打开「双卡信号堆叠」把两张卡的信号上下叠成两行，滑条分别调两行间距、副卡缩放，以及状态栏内容整体的左右边距。</string>
+    <string name="info_sb_clock">时钟与通知图标的玩法：给时钟加秒、把通知图标挪到右侧；下面的「图标排序」条列出状态栏全部图标——左右滑动浏览，长按拖动换位，松手自动吸附，点「恢复默认」回到系统顺序。</string>
     <string name="sb_enable">状态栏定制总开关</string>
     <string name="sb_enable_desc">需与应用总开关同时开启；关闭后状态栏恢复系统原样</string>
     <string name="sb_simplify">一键简化</string>
@@ -818,4 +847,298 @@
     <string name="sb_slot_zen">勿扰</string>
     <string name="sb_slot_nosim_all">无卡</string>
     <string name="sb_slot_secure_pay">支付</string>
+    <string name="settings_preset_hint">三档调整抓屏帧率、采样比例、定时抓屏间隔与画质参数（高光精修、色散）</string>
+    <string name="cat_wallpaper">壁纸服务</string>
+    <string name="cat_wallpaper_desc">3D 相机壁纸与 2D 静态 / 视频 / 特效壁纸</string>
+
+    <string name="wp_3d_label">液态 3D 相机壁纸</string>
+    <string name="wp_2d_label">液态 2D 壁纸</string>
+    <string name="wp_3d_picker_desc">真三维场景 + 可自定义相机运动曲线</string>
+    <string name="wp_2d_picker_desc">静态图片、循环视频与动态特效</string>
+
+    <string name="wp_3d_section">3D 相机壁纸</string>
+    <string name="wp_3d_desc">分层真实三维场景（星空 / 月球 / 山脊），画面来自透视相机；相机位置、朝向与视场角由曲线驱动，可选用内置路径或手写关键帧。</string>
+    <string name="wp_3d_set">设为 3D 壁纸</string>
+    <string name="wp_3d_curve">相机曲线</string>
+    <string name="wp_3d_cycle">循环时长</string>
+    <string name="wp_3d_speed">相机速度</string>
+    <string name="wp_3d_parallax">滑动视差</string>
+    <string name="wp_3d_edit">编辑自定义曲线</string>
+    <string name="wp_3d_reset">恢复内置环绕</string>
+    <string name="wp_3d_edit_title">自定义相机曲线</string>
+    <string name="wp_3d_edit_hint">每行一个关键帧：t,x,y,z,yaw,pitch,roll,fov（t 为 0..1 循环进度，# 开头为注释）。首尾位姿一致即可无缝循环。</string>
+    <string name="wp_3d_edit_invalid">曲线格式有误：每行需要 8 个数值</string>
+    <string name="wp_3d_edit_saved">自定义曲线已保存，选中「自定义」后生效</string>
+    <string name="wp_3d_need_custom">请先在「编辑自定义曲线」里写入有效关键帧</string>
+
+    <string name="wp_curve_orbit">环绕</string>
+    <string name="wp_curve_dolly">推拉</string>
+    <string name="wp_curve_rise">升降</string>
+    <string name="wp_curve_drift">漂移</string>
+    <string name="wp_curve_still">静止</string>
+    <string name="wp_curve_custom">自定义</string>
+
+    <string name="wp_2d_section">2D 壁纸</string>
+    <string name="wp_2d_desc">静态图片会做缓慢推近与滑动视差；视频静音循环并按屏幕裁切；动态特效完全由代码绘制，不需要素材。</string>
+    <string name="wp_2d_set">设为 2D 壁纸</string>
+    <string name="wp_2d_mode">壁纸模式</string>
+    <string name="wp_2d_mode_switch_hint">从图片/特效切到视频后，需再点一次「设为 2D 壁纸」才会播放。</string>
+    <string name="wp_2d_effect">动态特效</string>
+    <string name="wp_2d_parallax">视差强度</string>
+    <string name="wp_2d_import_image">导入图片</string>
+    <string name="wp_2d_import_video">导入视频</string>
+    <string name="wp_2d_source_none">尚未导入素材，当前使用动态特效</string>
+    <string name="wp_2d_source_fmt">当前素材：%1$s</string>
+    <string name="wp_2d_need_source">请先导入图片或视频</string>
+    <string name="wp_import_ok">素材已导入</string>
+    <string name="wp_import_fail">素材导入失败</string>
+
+    <string name="wp_mode_image">静态图片</string>
+    <string name="wp_mode_video">动态视频</string>
+    <string name="wp_mode_effect">动态特效</string>
+    <string name="wp_effect_aurora">极光</string>
+    <string name="wp_effect_starfield">星尘</string>
+    <string name="wp_effect_flow">流光</string>
+    <string name="wp_picker_failed">没有找到可用的壁纸选择器</string>
+    <string name="wp_picker_hint">在系统壁纸选择器里选中本服务并应用，返回桌面即可看到效果；改参数后无需重选。</string>
+
+    <!-- 息屏/锁屏/桌面 设置页 -->
+    <string name="settings_aod_group_aod">息屏时</string>
+    <string name="settings_aod_group_lock">锁屏时</string>
+    <string name="settings_aod_group_home">桌面</string>
+    <string name="settings_aod_group_other">其他</string>
+    <string name="settings_aod_row_effect">效果</string>
+    <string name="settings_aod_row_effect_aod_desc">混色、旋转、一直播放、相框倾斜</string>
+    <string name="settings_aod_row_style_desc_aod">当前使用的过渡与息屏样式</string>
+    <string name="settings_aod_row_wallpaper_desc_aod">打开当前页面使用的图片</string>
+    <string name="settings_aod_row_other_desc_aod">附加信息、场景化信息、新通知提醒、显示模式</string>
+    <string name="settings_aod_row_effect_lock_desc">壁纸效果与特殊效果</string>
+    <string name="settings_aod_row_style_desc_lock">与息屏样式共用</string>
+    <string name="settings_aod_row_other_desc_lock">锁屏液态效果减弱、液态玻璃快捷跳转</string>
+    <string name="settings_aod_row_wallpaper_desc_home">正常选择壁纸页，可跟随锁屏</string>
+    <string name="settings_aod_row_style_desc_home">负责锁屏到桌面的过渡与图标入场</string>
+    <string name="settings_aod_row_other_desc_home">图标跳转系统图标控制</string>
+    <string name="settings_aod_hub_other_row">其他（汇总）</string>
+    <string name="settings_aod_hub_other_row_desc">息屏 / 锁屏 / 桌面全部「其他」项集中在一处</string>
+    <string name="settings_aod_dynamic">允许 AOD 动态变化</string>
+    <string name="settings_aod_dynamic_desc">关闭后息屏保持静止：不旋转、不混色、照片不倾斜，锁屏特殊效果也不生效。</string>
+    <string name="settings_aod_always_play">一直播放</string>
+    <string name="settings_aod_always_play_desc">息屏画面持续播放，不按系统节奏暂停。</string>
+    <string name="settings_aod_frame_pair">相框模式</string>
+    <string name="settings_aod_frame_pair_desc">开启后用双照片相框：相框照片叠在壁纸上，可单独换照片与调整取景。</string>
+    <string name="settings_aod_frame_photo">相框照片</string>
+    <string name="settings_aod_frame_photo_desc">挑一张用作相框前景照片。</string>
+    <string name="settings_aod_frame_crop">调整取景</string>
+    <string name="settings_aod_frame_crop_desc">移动、缩放与旋转相框照片的取景范围。</string>
+    <string name="settings_aod_sakura_example">樱花示例</string>
+    <string name="settings_aod_sakura_example_desc">套用官方樱花相框示例照片。</string>
+    <string name="settings_aod_sakura_applied">已套用樱花示例</string>
+    <string name="settings_aod_change_photo">更换照片</string>
+    <string name="settings_aod_change_photo_desc">挑一张用作当前息屏样式的照片。</string>
+    <string name="settings_aod_wallpaper_pick">选择图片</string>
+    <string name="settings_aod_wallpaper_pick_desc">打开系统壁纸选择页，挑一张用作息屏背景。</string>
+    <string name="settings_aod_advanced_row">高级设置</string>
+    <string name="settings_aod_advanced_row_desc">直接展示所有参数，可自由调整</string>
+    <string name="settings_aod_advanced_warn">小白误入：这里的参数会直接改变三态观感，没有撤销键。</string>
+
+    <!-- 效果页 -->
+    <string name="settings_aod_effect_group_wall">壁纸效果</string>
+    <string name="settings_aod_effect_group_special">特殊效果</string>
+    <string name="settings_aod_effect_group_motion">动态与参数</string>
+    <string name="settings_aod_effect_lock_note">特殊效果需先开启「允许 AOD 动态变化」；光栅与闪卡还需要全景息屏。</string>
+    <string name="settings_aod_effect_aod_note">动态项只在「允许 AOD 动态变化」开启后生效。</string>
+    <string name="settings_aod_effect_style_head">当前样式专属</string>
+    <string name="settings_aod_effect_adjust_head">调整</string>
+    <string name="settings_aod_effect_style_none">当前样式没有额外调整项。</string>
+    <string name="settings_aod_gate_scene3d">3D 场景壁纸不可用</string>
+
+    <!-- 效果名 -->
+    <string name="effect_lock_wp_none">无</string>
+    <string name="effect_lock_wp_rainbow">长虹</string>
+    <string name="effect_lock_wp_wave">波浪</string>
+    <string name="effect_lock_wp_fog">雾花</string>
+    <string name="effect_lock_wp_blur">模糊</string>
+    <string name="effect_lock_wp_stripes_fine">细条纹</string>
+    <string name="effect_lock_wp_stripes_coarse">宽条纹</string>
+    <string name="effect_lock_wp_light_stripes">光线纹</string>
+    <string name="effect_lock_wp_grid">方格纹</string>
+    <string name="effect_lock_wp_water">水波纹</string>
+    <string name="effect_lock_wp_ripple">涟漪纹</string>
+    <string name="effect_lock_sp_none">无</string>
+    <string name="effect_lock_sp_liquid">液态</string>
+    <string name="effect_lock_sp_lenticular">光栅</string>
+    <string name="effect_lock_sp_flash_card">闪卡</string>
+    <string name="effect_lock_sp_depth3d">3D</string>
+    <string name="effect_lock_sp_bokeh">景深</string>
+    <string name="effect_home_transition_none">默认（不接管）</string>
+    <string name="effect_home_transition_crossfade">淡出淡入</string>
+    <string name="effect_home_icon_foreground">前景飞入</string>
+    <string name="effect_home_icon_background">后景飞入</string>
+    <string name="effect_home_icon_rotate">旋转飞入</string>
+    <string name="effect_home_icon_crossfade">淡出淡入</string>
+
+    <!-- 其他页 -->
+    <string name="settings_aod_other_group_info">附加信息</string>
+    <string name="settings_aod_other_battery">电量</string>
+    <string name="settings_aod_other_battery_desc">息屏显示电量信息。</string>
+    <string name="settings_aod_other_notif_icon">通知图标</string>
+    <string name="settings_aod_other_notif_icon_desc">息屏显示通知图标。</string>
+    <string name="settings_aod_other_group_scene">场景</string>
+    <string name="settings_aod_other_scene">场景化信息</string>
+    <string name="settings_aod_other_scene_desc">按时间与位置显示天气、日程等场景信息。</string>
+    <string name="settings_aod_other_new_notif">新通知提醒</string>
+    <string name="settings_aod_other_new_notif_desc">收到新通知时点亮息屏。</string>
+    <string name="settings_aod_other_group_display">显示</string>
+    <string name="settings_aod_display_mode">显示模式</string>
+    <string name="settings_aod_display_mode_desc">全天常亮 / 定时 / 节能（无操作一段时间后消失）。</string>
+    <string name="settings_aod_mode_always">全天</string>
+    <string name="settings_aod_mode_scheduled">定时</string>
+    <string name="settings_aod_mode_power">节能</string>
+    <string name="settings_aod_schedule_hint">定时区间默认 22:00 至次日 07:00，可在下方直接改。</string>
+    <string name="settings_aod_schedule_start">开始时间</string>
+    <string name="settings_aod_schedule_start_desc">定时档从这个时刻起显示息屏。</string>
+    <string name="settings_aod_schedule_end">结束时间</string>
+    <string name="settings_aod_schedule_end_desc">到这个时刻收起息屏；早于开始即跨夜。</string>
+    <string name="settings_aod_other_group_glass">液态效果</string>
+    <string name="settings_aod_glass_weak">息屏液态效果减弱</string>
+    <string name="settings_aod_glass_weak_lock">锁屏液态效果减弱</string>
+    <string name="settings_aod_not_implemented">未实现</string>
+    <string name="settings_aod_lock_glass_jump">锁屏液态玻璃设置</string>
+    <string name="settings_aod_lock_glass_jump_desc">跳转到液态玻璃设置页。</string>
+
+    <!-- 桌面页 -->
+    <string name="settings_aod_home_wallpaper">桌面壁纸</string>
+    <string name="settings_aod_home_wallpaper_desc">打开系统壁纸选择页。</string>
+    <string name="settings_aod_home_follow_lock">跟随锁屏</string>
+    <string name="settings_aod_home_follow_lock_desc">桌面与锁屏使用同一张壁纸。</string>
+    <string name="settings_aod_home_group_transition">变化效果</string>
+    <string name="settings_aod_home_group_icon">图标效果</string>
+    <string name="settings_aod_home_group_aod">息屏动画</string>
+    <string name="settings_aod_home_aod_independent">息屏独立动画</string>
+    <string name="settings_aod_home_aod_independent_desc">关闭时沿用息屏页选择的息屏动画。</string>
+    <string name="settings_aod_home_aod_style">息屏动画（息屏专属）</string>
+    <string name="settings_aod_home_icons">图标</string>
+    <string name="settings_aod_home_icons_desc">跳转系统图标控制。</string>
+    <string name="settings_aod_home_transition_note">AOD 直接进桌面时沿用息屏样式。</string>
+
+    <!-- 样式页 -->
+    <string name="settings_aod_style_group_aod">息屏样式</string>
+    <string name="settings_aod_style_group_lock">锁屏样式</string>
+    <string name="settings_aod_style_note">样式同时决定过渡方式与息屏画面。</string>
+    <string name="settings_aod_style_family_panorama">全景</string>
+    <string name="settings_aod_style_family_meizu">魅族</string>
+    <string name="settings_aod_style_family_scene3d">3D 场景</string>
+    <string name="settings_aod_style_family_oplus">OPPO</string>
+    <string name="settings_aod_style_family_standard">其他</string>
+
+    <!-- 门槛提示 -->
+    <string name="settings_aod_gate_dynamic">需开启动态变化</string>
+    <string name="settings_aod_gate_panorama">需开启全景息屏</string>
+    <string name="settings_aod_gate_gyro">需陀螺仪</string>
+    <string name="settings_aod_gate_photo">需图片生成 3D</string>
+    <string name="settings_aod_gate_unimplemented">未实现</string>
+    <string name="settings_aod_page_unavailable">打不开系统页面</string>
+
+    <!-- 高级设置 -->
+    <string name="settings_aod_advanced_group_tip">说明</string>
+    <string name="settings_aod_advanced_group_motion">息屏动效</string>
+    <string name="settings_aod_advanced_group_lock_wp">锁屏壁纸效果</string>
+    <string name="settings_aod_advanced_group_lock_sp">锁屏特殊效果</string>
+    <string name="settings_aod_advanced_group_home_transition">桌面过渡</string>
+    <string name="settings_aod_advanced_group_home_icon">桌面图标</string>
+    <string name="settings_aod_advanced_reset">恢复默认参数</string>
+    <string name="settings_aod_advanced_reset_done">已恢复默认参数</string>
+
+    <!-- 参数名 -->
+    <string name="effect_param_color_mix">混色强度</string>
+    <string name="effect_param_rotate_speed">旋转速度</string>
+    <string name="effect_param_photo_tilt">相框倾斜</string>
+    <string name="effect_param_frame_x">取景水平</string>
+    <string name="effect_param_frame_y">取景垂直</string>
+    <string name="effect_param_frame_size">取景大小</string>
+    <string name="effect_param_frame_angle">取景角度</string>
+    <string name="effect_param_power_save">节能消失时长</string>
+    <string name="effect_param_lock_wp_speed">壁纸效果速度</string>
+    <string name="effect_param_lock_wp_intensity">壁纸效果强度</string>
+    <string name="effect_param_lock_sp_speed">特殊效果速度</string>
+    <string name="effect_param_lock_sp_intensity">特殊效果强度</string>
+    <string name="effect_param_gyro_gain">陀螺仪灵敏度</string>
+    <string name="effect_param_transition_duration">过渡时长</string>
+    <string name="effect_param_icon_duration">图标时长</string>
+    <string name="effect_param_icon_stagger">图标错峰</string>
+    <string name="effect_param_icon_travel">图标位移</string>
+
+    <!-- 数值格式 -->
+    <string name="settings_aod_value_suffix_percent">%1$s%%</string>
+    <string name="settings_aod_value_suffix_deg">%1$s°</string>
+    <string name="settings_aod_value_suffix_ms">%1$s ms</string>
+    <string name="settings_aod_value_suffix_s">%1$s s</string>
+    <string name="settings_aod_value_suffix_x">%1$s×</string>
+
+    <!-- 锁屏 / 息屏编辑页 -->
+    <string name="settings_aod_edit_title_lock">锁屏编辑</string>
+    <string name="settings_aod_edit_title_aod">息屏编辑</string>
+    <string name="settings_aod_edit_row">编辑</string>
+    <string name="settings_aod_edit_row_desc_lock">时钟大小与位置、右侧小组件、底部大丸。</string>
+    <string name="settings_aod_edit_row_desc_aod">调整时钟与小组件（只能左右平移）。</string>
+    <string name="settings_aod_edit_hint_lock">长按时钟拖动改位置，拖右下角圆点改大小；点时钟出字体面板；点空白进全屏预览。</string>
+    <string name="settings_aod_edit_hint_aod">长按时钟左右拖动改位置；点时钟出字体面板；点空白进全屏预览。纵向留给防烧屏，不可调。</string>
+    <string name="settings_aod_edit_stage_hint">长按时钟拖动 · 点空白预览</string>
+    <string name="settings_aod_edit_inline_hint">拖动调整位置 · 拖右下圆点缩放 · 点小组件改尺寸</string>
+    <string name="settings_aod_edit_widget_picker">添加小组件</string>
+    <string name="settings_aod_edit_widget_picker_desc">在编辑页的画布上点选添加，并可拖动摆放。</string>
+    <string name="settings_aod_edit_snap">自动吸附</string>
+    <string name="settings_aod_edit_snap_desc">拖动时对齐中线、三分线与左右边距，并显示参考线。</string>
+    <string name="settings_aod_edit_widgets">小组件</string>
+    <string name="settings_aod_edit_widgets_desc">点一下添加或移除；长按改尺寸（1×1 / 2×2 / 1×4）。</string>
+    <string name="settings_aod_edit_widget_add">点一下添加</string>
+    <string name="settings_aod_edit_widget_added">已添加 · %1$s</string>
+    <string name="settings_aod_edit_widget_remove">移除</string>
+    <string name="settings_aod_edit_size_1x1">1×1</string>
+    <string name="settings_aod_edit_size_2x2">2×2</string>
+    <string name="settings_aod_edit_size_1x4">1×4</string>
+    <string name="settings_aod_edit_preview">全屏预览</string>
+    <string name="settings_aod_edit_preview_desc">底部三段按钮切换 息屏 / 锁屏 / 桌面。</string>
+    <string name="settings_aod_edit_reset">恢复默认布局</string>
+    <string name="settings_aod_edit_reset_desc">时钟、小组件、大丸位置全部回到默认。</string>
+    <string name="settings_aod_edit_clock_panel">时钟样式</string>
+    <string name="settings_aod_edit_font">字体</string>
+    <string name="settings_aod_edit_font_sans">默认</string>
+    <string name="settings_aod_edit_font_serif">衬线</string>
+    <string name="settings_aod_edit_font_mono">等宽</string>
+    <string name="settings_aod_edit_font_casual">手写</string>
+    <string name="settings_aod_edit_weight">笔画粗细</string>
+    <string name="settings_aod_edit_color">颜色</string>
+    <string name="settings_aod_edit_color_white">白</string>
+    <string name="settings_aod_edit_color_warm">暖白</string>
+    <string name="settings_aod_edit_color_blue">蓝</string>
+    <string name="settings_aod_edit_color_pink">粉</string>
+    <string name="settings_aod_edit_color_gold">金</string>
+    <string name="settings_aod_edit_glass_tint">玻璃染色</string>
+    <string name="settings_aod_edit_glass_tint_desc">开启玻璃效果时，把时钟颜色染到玻璃上。</string>
+    <string name="settings_aod_edit_info">附加信息</string>
+    <string name="settings_aod_edit_info_none">无</string>
+    <string name="settings_aod_edit_info_lunar">农历</string>
+    <string name="settings_aod_edit_info_weather">天气</string>
+    <string name="settings_aod_edit_style">样式</string>
+    <string name="settings_aod_edit_style_default">默认</string>
+    <string name="settings_aod_edit_style_thin">纤细</string>
+    <string name="settings_aod_edit_style_bold">粗体</string>
+    <string name="settings_aod_edit_style_serif">衬线标题</string>
+    <string name="settings_aod_edit_pill_flashlight">手电筒</string>
+    <string name="settings_aod_edit_pill_camera">相机</string>
+    <string name="settings_aod_edit_pill_content">快捷入口内容</string>
+    <string name="settings_aod_edit_pill_size">大小</string>
+    <string name="settings_aod_edit_pill_none">无</string>
+    <string name="settings_aod_edit_pill_dial">拨号</string>
+    <string name="settings_aod_edit_pill_recorder">录音</string>
+    <string name="settings_aod_edit_pill_calculator">计算器</string>
+    <string name="settings_aod_edit_pill_scan">扫一扫</string>
+    <string name="settings_aod_edit_pill_pay">收付款</string>
+    <string name="settings_aod_edit_pill_scale">大小 %1$d%%</string>
+    <string name="settings_aod_edit_close">关闭</string>
+    <string name="lock_widget_weather">天气</string>
+    <string name="lock_widget_music">音乐</string>
+    <string name="lock_widget_battery">电量</string>
+    <string name="lock_widget_steps">步数</string>
 </resources>

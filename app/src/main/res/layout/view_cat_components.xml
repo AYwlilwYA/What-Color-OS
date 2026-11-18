@@ -11,7 +11,7 @@
         android:padding="16dp">
 
         <!-- 音量条液态玻璃（默认关；TTL 500ms 重读 Prefs，改动无需重启系统界面） -->
-        <Switch
+        <com.coloros16.liquidglass.ui.LgSwitch
             android:id="@+id/switchVolumeSeekBarGlass"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -32,7 +32,7 @@
             android:textColor="?android:attr/textColorSecondary" />
 
         <!-- 音量面板去白底（面板后方模糊层净化；默认关；TTL 500ms 重读 Prefs） -->
-        <Switch
+        <com.coloros16.liquidglass.ui.LgSwitch
             android:id="@+id/switchVolumePanelBackdrop"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -54,7 +54,7 @@
             android:textColor="?android:attr/textColorSecondary" />
 
         <!-- 通知长按菜单玻璃（默认关；TTL 500ms 重读 Prefs） -->
-        <Switch
+        <com.coloros16.liquidglass.ui.LgSwitch
             android:id="@+id/switchNotificationPopupGlass"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -76,7 +76,7 @@
             android:textColor="?android:attr/textColorSecondary" />
 
         <!-- 相册液态玻璃（默认关） -->
-        <Switch
+        <com.coloros16.liquidglass.ui.LgSwitch
             android:id="@+id/switchGalleryGlass"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -98,7 +98,7 @@
             android:textColor="?android:attr/textColorSecondary" />
 
         <!-- 计算器液态玻璃（默认关） -->
-        <Switch
+        <com.coloros16.liquidglass.ui.LgSwitch
             android:id="@+id/switchCalculatorGlass"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -120,7 +120,7 @@
             android:textColor="?android:attr/textColorSecondary" />
 
         <!-- 智能侧边栏液态玻璃（默认关） -->
-        <Switch
+        <com.coloros16.liquidglass.ui.LgSwitch
             android:id="@+id/switchSmartSidebarGlass"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -142,7 +142,7 @@
             android:textColor="?android:attr/textColorSecondary" />
 
         <!-- 速览（负一屏）玻璃（默认关） -->
-        <Switch
+        <com.coloros16.liquidglass.ui.LgSwitch
             android:id="@+id/switchAssistantScreenGlass"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -164,7 +164,7 @@
             android:textColor="?android:attr/textColorSecondary" />
 
         <!-- 全局搜索弹窗玻璃（默认关） -->
-        <Switch
+        <com.coloros16.liquidglass.ui.LgSwitch
             android:id="@+id/switchQuickSearchGlass"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -186,7 +186,7 @@
             android:textColor="?android:attr/textColorSecondary" />
 
         <!-- 相册背景采样范围探针（实验，默认关） -->
-        <Switch
+        <com.coloros16.liquidglass.ui.LgSwitch
             android:id="@+id/switchGalleryShaderProbe"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -208,7 +208,7 @@
             android:textColor="?android:attr/textColorSecondary" />
 
         <!-- 最近任务清除按钮玻璃（默认关；TTL 500ms 重读 Prefs，改动无需重启桌面） -->
-        <Switch
+        <com.coloros16.liquidglass.ui.LgSwitch
             android:id="@+id/switchClearAllBtnGlass"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -230,7 +230,7 @@
             android:textColor="?android:attr/textColorSecondary" />
 
         <!-- 桌面编辑模式整理/完成钮玻璃（默认关；TTL 500ms 重读 Prefs） -->
-        <Switch
+        <com.coloros16.liquidglass.ui.LgSwitch
             android:id="@+id/switchEditToolbarGlass"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -252,7 +252,7 @@
             android:textColor="?android:attr/textColorSecondary" />
 
         <!-- 桌面编辑工具条四圆钮玻璃（默认关；TTL 500ms 重读 Prefs） -->
-        <Switch
+        <com.coloros16.liquidglass.ui.LgSwitch
             android:id="@+id/switchEditToolBtnGlass"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -274,7 +274,7 @@
             android:textColor="?android:attr/textColorSecondary" />
 
         <!-- 桌面长按菜单底衬玻璃（默认关；TTL 500ms 重读 Prefs） -->
-        <Switch
+        <com.coloros16.liquidglass.ui.LgSwitch
             android:id="@+id/switchPopupMenuGlass"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -303,7 +303,7 @@
             android:text="@string/settings_section_alive_aod"
             android:textAppearance="?attr/textAppearanceTitleMedium" />
 
-        <Switch
+        <com.coloros16.liquidglass.ui.LgSwitch
             android:id="@+id/switchAliveAodHandoff"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -324,7 +324,7 @@
             android:textAppearance="?attr/textAppearanceBodySmall"
             android:textColor="?android:attr/textColorSecondary" />
 
-        <Switch
+        <com.coloros16.liquidglass.ui.LgSwitch
             android:id="@+id/switchAliveAodStyle"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -345,7 +345,7 @@
             android:textAppearance="?attr/textAppearanceBodySmall"
             android:textColor="?android:attr/textColorSecondary" />
 
-        <Switch
+        <com.coloros16.liquidglass.ui.LgSwitch
             android:id="@+id/switchAliveAodGlass"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

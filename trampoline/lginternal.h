@@ -20,7 +20,7 @@ int lg_glass_arm_untried(void);
 
 // —— 定义在 engine.c ——
 struct lg_cfg {
-    int prop_on;        // vendor.debug.lg.glass 总闸
+    int prop_on;        // debug.lg.glass 总闸（debug_prop，全域可读）
     int file_on;        // conf on 字段
     int enabled;        // 引擎内部使能
     double bx, by, bw, bh, br;  // 圆角矩形几何（conf 行）

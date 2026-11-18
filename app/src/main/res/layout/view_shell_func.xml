@@ -36,7 +36,9 @@
             android:orientation="vertical"
             android:padding="16dp">
 
-            <LinearLayout style="@style/ShellGroupHead">
+            <LinearLayout
+                android:id="@+id/funcGroupHead"
+                style="@style/ShellGroupHead">
                 <TextView
                     style="@style/ShellGroupTitle"
                     android:text="@string/settings_func_group" />
@@ -44,6 +46,7 @@
             </LinearLayout>
 
 <LinearLayout
+            android:id="@+id/funcGroupList"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:background="@drawable/bg_plate"
@@ -94,7 +97,34 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content" />
 
+                <include
+                    android:id="@+id/funcRowWallpaper"
+                    layout="@layout/item_row"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+
         </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/funcResultsHead"
+                style="@style/ShellGroupHead"
+                android:visibility="gone">
+                <TextView
+                    style="@style/ShellGroupTitle"
+                    android:text="@string/settings_func_search_results" />
+                <View style="@style/ShellGroupRule" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/funcResults"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_plate"
+                android:divider="@drawable/bg_seam_line_inset"
+                android:dividerHeight="1dp"
+                android:orientation="vertical"
+                android:showDividers="middle"
+                android:visibility="gone" />
 
             <TextView
                 android:layout_width="match_parent"

@@ -104,8 +104,6 @@ static int lg_canary_probe(const char **step) {
     return (e && strcmp(e, "fail") == 0) ? 0 : 1;
 }
 #else
-static const char *kProbeSkSL = "half4 main(float2 coord) { return half4(0.5,0.5,0.5,1.0); }";
-
 struct lg_canary_syms {
     void *make_for_shader;
     void *str_c1;
@@ -141,17 +139,6 @@ static int lg_resolve_engine_syms(void) {
 static int lg_canary_probe(const char **step) {
     *step = "sym";
     if (!C.make_for_shader || !C.str_c1 || !C.str_d1) return 0;
-    *step = "compile";
-    char strbuf[128];
-    memset(strbuf, 0, sizeof(strbuf));
-    ((void (*)(void *, const char *))C.str_c1)(strbuf, kProbeSkSL);
-    unsigned long opts[2] = {0, 0};
-    void *sret[2] = {0, 0};
-    const void *args[2] = {strbuf, opts};
-    x8_call(sret, C.make_for_shader, args, 2);
-    ((void (*)(void *))C.str_d1)(strbuf);
-    if (!sret[0]) return 0;
-    sk_unref(sret[0]);
     *step = "ok";
     return 1;
 }

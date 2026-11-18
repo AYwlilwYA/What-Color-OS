@@ -26,6 +26,9 @@
     <!-- 全局悬浮球（系统最上层 overlay 窗口） -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
+    <!-- 壁纸服务：设置页拉起系统壁纸选择器 -->
+    <uses-permission android:name="android.permission.SET_WALLPAPER" />
+
     <!-- 包可见性声明（hook 安装分发与设置页读取宿主信息用） -->
     <queries>
         <package android:name="com.android.systemui" />
@@ -52,6 +55,34 @@
                 <category android:name="de.robv.android.xposed.category.MODULE_SETTINGS" />
             </intent-filter>
         </activity>
+
+        <!-- 3D 相机壁纸：EGL/GLES 真三维场景，相机曲线驱动 -->
+        <service
+            android:name=".wallpaper.Lg3DWallpaperService"
+            android:exported="true"
+            android:label="@string/wp_3d_label"
+            android:permission="android.permission.BIND_WALLPAPER">
+            <intent-filter>
+                <action android:name="android.service.wallpaper.WallpaperService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.wallpaper"
+                android:resource="@xml/wallpaper_lg3d" />
+        </service>
+
+        <!-- 2D 壁纸：静态图 / 循环视频 / 动态特效 -->
+        <service
+            android:name=".wallpaper.Lg2DWallpaperService"
+            android:exported="true"
+            android:label="@string/wp_2d_label"
+            android:permission="android.permission.BIND_WALLPAPER">
+            <intent-filter>
+                <action android:name="android.service.wallpaper.WallpaperService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.wallpaper"
+                android:resource="@xml/wallpaper_lg2d" />
+        </service>
 
         <!-- 日志文件分享通道：设置页分享抓取文件（captures/）走 content uri -->
         <provider

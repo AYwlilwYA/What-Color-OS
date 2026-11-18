@@ -20,6 +20,7 @@ data class StyleCapabilities(
     val sceneContinuous: Boolean = false,
     val mask: Boolean = false,
     val crossfade: Boolean = true,
+    val frameReveal: Boolean = false,
 )
 
 /** L1 场景连续层配置。 */

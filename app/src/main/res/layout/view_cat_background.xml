@@ -145,7 +145,7 @@
             android:text="@string/settings_section_capture_retry"
             android:textAppearance="?attr/textAppearanceTitleMedium" />
 
-        <Switch
+        <com.coloros16.liquidglass.ui.LgSwitch
             android:id="@+id/switchCaptureRetryEnabled"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -167,7 +167,7 @@
             android:textAppearance="?attr/textAppearanceBodySmall"
             android:textColor="?android:attr/textColorSecondary" />
 
-        <Switch
+        <com.coloros16.liquidglass.ui.LgSwitch
             android:id="@+id/switchRegionCaptureExperimental"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -271,7 +271,7 @@
             android:textAppearance="?attr/textAppearanceBodySmall"
             android:textColor="?android:attr/textColorSecondary" />
 
-        <Switch
+        <com.coloros16.liquidglass.ui.LgSwitch
             android:id="@+id/switchKeepSystemCcBlur"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -293,7 +293,7 @@
             android:textAppearance="?attr/textAppearanceBodySmall"
             android:textColor="?android:attr/textColorSecondary" />
 
-        <Switch
+        <com.coloros16.liquidglass.ui.LgSwitch
             android:id="@+id/switchRemovePanelMixColor"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

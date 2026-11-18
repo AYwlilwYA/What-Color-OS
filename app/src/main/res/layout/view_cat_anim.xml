@@ -20,7 +20,7 @@
             android:textColor="?android:attr/textColorSecondary" />
 
         <!-- 打开动画 -->
-        <Switch
+        <com.coloros16.liquidglass.ui.LgSwitch
             android:id="@+id/switchAnimOpen"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -78,7 +78,7 @@
         </com.google.android.material.card.MaterialCardView>
 
         <!-- 关闭动画 -->
-        <Switch
+        <com.coloros16.liquidglass.ui.LgSwitch
             android:id="@+id/switchAnimClose"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -136,7 +136,7 @@
         </com.google.android.material.card.MaterialCardView>
 
         <!-- 打断动画 -->
-        <Switch
+        <com.coloros16.liquidglass.ui.LgSwitch
             android:id="@+id/switchAnimBreak"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

@@ -24,6 +24,7 @@ object SfGlassChannel {
     private const val SESSION_IDLE_OFF_MS = 5000L
     private const val WATCHDOG_TICK_MS = 2000L
     private const val SU_TIMEOUT_MS = 8000L
+    private const val CONF_PATH = "/system_ext/lib64/oplusex/lg_glass.conf"
 
     /** su 执行结果：ok=exit 0，out=合并输出，err=失败原因（ok 时 null）。 */
     internal data class SuResult(val ok: Boolean, val out: String, val err: String?) {
@@ -130,6 +131,7 @@ object SfGlassChannel {
             lastOfferKey = ""
             val err = retract()
             if (err == null) {
+                writeConf(0)
                 Lg.i(TAG, "lg-sf-session-off reason=$reason")
             } else {
                 throttled("lg-sf-session-off-fail", "撤层失败 reason=$reason: $err")
@@ -151,6 +153,7 @@ object SfGlassChannel {
                 if (sessionOn) return@execute
                 lastOfferKey = ""
                 val err = retract()
+                if (err == null) writeConf(0)
                 Lg.i(
                     TAG,
                     "lg-sf-idle-off 无认领满 ${SESSION_IDLE_OFF_MS}ms 自动撤层" +
@@ -238,6 +241,7 @@ object SfGlassChannel {
                 val err = applyGeom(g)
                 if (err == null) {
                     lastOfferKey = key
+                    writeConf(1)
                     throttled(
                         "lg-sf-blur",
                         "已下发 id=${g.id} geom=(${g.l.toInt()},${g.t.toInt()},${g.w.toInt()}x${g.h.toInt()}) corner=${g.corner.toInt()}",
@@ -309,7 +313,8 @@ object SfGlassChannel {
             left - originX, top - originY, left - originX + width, top - originY + height,
             corner,
         )
-        return SfBlurCall.applyRegions(sc, arrayOf(region), r)
+        // 窗口级半径恒0：模糊只走申报 region（region 自带 radius），窗口级全屏模糊停用
+        return SfBlurCall.applyRegions(sc, arrayOf(region), 0)
     }
 
     /** 撤层：清区域 + 窗口半径归零；无宿主 SC 时视为无事可做。 */
@@ -328,6 +333,33 @@ object SfGlassChannel {
                 .coerceAtLeast(1)
         } catch (_: Throwable) {
             13
+        }
+    }
+
+    /**
+     * on 写进 conf（SF 侧 TTL 500ms 惰性读）：读改写只换 on，材质/几何字段原样保留——
+     * 玻璃几何走 generate 每帧 region 直取，不经配置。路径在 system_lib_file，
+     * platform_app 无写权，读写都走 su。
+     */
+    private fun writeConf(on: Int) {
+        try {
+            val rd = runSu("cat $CONF_PATH 2>/dev/null")
+            val cur = if (rd.ok) rd.out else null
+            val base = cur?.lineSequence()?.firstOrNull { it.contains("on=") }
+                ?: "on=0 bx=60 by=60 bw=500 bh=300 br=60 timeout_ms=100 overtrip=10 rf=28 ds=0 hg=0.5 ag=45 vb=1.5 ib=0"
+            val merged = base.trim().split(Regex("\\s+")).joinToString(" ") { t ->
+                val i = t.indexOf('=')
+                if (i <= 0) t else when (t.substring(0, i)) {
+                    "on" -> "on=$on"
+                    else -> t
+                }
+            }
+            val w = runSu("printf '%s\\n' '$merged' > $CONF_PATH")
+            if (!w.ok) {
+                throttled("lg-sf-conf", "conf 写失败 on=$on: ${w.err ?: w.summary}")
+            }
+        } catch (t: Throwable) {
+            throttled("lg-sf-conf", "conf 写失败 on=$on: ${t.javaClass.simpleName}: ${t.message}")
         }
     }
 

@@ -14,10 +14,9 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
-import android.widget.Switch
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
-import androidx.core.content.ContextCompat
 import androidx.core.widget.NestedScrollView
 import com.coloros16.liquidglass.R
 import com.coloros16.liquidglass.config.Prefs
@@ -27,6 +26,7 @@ import com.coloros16.liquidglass.engine.SceneTimeline
 import com.coloros16.liquidglass.engine.SystemSceneMotion
 import com.coloros16.liquidglass.engine.TransitionClock
 import com.coloros16.liquidglass.engine.TransitionEdge
+import com.coloros16.liquidglass.engine.effect.EffectSettings
 import com.coloros16.liquidglass.engine.from
 import com.coloros16.liquidglass.engine.to
 import com.coloros16.liquidglass.engine.transitionEdgeOf
@@ -45,22 +45,24 @@ class AodDisplayController(
     private val writeString: (String, String) -> Unit,
     private val writeBoolean: (String, Boolean) -> Unit,
     private val close: () -> Unit,
+    private val readSettings: () -> com.coloros16.liquidglass.engine.effect.EffectSettings,
+    private val writeSettings: (com.coloros16.liquidglass.engine.effect.EffectSettings) -> Unit,
+    private val readLayout: (com.coloros16.liquidglass.engine.edit.EditSurface) -> com.coloros16.liquidglass.engine.edit.LockLayoutSettings,
+    private val writeLayout: (com.coloros16.liquidglass.engine.edit.EditSurface, com.coloros16.liquidglass.engine.edit.LockLayoutSettings) -> Unit,
+    private val pickPhoto: ((frame: Boolean) -> Unit)? = null,
+    /** 面板内跳独立页（编辑画布）：先关面板再压屏，null 时只记日志不跳。 */
+    private val openScreen: ((String) -> Unit)? = null,
 ) : AodStateBar.Listener {
 
     private companion object {
         const val TAG = "LgAodUi"
+        const val AOD_OPEN_DELAY_MS = 150L
     }
 
     private val density = context.resources.displayMetrics.density
-    private val plate600 = context.getColor(R.color.lg_plate_600)
-    private val seam = context.getColor(R.color.lg_seam)
-    private val seamHi = context.getColor(R.color.lg_seam_hi)
     private val ink100 = context.getColor(R.color.lg_ink_100)
     private val ink300 = context.getColor(R.color.lg_ink_300)
     private val ink400 = context.getColor(R.color.lg_ink_400)
-    private val brass = context.getColor(R.color.lg_brass)
-    private val blued = context.getColor(R.color.lg_blued)
-    private val bluedInk = context.getColor(R.color.lg_blued_ink)
 
     private val clock = TransitionClock()
     private val defaultHint = context.getString(R.string.settings_aod_page_hint)
@@ -73,8 +75,14 @@ class AodDisplayController(
     private lateinit var apply: TextView
     private lateinit var cancel: TextView
     private lateinit var header: TextView
+    private lateinit var dockBar: LinearLayout
 
     private var bound = false
+    private var dockState: SceneState? = null
+    private var settingsSheet: BottomSheetDialog? = null
+    private var editPanel: AodInlineEditPanel? = null
+    private var scene3dActive = false
+    private var scene3dCheckedAt = 0L
     private var current = SceneState.AOD
     private var lastEdge = TransitionEdge.AOD_TO_LOCK
     private var draftId = Prefs.DEFAULT_ALIVE_AOD_STYLE_ID
@@ -155,6 +163,8 @@ class AodDisplayController(
             ?: return missing("aodCancel")
         header = root.findViewById(R.id.aodHeaderLabel)
             ?: return missing("aodHeaderLabel")
+        dockBar = root.findViewById(R.id.aodDockBar)
+            ?: return missing("aodDockBar")
 
         bound = true
         appliedConfigId = localPrefs.getString(Prefs.KEY_ALIVE_AOD_CONFIG_ID, null)
@@ -176,9 +186,8 @@ class AodDisplayController(
 
         cancel.setOnClickListener { cancelDraft() }
         apply.setOnClickListener { applyDraft() }
-        root.findViewById<View>(R.id.aodDockWallpaper)?.setOnClickListener { showWallpaperSheet() }
-        root.findViewById<View>(R.id.aodDockStyle)?.setOnClickListener { showStyleSheet() }
-        root.findViewById<View>(R.id.aodDockEffects)?.setOnClickListener { showEffectsSheet() }
+        rebuildDock()
+        bindInlineEdit()
 
         root.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
             override fun onViewAttachedToWindow(v: View) = Unit
@@ -235,14 +244,17 @@ class AodDisplayController(
             Lg.i(TAG, "tap same state=$target no animation")
             return
         }
+        val fromAod = current == SceneState.AOD
         lastEdge = edge
         current = target
         bar.setActive(index)
+        rebuildDock()
         playing = true
         bar.setInteractive(false)
-        clock.play(edge, SystemSceneMotion.durationOf(edge), 0f, ClockSource.PREVIEW)
+        val startDelay = if (fromAod) AOD_OPEN_DELAY_MS else 0L
+        clock.play(edge, AodSceneCatalog.durationOf(draftId, edge), 0f, ClockSource.PREVIEW, startDelay)
         scheduleFrame()
-        Lg.i(TAG, "play edge=$edge target=$target")
+        Lg.i(TAG, "play edge=$edge target=$target delay=$startDelay")
     }
 
     override fun onScrubStart() {
@@ -295,6 +307,7 @@ class AodDisplayController(
         scrub = false
         settling = false
         current = target
+        rebuildDock()
         preview.render(target, null, 0f)
         bar.setScrub(false, 0f)
         bar.setActive(indexOf(target))
@@ -330,8 +343,28 @@ class AodDisplayController(
             Prefs.KEY_ALIVE_AOD_WALLPAPER,
             Prefs.DEFAULT_ALIVE_AOD_WALLPAPER,
         )
+        val effects = EffectSettings.parse(readString(Prefs.KEY_EFFECT_CONFIG, ""))
+        preview.lockWallpaperEffect = effects.lockWallpaperEffect
+        preview.lockSpecialEffect = effects.lockSpecialEffect
+        preview.lockWallpaperIntensity =
+            effects.param(com.coloros16.liquidglass.engine.effect.EffectParams.LOCK_WP_INTENSITY) / 100f
+        preview.framePair = effects.aodFramePair
+        preview.frameCropX = effects.param(com.coloros16.liquidglass.engine.effect.EffectParams.AOD_FRAME_X) / 100f
+        preview.frameCropY = effects.param(com.coloros16.liquidglass.engine.effect.EffectParams.AOD_FRAME_Y) / 100f
+        preview.frameCropSize = effects.param(com.coloros16.liquidglass.engine.effect.EffectParams.AOD_FRAME_SIZE) / 100f
+        preview.frameCropAngle = effects.param(com.coloros16.liquidglass.engine.effect.EffectParams.AOD_FRAME_ANGLE)
+        preview.allowAodDynamic = readBoolean(
+            Prefs.KEY_EFFECT_ALLOW_AOD_DYNAMIC,
+            Prefs.DEFAULT_EFFECT_ALLOW_AOD_DYNAMIC,
+        ) || effects.aodAlwaysPlay
+        preview.aodColorMix = effects.param(com.coloros16.liquidglass.engine.effect.EffectParams.AOD_COLOR_MIX)
+        preview.aodRotateSpeed = effects.param(com.coloros16.liquidglass.engine.effect.EffectParams.AOD_ROTATE_SPEED)
+        preview.aodPhotoTilt = effects.param(com.coloros16.liquidglass.engine.effect.EffectParams.AOD_PHOTO_TILT)
+        loadFramePhoto(effects.aodFramePhoto)
+        loadStylePhoto(effects.aodPhoto)
         header.text = context.getString(style.nameRes)
         bar.setActive(indexOf(current))
+        rebuildDock()
         val dirty = draftId != appliedId || draftConfigId != appliedConfigId
         val canApply = dirty || !appliedEnabled
         apply.isEnabled = canApply
@@ -405,114 +438,243 @@ class AodDisplayController(
         return "$base $index"
     }
 
-    private fun showEffectsSheet() {
-        val (dialog, content) = buildSheet(
-            context.getString(R.string.settings_aod_effects_title),
-            context.getString(R.string.settings_aod_effects_desc),
+    /** 预览手机框内联编辑：布局配置注入 + 手势回调 → 底部抽屉面板。 */
+    private fun bindInlineEdit() {
+        val delegate = preview.edit
+        delegate.anchorOf = { state ->
+            val a = sceneSpecAnchor(state)
+            a.centerX to a.centerY
+        }
+        delegate.lockSettings = readLayout(com.coloros16.liquidglass.engine.edit.EditSurface.LOCK)
+        delegate.aodSettings = readLayout(com.coloros16.liquidglass.engine.edit.EditSurface.AOD)
+        delegate.interactive = true
+        delegate.listener = object : AodPreviewEditDelegate.Listener {
+            override fun onClockTapped() {
+                editPanel?.showClockPanel(currentLayout() ?: return)
+            }
+
+            override fun onWidgetHold(typeId: String) {
+                editPanel?.showWidgetMenu(typeId, currentLayout() ?: return)
+            }
+
+            override fun onWidgetTapped(typeId: String) {
+                editPanel?.showWidgetMenu(typeId, currentLayout() ?: return)
+            }
+
+            override fun onPillTapped(typeId: String) {
+                editPanel?.showPillPanel(typeId, currentLayout() ?: return)
+            }
+
+            override fun onLayoutEdited() {
+                persistLayout()
+            }
+
+            override fun onSelectionChanged(selected: Boolean) {
+                if (selected) hint.text = context.getString(R.string.settings_aod_edit_inline_hint)
+                else hint.text = defaultHint
+            }
+        }
+        editPanel = AodInlineEditPanel(
+            context = context,
+            onChanged = {
+                persistLayout()
+                preview.invalidate()
+            },
         )
-        addSwitchRow(
-            content,
-            context.getString(R.string.settings_alive_aod_handoff),
-            context.getString(R.string.settings_alive_aod_handoff_desc),
-            Prefs.KEY_ALIVE_AOD_HANDOFF,
-            Prefs.DEFAULT_ALIVE_AOD_HANDOFF,
-        ) { checked ->
-            writeBoolean(Prefs.KEY_ALIVE_AOD_HANDOFF, checked)
-            Lg.i(TAG, "effect handoff=$checked")
-        }
-        addDivider(content)
-        addSwitchRow(
-            content,
-            context.getString(R.string.settings_alive_aod_style),
-            context.getString(R.string.settings_alive_aod_style_desc),
-            Prefs.KEY_ALIVE_AOD_STYLE,
-            Prefs.DEFAULT_ALIVE_AOD_STYLE,
-        ) { checked ->
-            writeBoolean(Prefs.KEY_ALIVE_AOD_STYLE, checked)
-            appliedEnabled = checked
-            updateUi()
-            Lg.i(TAG, "effect style=$checked")
-        }
-        addDivider(content)
-        addSwitchRow(
-            content,
-            context.getString(R.string.settings_alive_aod_glass),
-            context.getString(R.string.settings_alive_aod_glass_desc),
-            Prefs.KEY_ALIVE_AOD_GLASS,
-            Prefs.DEFAULT_ALIVE_AOD_GLASS,
-        ) { checked ->
-            writeBoolean(Prefs.KEY_ALIVE_AOD_GLASS, checked)
-            Lg.i(TAG, "effect glass=$checked")
-        }
-        dialog.show()
+        Lg.i(TAG, "inline edit bound lock=${delegate.lockSettings != null} aod=${delegate.aodSettings != null}")
     }
 
-    private fun showWallpaperSheet() {
-        val (dialog, content) = buildSheet(
-            context.getString(R.string.settings_aod_wallpaper_title),
-            context.getString(R.string.settings_aod_wallpaper_desc),
-        )
-        val row = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(dpi(16f), dpi(4f), dpi(16f), dpi(8f))
+    private fun sceneSpecAnchor(state: SceneState): com.coloros16.liquidglass.engine.ClockAnchor =
+        AodSceneCatalog.forStyle(draftId)?.clockAnchors?.get(state)
+            ?: com.coloros16.liquidglass.engine.ClockAnchor()
+
+    private fun currentLayout(): com.coloros16.liquidglass.engine.edit.LockLayoutSettings? =
+        if (current == SceneState.AOD) preview.edit.aodSettings else preview.edit.lockSettings
+
+    private fun currentSurface(): com.coloros16.liquidglass.engine.edit.EditSurface =
+        if (current == SceneState.AOD) com.coloros16.liquidglass.engine.edit.EditSurface.AOD
+        else com.coloros16.liquidglass.engine.edit.EditSurface.LOCK
+
+    private fun persistLayout() {
+        val layout = currentLayout() ?: return
+        writeLayout(currentSurface(), layout)
+    }
+
+    /** 3D 场景壁纸判定：动态壁纸服务或场景族息屏样式即视为 3D 场景；按需查询 + TTL 缓存。 */
+    private fun scene3dNow(): Boolean {
+        if (com.coloros16.liquidglass.engine.effect.StyleFamilyMap.familyOf(draftId) ==
+            com.coloros16.liquidglass.engine.effect.EffectFamily.SCENE_3D
+        ) return true
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - scene3dCheckedAt < 1000L) return scene3dActive
+        scene3dCheckedAt = now
+        scene3dActive = try {
+            WallpaperManager.getInstance(context).wallpaperInfo != null
+        } catch (t: Throwable) {
+            false
         }
-        val tiles = listOf(
-            Triple(context.getString(R.string.settings_aod_wallpaper_static), intArrayOf(0xFF2D4A72.toInt(), 0xFF101A2A.toInt()), true),
-            Triple(context.getString(R.string.settings_aod_wallpaper_live), intArrayOf(0xFF1E6A72.toInt(), 0xFF0D2026.toInt()), false),
-            Triple(context.getString(R.string.settings_aod_wallpaper_import), intArrayOf(0xFF6A5320.toInt(), 0xFF241C0C.toInt()), null),
-        )
-        for ((label, colors, takeover) in tiles) {
-            val tile = LinearLayout(context).apply {
+        return scene3dActive
+    }
+
+    /** 按当前三态重建圆钮：息屏与锁屏 4（效果/壁纸/样式/其他）、桌面 3（壁纸/样式/其他）。 */
+    private fun rebuildDock() {
+        if (!::dockBar.isInitialized || dockState == current) return
+        dockState = current
+        dockBar.removeAllViews()
+        val pages = AodSettingsPages.categoriesOf(current)
+        for (pageId in pages) {
+            val label = context.getString(AodSettingsPages.categoryLabel(pageId))
+            val item = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER_HORIZONTAL
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    leftMargin = dpi(4f)
-                    rightMargin = dpi(4f)
-                }
+                gravity = Gravity.CENTER
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
+                setBackgroundResource(R.drawable.bg_aod_dock_press)
                 isClickable = true
                 isFocusable = true
-                setOnClickListener {
-                    if (takeover == null) {
-                        toast(context.getString(R.string.settings_aod_wallpaper_unavailable))
-                    } else {
-                        writeBoolean(Prefs.KEY_ALIVE_AOD_WALLPAPER, takeover)
-                        updateUi()
-                        toast(context.getString(
-                            if (takeover) R.string.settings_aod_wallpaper_takeover_on
-                            else R.string.settings_aod_wallpaper_takeover_off,
-                        ))
-                        Lg.i(TAG, "wallpaper takeover=$takeover")
-                    }
-                    dialog.dismiss()
-                }
+                setOnClickListener { openCategory(pageId) }
             }
-            tile.addView(
-                View(context).apply {
-                    background = GradientDrawable(GradientDrawable.Orientation.TL_BR, colors).apply {
-                        cornerRadius = dp(12f)
-                        setStroke(dpi(1f), seamHi)
-                    }
+            item.addView(
+                android.widget.ImageView(context).apply {
+                    setBackgroundResource(R.drawable.bg_aod_dock)
+                    setImageResource(AodSettingsPages.categoryIcon(pageId))
+                    setColorFilter(0xF2FFFFFF.toInt())
+                    setPadding(dpi(10f), dpi(10f), dpi(10f), dpi(10f))
+                    contentDescription = label
                 },
-                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dpi(92f)),
+                LinearLayout.LayoutParams(dpi(40f), dpi(40f)),
             )
-            tile.addView(
+            item.addView(
                 TextView(context).apply {
                     text = label
-                    textSize = 11.5f
+                    setTextColor(0xB8FFFFFF.toInt())
+                    textSize = 11f
                     gravity = Gravity.CENTER
-                    setTextColor(ink300)
-                    setPadding(0, dpi(6f), 0, 0)
+                    setPadding(0, dpi(5f), 0, 0)
                 },
-                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT),
             )
-            row.addView(tile)
+            dockBar.addView(item)
+        }
+        Lg.i(TAG, "dock rebuilt state=$current buttons=${pages.size}")
+    }
+
+    /** 圆钮 → 页内面板：设置分类复用声明式清单，样式用模板抽屉，全部不离开本页。 */
+    private fun openCategory(pageId: String) {
+        settingsSheet?.dismiss()
+        settingsSheet = null
+        if (pageId == AodSettingsPages.PAGE_AOD_STYLE || pageId == AodSettingsPages.PAGE_LOCK_STYLE) {
+            showStyleSheet()
+            return
+        }
+        val page = AodSettingsPages.of(context, pageId, styleId = draftId) ?: return
+        val (dialog, content) = buildSheet(
+            context.getString(AodSettingsPages.categoryLabel(pageId)),
+            stateName(current),
+        )
+        val panel = ScrollView(context).apply {
+            addView(
+                LinearLayout(context).apply {
+                    id = R.id.aodSettingsContainer
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dpi(16f), 0, dpi(16f), dpi(8f))
+                },
+                ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
+            )
         }
         content.addView(
-            row,
+            panel,
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
         )
+        val controller = AodSettingsController(
+            context = context,
+            root = panel,
+            page = page,
+            readSettings = readSettings,
+            writeSettings = writeSettings,
+            readBool = readBoolean,
+            writeBool = writeBoolean,
+            push = { screenId ->
+                val opener = openScreen
+                if (opener == null) {
+                    Lg.w(TAG, "panel nav no opener screen=$screenId")
+                } else {
+                    settingsSheet?.dismiss()
+                    settingsSheet = null
+                    Lg.i(TAG, "panel nav open screen=$screenId")
+                    opener(screenId)
+                }
+            },
+            scene3dActive = { scene3dNow() },
+            onChanged = { updateUi() },
+            styleOverride = draftId,
+            editAction = { action ->
+                if (action == "widget_picker") {
+                    currentLayout()?.let { editPanel?.showWidgetPicker(it) }
+                }
+            },
+            pickPhoto = pickPhoto,
+        )
+        controller.bind()
+        settingsSheet = dialog
+        dialog.setOnDismissListener { settingsSheet = null }
         dialog.show()
-        Lg.i(TAG, "wallpaper sheet open")
+        Lg.i(TAG, "panel open page=$pageId state=$current style=$draftId")
+    }
+
+    private var stylePhotoUri: String? = null
+
+    private fun loadStylePhoto(uri: String) {
+        if (uri == stylePhotoUri) return
+        stylePhotoUri = uri
+        if (uri.isBlank()) {
+            preview.stylePhoto = null
+            return
+        }
+        Thread {
+            val bitmap = try {
+                val parsed = android.net.Uri.parse(uri)
+                context.contentResolver.openInputStream(parsed)?.use { stream ->
+                    android.graphics.BitmapFactory.decodeStream(stream)
+                }
+            } catch (t: Throwable) {
+                Lg.w(TAG, "style photo load failed ${t.javaClass.simpleName}: ${t.message}")
+                null
+            }
+            if (bitmap != null) {
+                preview.post { preview.stylePhoto = bitmap }
+            }
+        }.apply { name = "aod-style-photo"; isDaemon = true }.start()
+    }
+
+    private var framePhotoUri: String? = null
+
+    private fun loadFramePhoto(uri: String) {
+        if (uri == framePhotoUri) return
+        framePhotoUri = uri
+        if (uri.isBlank()) {
+            preview.framePhoto = null
+            return
+        }
+        Thread {
+            val bitmap = try {
+                if (uri == "sakura") {
+                    context.assets.open("aod/examples/sakura-color.jpg").use { stream ->
+                        android.graphics.BitmapFactory.decodeStream(stream)
+                    }
+                } else {
+                    val parsed = android.net.Uri.parse(uri)
+                    context.contentResolver.openInputStream(parsed)?.use { stream ->
+                        android.graphics.BitmapFactory.decodeStream(stream)
+                    }
+                }
+            } catch (t: Throwable) {
+                Lg.w(TAG, "frame photo load failed ${t.javaClass.simpleName}: ${t.message}")
+                null
+            }
+            if (bitmap != null) {
+                preview.post { preview.framePhoto = bitmap }
+            }
+        }.apply { name = "aod-frame-photo"; isDaemon = true }.start()
     }
 
     private fun loadWallpaper() {
@@ -620,63 +782,6 @@ class AodDisplayController(
             dialog.behavior.skipCollapsed = true
         }
         return dialog to content
-    }
-
-    private fun addSwitchRow(
-        parent: LinearLayout,
-        title: String,
-        desc: String,
-        key: String,
-        default: Boolean,
-        onChanged: (Boolean) -> Unit,
-    ) {
-        val row = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dpi(16f), dpi(14f), dpi(16f), dpi(14f))
-        }
-        val texts = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        texts.addView(
-            TextView(context).apply {
-                text = title
-                textSize = 15f
-                setTextColor(ink100)
-            },
-        )
-        texts.addView(
-            TextView(context).apply {
-                text = desc
-                textSize = 10.5f
-                setTextColor(ink400)
-                setPadding(0, dpi(3f), dpi(10f), 0)
-            },
-        )
-        row.addView(texts)
-        val toggle = Switch(context).apply {
-            text = ""
-            isChecked = readBoolean(key, default)
-            setThumbDrawable(ContextCompat.getDrawable(context, R.drawable.lg_sw_thumb))
-            setTrackDrawable(ContextCompat.getDrawable(context, R.drawable.lg_sw_track))
-            setOnCheckedChangeListener { _, checked -> onChanged(checked) }
-        }
-        row.addView(toggle)
-        parent.addView(
-            row,
-            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
-        )
-    }
-
-    private fun addDivider(parent: LinearLayout) {
-        parent.addView(
-            View(context).apply { setBackgroundColor(seam) },
-            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dpi(1f)).apply {
-                leftMargin = dpi(16f)
-                rightMargin = dpi(16f)
-            },
-        )
     }
 
     private fun missing(id: String) {

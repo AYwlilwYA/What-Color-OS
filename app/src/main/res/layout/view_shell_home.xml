@@ -42,6 +42,7 @@
                         android:paddingHorizontal="22dp">
 
                         <TextView
+                            android:id="@+id/heroMeta"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:letterSpacing="0.08"
@@ -50,6 +51,7 @@
                             android:textSize="10sp" />
 
                         <TextView
+                            android:id="@+id/heroTitle"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="6dp"
@@ -63,6 +65,7 @@
                             android:textStyle="bold" />
 
                         <TextView
+                            android:id="@+id/heroDesc"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="4dp"
@@ -121,7 +124,7 @@
                         android:textAppearance="?attr/textAppearanceLabelMedium"
                         android:textColor="@color/lg_ink_300" />
 
-                    <Switch
+                    <com.coloros16.liquidglass.ui.LgSwitch
                         android:id="@+id/homeMasterSwitch"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"

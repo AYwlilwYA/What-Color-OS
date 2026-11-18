@@ -34,7 +34,37 @@ data class StatusBarConfig(
     val clockGravity: Int = 0,
     val notificationIconsRight: Boolean = false,
     val duoEnable: Boolean = false,
+    val qsClockScale: Float = 1f,
+    val qsClockDxDp: Int = 0,
+    val qsClockDyDp: Int = 0,
+    val carrierText: String = "",
+    val notifClockEnable: Boolean = false,
+    val notifClockGravity: Int = 0,
+    val notifDatePosition: Int = 0,
+    val notifClockDateGapDp: Int = 10,
+    val notifClockScale: Float = 1f,
+    val notifDateSizeSp: Int = 0,
+    val notifHideSettingsBtn: Boolean = false,
+    val ccMarginLeftDp: Int = -1,
+    val ccMarginRightDp: Int = -1,
 ) {
+    /** 下拉顶栏时钟是否需要改动（默认值恒 false，零写入）。 */
+    val qsClockTouched: Boolean
+        get() = qsClockScale != 1f || qsClockDxDp != 0 || qsClockDyDp != 0
+
+    /** 运营商替换文本：开关关或文本空白时为空串（= 不替换）。 */
+    val carrierReplacement: String
+        get() = carrierText
+
+    /** 通知中心时钟是否需要改动（总开关关时恒 false）。 */
+    val notifClockTouched: Boolean
+        get() = notifClockEnable && (
+            notifClockGravity != 0 ||
+                notifDatePosition != 0 ||
+                notifClockScale != 1f ||
+                notifDateSizeSp != 0 ||
+                notifClockDateGapDp != Prefs.DEFAULT_NOTIF_CLOCK_DATE_GAP
+            )
     /** 是否有任一功能实际开启（总闸关闭时恒 false）。 */
     val anyFeature: Boolean
         get() = enabled && (
@@ -57,7 +87,13 @@ data class StatusBarConfig(
                 clockShowDate ||
                 clockGravity != 0 ||
                 notificationIconsRight ||
-                duoEnable
+                duoEnable ||
+                qsClockTouched ||
+                carrierReplacement.isNotEmpty() ||
+                notifClockTouched ||
+                (notifClockEnable && notifHideSettingsBtn) ||
+                ccMarginLeftDp >= 0 ||
+                ccMarginRightDp >= 0
             )
 
     companion object {
@@ -130,6 +166,27 @@ object StatusBarSettings {
             clockGravity = int(p, Prefs.KEY_STATUSBAR_CLOCK_GRAVITY, Prefs.DEFAULT_STATUSBAR_CLOCK_GRAVITY).coerceIn(0, 2),
             notificationIconsRight = bool(p, Prefs.KEY_STATUSBAR_NOTIFICATION_ICONS_RIGHT, Prefs.DEFAULT_STATUSBAR_NOTIFICATION_ICONS_RIGHT),
             duoEnable = bool(p, Prefs.KEY_STATUSBAR_DUO, Prefs.DEFAULT_STATUSBAR_DUO),
+            qsClockScale = int(p, Prefs.KEY_STATUSBAR_QS_CLOCK_SCALE, Prefs.DEFAULT_STATUSBAR_QS_CLOCK_SCALE)
+                .coerceIn(Prefs.STATUSBAR_QS_CLOCK_SCALE_MIN, Prefs.STATUSBAR_QS_CLOCK_SCALE_MAX) / 100f,
+            qsClockDxDp = int(p, Prefs.KEY_STATUSBAR_QS_CLOCK_DX, Prefs.DEFAULT_STATUSBAR_QS_CLOCK_DX)
+                .coerceIn(Prefs.STATUSBAR_QS_CLOCK_OFFSET_MIN, Prefs.STATUSBAR_QS_CLOCK_OFFSET_MAX),
+            qsClockDyDp = int(p, Prefs.KEY_STATUSBAR_QS_CLOCK_DY, Prefs.DEFAULT_STATUSBAR_QS_CLOCK_DY)
+                .coerceIn(Prefs.STATUSBAR_QS_CLOCK_OFFSET_MIN, Prefs.STATUSBAR_QS_CLOCK_OFFSET_MAX),
+            carrierText = carrierText(p),
+            notifClockEnable = bool(p, Prefs.KEY_NOTIF_CLOCK_ENABLE, Prefs.DEFAULT_NOTIF_CLOCK_ENABLE),
+            notifClockGravity = int(p, Prefs.KEY_NOTIF_CLOCK_GRAVITY, Prefs.DEFAULT_NOTIF_CLOCK_GRAVITY).coerceIn(0, 3),
+            notifDatePosition = int(p, Prefs.KEY_NOTIF_DATE_POSITION, Prefs.DEFAULT_NOTIF_DATE_POSITION).coerceIn(0, 3),
+            notifClockDateGapDp = int(p, Prefs.KEY_NOTIF_CLOCK_DATE_GAP, Prefs.DEFAULT_NOTIF_CLOCK_DATE_GAP)
+                .coerceIn(Prefs.NOTIF_CLOCK_DATE_GAP_MIN, Prefs.NOTIF_CLOCK_DATE_GAP_MAX),
+            notifClockScale = int(p, Prefs.KEY_NOTIF_CLOCK_SCALE, Prefs.DEFAULT_NOTIF_CLOCK_SCALE)
+                .coerceIn(Prefs.NOTIF_CLOCK_SCALE_MIN, Prefs.NOTIF_CLOCK_SCALE_MAX) / 100f,
+            notifDateSizeSp = int(p, Prefs.KEY_NOTIF_DATE_SIZE, Prefs.DEFAULT_NOTIF_DATE_SIZE)
+                .coerceIn(Prefs.NOTIF_DATE_SIZE_MIN, Prefs.NOTIF_DATE_SIZE_MAX),
+            notifHideSettingsBtn = bool(p, Prefs.KEY_NOTIF_HIDE_SETTINGS_BTN, Prefs.DEFAULT_NOTIF_HIDE_SETTINGS_BTN),
+            ccMarginLeftDp = int(p, Prefs.KEY_CC_MARGIN_LEFT, Prefs.DEFAULT_CC_MARGIN_LEFT)
+                .coerceIn(Prefs.CC_MARGIN_MIN, Prefs.CC_MARGIN_MAX),
+            ccMarginRightDp = int(p, Prefs.KEY_CC_MARGIN_RIGHT, Prefs.DEFAULT_CC_MARGIN_RIGHT)
+                .coerceIn(Prefs.CC_MARGIN_MIN, Prefs.CC_MARGIN_MAX),
         )
     }
 
@@ -161,4 +218,14 @@ object StatusBarSettings {
     }
 
     private fun int(p: SharedPreferences, key: String, def: Int): Int = Prefs.readIntCompat(p, key, def)
+
+    /** 运营商替换文本：开关关或读失败一律空串（= 不替换）。 */
+    private fun carrierText(p: SharedPreferences): String {
+        if (!bool(p, Prefs.KEY_CARRIER_TEXT_ENABLE, Prefs.DEFAULT_CARRIER_TEXT_ENABLE)) return ""
+        return try {
+            p.getString(Prefs.KEY_CARRIER_TEXT_CUSTOM, Prefs.DEFAULT_CARRIER_TEXT_CUSTOM)?.trim().orEmpty()
+        } catch (_: Throwable) {
+            ""
+        }
+    }
 }

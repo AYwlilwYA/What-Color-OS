@@ -188,6 +188,27 @@
         <LinearLayout style="@style/ShellGroupHead">
             <TextView
                 style="@style/ShellGroupTitle"
+                android:text="@string/settings_home_style_group" />
+            <View style="@style/ShellGroupRule" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/homeStyleList"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_plate"
+            android:divider="@drawable/bg_seam_line_inset"
+            android:dividerHeight="1dp"
+            android:orientation="vertical"
+            android:showDividers="middle" />
+
+        <TextView
+            style="@style/ShellHint"
+            android:text="@string/settings_home_style_hint" />
+
+        <LinearLayout style="@style/ShellGroupHead">
+            <TextView
+                style="@style/ShellGroupTitle"
                 android:text="@string/settings_home_quick_jump" />
             <TextView android:id="@+id/infoHomeJump" style="@style/ShellGroupInfo" />
             <View style="@style/ShellGroupRule" />

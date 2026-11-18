@@ -24,6 +24,7 @@
 #endif
 
 #include "lginternal.h"
+#include "elfsym.h"
 
 #define TAG_E "LG-GLASS"
 #define CONF_PATH "/system_ext/lib64/oplusex/lg_glass.conf"
@@ -95,12 +96,20 @@ static _Atomic long g_stat_calls;
 static float g_last_rect[4];
 
 #if defined(__aarch64__) && !defined(LG_HOST_TEST)
-#define LG_RGEN_N 7
-// B 路 generate 家族候选（sf_bin 内偏移，vaddr==file offset）
-// C15: Kawase/Gaussian/IBlurUtilsExt（vtable+spec150 交叉实锤）；C16: 原四候选
-static const unsigned long k_rgen_off[LG_RGEN_N] = {
+#define LG_RGEN_N 4
+// B 路 generate 家族：符号名为主（跨 ROM 通用），硬偏移仅作符号缺失时的兜底
+static const char *const k_rgen_sym[LG_RGEN_N] = {
+    "_ZNK7android12renderengine4skia16KawaseBlurFilter8generateEPNS1_14SkiaGpuContextEj5sk_spI7SkImageERK6SkRect",
+    "_ZNK7android12renderengine4skia18GaussianBlurFilter8generateEPNS1_14SkiaGpuContextEj5sk_spI7SkImageERK6SkRect",
+    "_ZNK7android12renderengine4skia20KawaseBlurDualFilter8generateEPNS1_14SkiaGpuContextEj5sk_spI7SkImageERK6SkRect",
+    "_ZN7android12renderengine4skia13IBlurUtilsExt8generateEP18GrRecordingContextj5sk_spI7SkImageERK6SkRect"};
+// 兜底偏移：C15 三项 + C16 四项，paciasp/RX 门过滤不适用项
+#define LG_RGEN_FB_N 7
+static const unsigned long k_rgen_fb[LG_RGEN_FB_N] = {
     0x418a70UL, 0x640b24UL, 0x8d2194UL,
     0x4de8b0UL, 0x7150e0UL, 0x715ad8UL, 0x9c9678UL};
+static unsigned long g_rgen_off[LG_RGEN_N];
+static int g_rgen_resolved;
 static void *g_rorig[LG_RGEN_N];
 static void *g_rtramp[LG_RGEN_N];
 static _Atomic int g_rdone[LG_RGEN_N];
@@ -585,7 +594,7 @@ static void lg_stat_print(void) {
 #if defined(__aarch64__) && !defined(LG_HOST_TEST)
     lg_logf("%s-STAT calls=%ld ok=%ld fb=%ld err=%d hit=%ld rej=%ld over=%ld "
             "streak=%d rect=(%.0f,%.0f,%.0f,%.0f) q=[%ld,%ld,%ld,%ld,%ld] "
-            "R calls=%ld rhit=%ld rfb=%ld rsites=[%ld,%ld,%ld,%ld,%ld,%ld,%ld] "
+            "R calls=%ld rhit=%ld rfb=%ld rsites=[%ld,%ld,%ld,%ld] "
             "Rrect=(%.0f,%.0f,%.0f,%.0f) "
             "gate=%d prop=%d file=%d alive=%d untried=%d region_n=%d",
             TAG_E, atomic_load(&g_calls), atomic_load(&g_ok), atomic_load(&g_fb),
@@ -597,8 +606,6 @@ static void lg_stat_print(void) {
             atomic_load(&g_r_calls), atomic_load(&g_r_hit), atomic_load(&g_r_fb),
             atomic_load(&g_r_site[0]), atomic_load(&g_r_site[1]),
             atomic_load(&g_r_site[2]), atomic_load(&g_r_site[3]),
-            atomic_load(&g_r_site[4]), atomic_load(&g_r_site[5]),
-            atomic_load(&g_r_site[6]),
             g_r_last[0], g_r_last[1], g_r_last[2], g_r_last[3],
             lg_boot_gate_open() ? 1 : 0, g_cfg.prop_on, g_cfg.file_on,
             lg_glass_engine_alive() ? 1 : 0, lg_glass_arm_untried() ? 1 : 0,
@@ -758,16 +765,6 @@ __attribute__((used)) static void lg_region_w2(void *a0, void *a1, unsigned a2, 
 __attribute__((used)) static void lg_region_w3(void *a0, void *a1, unsigned a2, void *a3, void *a4, void *sret) {
     lg_region_worker(3, a0, a1, a2, a3, a4, sret);
 }
-__attribute__((used)) static void lg_region_w4(void *a0, void *a1, unsigned a2, void *a3, void *a4, void *sret) {
-    lg_region_worker(4, a0, a1, a2, a3, a4, sret);
-}
-__attribute__((used)) static void lg_region_w5(void *a0, void *a1, unsigned a2, void *a3, void *a4, void *sret) {
-    lg_region_worker(5, a0, a1, a2, a3, a4, sret);
-}
-__attribute__((used)) static void lg_region_w6(void *a0, void *a1, unsigned a2, void *a3, void *a4, void *sret) {
-    lg_region_worker(6, a0, a1, a2, a3, a4, sret);
-}
-
 // 入口跳板：sret x8 → x5（第6参），尾分支保调用方 lr；首条 bti jc 过间接跳转落地垫检查
 __attribute__((naked)) static void lg_rthunk0(void) {
     __asm__ volatile("bti jc\n mov x5, x8\n b lg_region_w0");
@@ -781,19 +778,8 @@ __attribute__((naked)) static void lg_rthunk2(void) {
 __attribute__((naked)) static void lg_rthunk3(void) {
     __asm__ volatile("bti jc\n mov x5, x8\n b lg_region_w3");
 }
-__attribute__((naked)) static void lg_rthunk4(void) {
-    __asm__ volatile("bti jc\n mov x5, x8\n b lg_region_w4");
-}
-__attribute__((naked)) static void lg_rthunk5(void) {
-    __asm__ volatile("bti jc\n mov x5, x8\n b lg_region_w5");
-}
-__attribute__((naked)) static void lg_rthunk6(void) {
-    __asm__ volatile("bti jc\n mov x5, x8\n b lg_region_w6");
-}
-
 static void *const g_rthunk[LG_RGEN_N] = {
-    (void *)lg_rthunk0, (void *)lg_rthunk1, (void *)lg_rthunk2, (void *)lg_rthunk3,
-    (void *)lg_rthunk4, (void *)lg_rthunk5, (void *)lg_rthunk6};
+    (void *)lg_rthunk0, (void *)lg_rthunk1, (void *)lg_rthunk2, (void *)lg_rthunk3};
 
 static void lg_region_worker(int site, void *a0, void *a1, unsigned a2,
                              void *a3, void *a4, void *sret) {
@@ -892,6 +878,37 @@ static void lg_region_worker(int site, void *a0, void *a1, unsigned a2,
 // 入口 24B = bti jc + ldr x17,#8 + br x17 + thunk + 桥 bti jc（覆盖原指令 0..5），
 // cave 40B = bti jc + 原指令 0..4 重放 + ldr/br → 桥（bti jc）→ 原指令 6 起原位续跑；
 // worker 调原函数 = br 进 cave（重放 paciasp 与保存序，g_rorig 指 cave 不指 addr+16）
+// generate 家族地址解析：符号表优先（跨 ROM），全 miss 才退回硬偏移表
+static void resolve_rgen_offsets(const char *exe, unsigned long rx_s, unsigned long rx_e,
+                                 unsigned long bias) {
+    if (g_rgen_resolved) return;
+    int hit = 0;
+    for (int i = 0; i < LG_RGEN_N; i++) {
+        unsigned long va = 0;
+        if (lg_elfsym_find(exe, k_rgen_sym[i], &va) == 0 && va) {
+            unsigned long a = bias + va;
+            if (a >= rx_s && a + 24 <= rx_e) {
+                g_rgen_off[i] = va;
+                hit++;
+                lg_logf("%s-SYM site=%d off=0x%lx src=%d", TAG_E, i, va,
+                        lg_elfsym_last_source());
+                continue;
+            }
+            lg_logf("%s-SYM site=%d off=0x%lx 超 RX 段，弃用", TAG_E, i, va);
+        }
+        g_rgen_off[i] = 0;
+    }
+    if (hit > 0) {
+        g_rgen_resolved = 1;
+        lg_logf("%s-SYM resolved=%d/%d（符号路径）", TAG_E, hit, LG_RGEN_N);
+        return;
+    }
+    // 符号全 miss：兜底表逐项试，paciasp/RX 门在安装时过滤
+    for (int i = 0; i < LG_RGEN_N && i < LG_RGEN_FB_N; i++) g_rgen_off[i] = k_rgen_fb[i];
+    g_rgen_resolved = 1;
+    lg_logf("%s-SYM miss=%d 全表，回退硬偏移兜底", TAG_E, LG_RGEN_N);
+}
+
 static int install_region_sites(const char **step) {
     if (atomic_load(&g_region_n) >= LG_RGEN_N) {
         *step = "already";
@@ -904,13 +921,15 @@ static int install_region_sites(const char **step) {
         *step = "sf-no-maps";
         return -1;
     }
+    resolve_rgen_offsets(exe, rx_s, rx_e, bias);
     int got = 0;
     for (int i = 0; i < LG_RGEN_N; i++) {
         if (atomic_load(&g_rdone[i])) {
             got++;
             continue;
         }
-        unsigned long addr = bias + k_rgen_off[i];
+        if (!g_rgen_off[i]) continue;
+        unsigned long addr = bias + g_rgen_off[i];
         if (addr < rx_s || addr + 24 > rx_e) {
             lg_logf("%s-INL site=%d addr=%p 超出 RX 段 [%p,%p) 跳过",
                     TAG_E, i, (void *)addr, (void *)rx_s, (void *)rx_e);
@@ -969,7 +988,7 @@ static int install_region_sites(const char **step) {
         atomic_fetch_add(&g_region_n, 1);
         got++;
         lg_logf("%s-INL site=%d bias=%p off=0x%lx addr=%p thunk=%p cave=%p",
-                TAG_E, i, (void *)bias, k_rgen_off[i], (void *)addr,
+                TAG_E, i, (void *)bias, g_rgen_off[i], (void *)addr,
                 g_rthunk[i], (void *)cave);
     }
     if (got > 0) {

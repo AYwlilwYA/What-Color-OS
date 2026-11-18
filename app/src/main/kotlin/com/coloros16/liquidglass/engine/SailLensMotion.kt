@@ -26,8 +26,8 @@ object SailLensMotion {
 
     /** 展开后装饰层转到的角度；照片角度停在同一圈的等价位置。 */
     const val DECOR_ANGLE_DEG = -149f
-    const val LOCK_ANGLE_DEG = 0f
-    const val HOME_ANGLE_DEG = 0f
+    const val LOCK_ANGLE_DEG = -360f
+    const val HOME_ANGLE_DEG = -360f
 
     /** 照片旋转轴距镜片中心的像素偏移（参考宽度 1080）。 */
     const val PIVOT_PX = 200f
@@ -280,9 +280,9 @@ object SailLensMotion {
                 out.blur = lerp(BLUR, 0f, f(EASE, p, 183f / total, direct))
                 out.decorAlpha = lerp(DECOR_ALPHA, 0f, f(EASE, p, 33f / total, direct))
                 out.decorAngleDeg = lerp(0f, DECOR_ANGLE_DEG, f(DEFAULT, p, 1f, direct))
-                out.angleDeg = lerp(spinDeg, nearestRotation(spinDeg, -360f), f(ROTATE, p, 24f / total, direct))
+                out.angleDeg = spinDeg
                 out.ripple = lerp(0f, 1.24f, f(EASE, p, 1f, direct))
-                out.spinSpeed = 0f
+                out.spinSpeed = 1f
             }
 
             TransitionEdge.AOD_TO_HOME -> {
@@ -295,13 +295,13 @@ object SailLensMotion {
                 out.blur = lerp(BLUR, 0f, f(EASE, p, 183f / total, direct))
                 out.decorAlpha = lerp(DECOR_ALPHA, 0f, f(EASE, p, 33f / total, direct))
                 out.decorAngleDeg = lerp(0f, DECOR_ANGLE_DEG, f(DEFAULT, p, 1f, direct))
-                out.angleDeg = lerp(spinDeg, nearestRotation(spinDeg, -360f), f(ROTATE, p, 24f / total, direct))
+                out.angleDeg = spinDeg
                 out.ripple = lerp(0f, 1.24f, f(EASE, p, 1f, direct))
-                out.spinSpeed = 0f
+                out.spinSpeed = 1f
             }
 
             TransitionEdge.LOCK_TO_AOD -> {
-                out.angleDeg = LOCK_ANGLE_DEG
+                out.angleDeg = spinDeg
                 out.scale = lerp(expanded, RADIUS, f(COLLAPSE, p, 1f, direct))
                 out.centerX = lerp(0.5f, aodX, f(COLLAPSE, p, 1f, direct))
                 out.centerY = lerp(0.5f, aodY, f(COLLAPSE, p, 1f, direct))
@@ -314,7 +314,7 @@ object SailLensMotion {
             }
 
             TransitionEdge.HOME_TO_AOD -> {
-                out.angleDeg = HOME_ANGLE_DEG
+                out.angleDeg = spinDeg
                 out.scale = lerp(expanded, RADIUS, f(COLLAPSE, p, 1f, direct))
                 out.centerX = lerp(0.5f, aodX, f(COLLAPSE, p, 1f, direct))
                 out.centerY = lerp(0.5f, aodY, f(COLLAPSE, p, 1f, direct))
@@ -334,7 +334,7 @@ object SailLensMotion {
                 out.distortion = lerp(0f, 0f, move)
                 out.decorAlpha = 0f
                 out.blur = lerp(0f, 16f, f(EASE, p, 1f, direct))
-                out.angleDeg = lerp(LOCK_ANGLE_DEG, nearestRotation(LOCK_ANGLE_DEG, -360f), f(ROTATE, p, LOCK_TO_HOME_ANGLE_MS / LOCK_TO_HOME_MS, direct))
+                out.angleDeg = spinDeg
                 out.decorAngleDeg = DECOR_ANGLE_DEG
                 out.ripple = lerp(1.24f, 1.24f, move)
                 out.spinSpeed = 0f
@@ -347,7 +347,7 @@ object SailLensMotion {
                 out.distortion = 0f
                 out.decorAlpha = 0f
                 out.blur = lerp(16f, 0f, f(EASE, p, 0f, direct))
-                out.angleDeg = lerp(HOME_ANGLE_DEG, nearestRotation(HOME_ANGLE_DEG, -360f), f(ROTATE, p, 24f / SystemSceneMotion.HOME_TO_LOCK_MS, direct))
+                out.angleDeg = spinDeg
                 out.decorAngleDeg = DECOR_ANGLE_DEG
                 out.ripple = 1.24f
                 out.spinSpeed = 0f

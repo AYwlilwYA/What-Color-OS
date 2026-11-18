@@ -12,12 +12,14 @@ import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
+import com.coloros16.liquidglass.engine.SceneSkyMath
 import com.coloros16.liquidglass.engine.SceneState
 import com.coloros16.liquidglass.engine.from
 import com.coloros16.liquidglass.engine.to
 import com.coloros16.liquidglass.engine.edit.ClockFonts
 import com.coloros16.liquidglass.engine.edit.ClockInfo
 import com.coloros16.liquidglass.engine.edit.ClockLayout
+import com.coloros16.liquidglass.engine.edit.ClockStyle
 import com.coloros16.liquidglass.engine.edit.EditAxis
 import com.coloros16.liquidglass.engine.edit.EditLayoutSolver
 import com.coloros16.liquidglass.engine.edit.EditSurface
@@ -78,6 +80,9 @@ class AodPreviewEditDelegate(private val host: View) {
     private var startVX = 0f
     private var startVY = 0f
     private var startScale = 1f
+    private var resizeAnchorLeft = 0f
+    private var resizeAnchorTop = 0f
+    private var lastTimeText = "10:08"
     private var guideX = -1f
     private var guideY = -1f
 
@@ -89,6 +94,7 @@ class AodPreviewEditDelegate(private val host: View) {
     private companion object {
         const val AOD_DEFAULT_Y = 0.435f
         const val LOCK_DEFAULT_Y = 0.155f
+        const val DATE_COLOR = 0xFFE7EDF4.toInt()
     }
 
     private val clockBounds = RectF()
@@ -230,6 +236,8 @@ class AodPreviewEditDelegate(private val host: View) {
                     target = Kind.CLOCK
                     tracking = true
                     startScale = s.clockScale
+                    resizeAnchorLeft = clockBounds.left
+                    resizeAnchorTop = clockBounds.top
                     return true
                 }
                 if (!pick(x, y, s)) {
@@ -282,9 +290,7 @@ class AodPreviewEditDelegate(private val host: View) {
                     handler.removeCallbacks(holdWidget)
                 }
                 if (resizing) {
-                    val base = min(phoneRect.width(), phoneRect.height())
-                    val delta = (dy + dx) / (base * 0.35f)
-                    s.clockScale = (startScale + delta).coerceIn(LockLayoutSettings.MIN_CLOCK_SCALE, fitMaxScale(s))
+                    resizeClock(s, dx, dy)
                     host.invalidate()
                     return true
                 }
@@ -300,9 +306,7 @@ class AodPreviewEditDelegate(private val host: View) {
                 handler.removeCallbacks(holdWidget)
                 val edited = resizing || (armed && moved)
                 if (resizing) {
-                    val base = min(phoneRect.width(), phoneRect.height())
-                    val delta = ((y - downY) + (x - downX)) / (base * 0.35f)
-                    s.clockScale = (startScale + delta).coerceIn(LockLayoutSettings.MIN_CLOCK_SCALE, fitMaxScale(s))
+                    resizeClock(s, x - downX, y - downY)
                     clampClock(s)
                 }
                 resizing = false
@@ -339,10 +343,18 @@ class AodPreviewEditDelegate(private val host: View) {
     }
 
     /** 编辑模式下接管时钟绘制：用布局配置的位置/字体/颜色画预览时钟。 */
-    fun drawClockOverride(canvas: Canvas, w: Float, h: Float, time: String, date: String): Boolean {
+    fun drawClockOverride(
+        canvas: Canvas,
+        w: Float,
+        h: Float,
+        time: String,
+        date: String,
+        sceneColor: Int = 0,
+    ): Boolean {
         val s = settings ?: return false
         if (state != SceneState.AOD && state != SceneState.LOCK) return false
-        drawClock(canvas, s, w, h, time, date)
+        lastTimeText = time
+        drawClock(canvas, s, w, h, time, date, sceneColor)
         return true
     }
 
@@ -380,7 +392,15 @@ class AodPreviewEditDelegate(private val host: View) {
         return 0f to 0f
     }
 
-    private fun drawClock(canvas: Canvas, s: LockLayoutSettings, w: Float, h: Float, time: String, date: String) {
+    private fun drawClock(
+        canvas: Canvas,
+        s: LockLayoutSettings,
+        w: Float,
+        h: Float,
+        time: String,
+        date: String,
+        sceneColor: Int = 0,
+    ) {
         val off = offsetOf(state)
         val anchor = anchorOf?.invoke(state)
         val ax = anchor?.first ?: 0.5f
@@ -388,7 +408,7 @@ class AodPreviewEditDelegate(private val host: View) {
         drawClockAt(
             canvas, w, h,
             (ax + off.first) * w, (ay + off.second) * h,
-            s.clockScale, s.clock.colorArgb, typefaceOf(s), s.clock.letterSpacing, s.clock.info,
+            s.clockScale, colorOf(s, sceneColor), typefaceOf(s), s.clock.letterSpacing, s.clock.info,
             time, date, 1f, 0f,
         )
     }
@@ -407,37 +427,19 @@ class AodPreviewEditDelegate(private val host: View) {
         time: String,
         date: String,
         poseScale: Float = 1f,
+        sceneColor: Int = 0,
     ): Boolean {
+        lastTimeText = time
         val fromState = edge?.from ?: state
         val toState = edge?.to ?: state
         if (fromState == SceneState.HOME && toState == SceneState.HOME) return false
-        val from = layoutOf(fromState)
-        val to = layoutOf(toState)
-        val base = from ?: to ?: return false
+        val base = layoutOf(fromState) ?: layoutOf(toState) ?: return false
         val e = t.coerceIn(0f, 1f)
-        val wLock = when {
-            fromState == SceneState.HOME -> 0f
-            toState == SceneState.HOME -> 1f - e
-            fromState == SceneState.LOCK -> 1f
-            toState == SceneState.LOCK -> e
-            else -> 0f
-        }
-        val wAod = when {
-            fromState == SceneState.HOME -> 0f
-            toState == SceneState.HOME -> 0f
-            fromState == SceneState.AOD -> 1f
-            toState == SceneState.AOD -> e
-            else -> 0f
-        }
-        val total = wLock + wAod
-        if (total <= 0.001f) return false
-        val lockScale = lockSettings?.clockScale ?: base.clockScale
-        val aodScale = aodSettings?.clockScale ?: base.clockScale
-        val scale = poseScale * (lockScale * wLock + aodScale * wAod) / total
-        val lockColor = lockSettings?.clock?.colorArgb ?: base.clock.colorArgb
-        val aodColor = aodSettings?.clock?.colorArgb ?: base.clock.colorArgb
-        val color = blendWeighted(lockColor, aodColor, wLock / total)
-        val dom = if (wLock >= wAod) (lockSettings ?: base) else (aodSettings ?: base)
+        val fromSettings = layoutOf(fromState) ?: base
+        val toSettings = layoutOf(toState) ?: base
+        val scale = poseScale * lerp(fromSettings.clockScale, toSettings.clockScale, e)
+        val color = lerpColor(colorOf(fromSettings, sceneColor), colorOf(toSettings, sceneColor), e)
+        val dom = if (e < 0.5f) fromSettings else toSettings
         val layer = if (alpha < 0.999f) {
             canvas.saveLayerAlpha(0f, 0f, w, h, (alpha.coerceIn(0f, 1f) * 255f).toInt())
         } else {
@@ -454,6 +456,19 @@ class AodPreviewEditDelegate(private val host: View) {
         return true
     }
 
+    /** 未自定义颜色（默认白）时用调用方给的三态色，自定义过则尊重用户值。 */
+    private fun colorOf(s: LockLayoutSettings, sceneColor: Int): Int =
+        if (sceneColor != 0 && s.clock.colorArgb == ClockStyle.WHITE) sceneColor else s.clock.colorArgb
+
+    /** 当前姿态里息屏端的权重：静止态取端值，转场期按边与进度线性插值。 */
+    fun aodWeight(edge: com.coloros16.liquidglass.engine.TransitionEdge?, t: Float): Float {
+        if (edge == null) return if (state == SceneState.AOD) 1f else 0f
+        val from = if (edge.from == SceneState.AOD) 1f else 0f
+        val to = if (edge.to == SceneState.AOD) 1f else 0f
+        val p = t.coerceIn(0f, 1f)
+        return from + (to - from) * p
+    }
+
     private fun layoutOf(state: SceneState): LockLayoutSettings? = when (state) {
         SceneState.AOD -> aodSettings
         SceneState.LOCK -> lockSettings
@@ -462,17 +477,8 @@ class AodPreviewEditDelegate(private val host: View) {
 
     private fun lerp(a: Float, b: Float, t: Float): Float = a + (b - a) * t
 
-    private fun blendWeighted(a: Int, b: Int, wa: Float): Int = lerpColor(a, b, 1f - wa)
 
-    private fun lerpColor(a: Int, b: Int, t: Float): Int {
-        val q = t.coerceIn(0f, 1f)
-        fun ch(shift: Int): Int {
-            val x = (a shr shift) and 0xFF
-            val y = (b shr shift) and 0xFF
-            return (x + ((y - x) * q).toInt()) and 0xFF
-        }
-        return (ch(24) shl 24) or (ch(16) shl 16) or (ch(8) shl 8) or ch(0)
-    }
+    private fun lerpColor(a: Int, b: Int, t: Float): Int = SceneSkyMath.lerpColor(a, b, t)
 
     private fun drawClockAt(
         canvas: Canvas,
@@ -490,29 +496,12 @@ class AodPreviewEditDelegate(private val host: View) {
         alpha: Float,
         rotationDeg: Float,
     ) {
-        clockTextSize = ClockLayout.fontPx(w, h, scale)
-        clockPaint.textSize = clockTextSize
-        clockPaint.typeface = typeface
-        clockPaint.letterSpacing = letterSpacing
-        clockPaint.color = color
-        val metrics = clockPaint.fontMetrics
-        val baseline = cy - (metrics.ascent + metrics.descent) / 2f
-        canvas.drawText(time, cx, baseline, clockPaint)
-        subPaint.textSize = clockTextSize * 0.15f
-        subPaint.color = (0x99FFFFFF.toInt() and 0x00FFFFFF) or ((color ushr 24) shl 24)
-        val dateBaseline = cy + clockTextSize * 0.62f
-        canvas.drawText(date, cx, dateBaseline, subPaint)
-        val infoText = when (info) {
-            ClockInfo.LUNAR -> "农历 十月初五"
-            ClockInfo.WEATHER -> "22° 晴"
-            ClockInfo.NONE -> null
-        }
-        if (infoText != null) {
-            canvas.drawText(infoText, cx, dateBaseline + subPaint.textSize * 1.6f, subPaint)
-        }
-        val halfW = clockPaint.measureText(time) / 2f + 12f * density
-        val halfH = clockTextSize * 0.45f
-        clockBounds.set(cx - halfW, cy - halfH, cx + halfW, cy + halfH)
+        clockTextSize = ClockGlyphPainter.draw(
+            canvas, cx, cy, ClockLayout.fontPx(w, h, scale),
+            time, date, color, DATE_COLOR,
+            typeface, dateTypeface(), letterSpacing, info,
+            clockPaint, subPaint, clockBounds, 12f * density,
+        )
     }
 
     private fun drawWidgets(canvas: Canvas, s: LockLayoutSettings, w: Float, h: Float) {
@@ -520,12 +509,7 @@ class AodPreviewEditDelegate(private val host: View) {
             if (!widget.enabled) continue
             val rect = widgetRect(widget, w, h)
             widgetRects.add(widget.typeId to RectF(rect))
-            val radius = 12f * density
-            canvas.drawRoundRect(rect, radius, radius, platePaint)
-            canvas.drawRoundRect(rect, radius, radius, strokePaint)
-            val name = widgetName(widget.typeId)
-            widgetTextPaint.textSize = min(10.5f * density, rect.width() / (name.length + 1f))
-            canvas.drawText(name, rect.centerX(), rect.centerY() + widgetTextPaint.textSize * 0.35f, widgetTextPaint)
+            WidgetPlatePainter.draw(canvas, rect, widgetName(widget.typeId), density, platePaint, strokePaint, widgetTextPaint)
             if (selection == Kind.WIDGET && selectionId == widget.typeId) {
                 drawRemoveBadge(canvas, rect)
             }
@@ -676,6 +660,35 @@ class AodPreviewEditDelegate(private val host: View) {
         }
     }
 
+    /** 右下角手柄缩放：字号按位移求值，中心同量右移下移使左上角钉死。 */
+    private fun resizeClock(s: LockLayoutSettings, dx: Float, dy: Float) {
+        val w = phoneRect.width()
+        val h = phoneRect.height()
+        if (w <= 0f || h <= 0f) return
+        val next = min(
+            ClockLayout.resizeScale(startScale, dx, dy, min(w, h)),
+            fitMaxScale(s),
+        )
+        if (next <= 0f) return
+        s.clockScale = next
+        measureClockBounds(s, w, h)
+        s.clockX = (resizeAnchorLeft + clockBounds.width() / 2f) / w
+        s.clockY = (resizeAnchorTop + clockBounds.height() / 2f) / h
+    }
+
+    /** 只量框不绘制：缩放中按新字号重算命中框，供左上角反算中心。 */
+    private fun measureClockBounds(s: LockLayoutSettings, w: Float, h: Float) {
+        val size = ClockLayout.fontPx(w, h, s.clockScale)
+        clockPaint.textSize = size
+        clockPaint.typeface = typefaceOf(s)
+        clockPaint.letterSpacing = s.clock.letterSpacing
+        val halfW = clockPaint.measureText(lastTimeText) / 2f + 12f * density
+        val halfH = size * 0.45f
+        val cx = s.clockX * w
+        val cy = s.clockY * h
+        clockBounds.set(cx - halfW, cy - halfH, cx + halfW, cy + halfH)
+    }
+
     private fun fitMaxScale(s: LockLayoutSettings): Float {
         val w = phoneRect.width()
         val drawn = clockBounds.width() - 24f * density
@@ -734,21 +747,8 @@ class AodPreviewEditDelegate(private val host: View) {
         return if (res != 0) host.context.getString(res) else typeId
     }
 
-    private fun typefaceOf(s: LockLayoutSettings): Typeface {
-        val base = when (ClockFonts.normalize(s.clock.fontFamily)) {
-            ClockFonts.SERIF -> Typeface.SERIF
-            ClockFonts.MONO -> Typeface.MONOSPACE
-            ClockFonts.CASUAL -> Typeface.create("casual", Typeface.NORMAL)
-            else -> Typeface.SANS_SERIF
-        }
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            try {
-                Typeface.create(base, s.clock.weight, false)
-            } catch (t: Throwable) {
-                base
-            }
-        } else {
-            base
-        }
-    }
+    private fun typefaceOf(s: LockLayoutSettings): Typeface =
+        ClockTypefaces.timeOf(host.context, s.clock)
+
+    private fun dateTypeface(): Typeface = ClockTypefaces.date()
 }

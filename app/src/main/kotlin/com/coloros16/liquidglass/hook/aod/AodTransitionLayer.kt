@@ -19,6 +19,7 @@ import com.coloros16.liquidglass.engine.TransitionEdge
 import com.coloros16.liquidglass.engine.TransitionParams
 import com.coloros16.liquidglass.log.Lg
 import com.coloros16.liquidglass.ui.aod.AodSceneSpec
+import io.github.libxposed.api.XposedInterface
 
 /**
  * 三态转场自绘层：只读引擎输出画遮罩与明暗，不重绘系统内容。
@@ -48,6 +49,10 @@ class AodTransitionLayer(context: Context) : View(context) {
     private var worldAllowDynamic = false
     private var worldColorMix = 0f
     private var worldDrawn = false
+    private var worldTiltDeg = 0f
+    private var worldWallpaperScale = 1f
+    private var worldAccent = 0
+    private var worldApi: XposedInterface? = null
 
     init {
         isClickable = false
@@ -89,6 +94,10 @@ class AodTransitionLayer(context: Context) : View(context) {
         spinDeg: Float,
         allowDynamic: Boolean,
         colorMix: Float,
+        tiltDeg: Float = 0f,
+        wallpaperScale: Float = 1f,
+        accent: Int = 0,
+        api: XposedInterface? = null,
     ) {
         worldSpec = spec
         worldState = state
@@ -98,6 +107,10 @@ class AodTransitionLayer(context: Context) : View(context) {
         worldSpinDeg = spinDeg
         worldAllowDynamic = allowDynamic
         worldColorMix = colorMix
+        worldTiltDeg = tiltDeg
+        worldWallpaperScale = wallpaperScale
+        worldAccent = accent
+        worldApi = api
         invalidate()
     }
 
@@ -111,6 +124,7 @@ class AodTransitionLayer(context: Context) : View(context) {
         worldEdge = null
         worldAodAlpha = 0f
         worldDrawn = false
+        worldApi = null
         invalidate()
     }
 
@@ -141,10 +155,18 @@ class AodTransitionLayer(context: Context) : View(context) {
      */
     private fun drawWorld(canvas: Canvas, w: Float, h: Float): Boolean {
         val spec = worldSpec ?: return false
-        val drawn = AodWorldLayer.drawLens(
-            canvas, w, h, spec, worldState, worldEdge, worldT, dim,
-            worldAodAlpha, worldSpinDeg, worldAllowDynamic, worldColorMix,
-        )
+        val drawn = if (spec.lens) {
+            AodWorldLayer.drawLens(
+                canvas, w, h, spec, worldState, worldEdge, worldT, dim,
+                worldAodAlpha, worldSpinDeg, worldAllowDynamic, worldColorMix,
+                wallpaperScale = worldWallpaperScale,
+            )
+        } else {
+            AodWorldLayer.drawPhoto(
+                canvas, w, h, spec, worldState, worldEdge, worldT, dim,
+                worldWallpaperScale, worldAccent, worldTiltDeg, worldApi,
+            ) { postInvalidate() }
+        }
         if (drawn != worldDrawn) {
             worldDrawn = drawn
             Lg.i(TAG, "world branch drawn=$drawn lens=${spec.lens} state=$worldState")

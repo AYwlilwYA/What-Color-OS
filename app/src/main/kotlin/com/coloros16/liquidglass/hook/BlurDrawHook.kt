@@ -616,6 +616,8 @@ object BlurDrawHook {
     private const val VOLUME_APPEAR_GAP_MS = 600L
     /** 音量弹窗窗口根作为抓屏排除对象的活跃窗口（ms）：只在刚绘制过的时间窗内生效。 */
     private const val VOLUME_HOST_ACTIVE_MS = 1_500L
+    /** 小岛胶囊状态栏窗口排除的活跃窗（ms）：胶囊玻璃刚绘制过才排除，岛不在屏不排状态栏。 */
+    private const val CAPSULE_EXCLUDE_ACTIVE_MS = 1_500L
     /** 亮白填充开启时的进度填充色：白 80%（近不透明亮磨砂），盖住玻璃扭曲、边界清晰。 */
     private val VOLUME_FROSTED_PROGRESS_COLOR = 0xCCFFFFFF.toInt()
     /** 面板背景替换开关 TTL（ms）重读间隔。 */
@@ -2634,6 +2636,19 @@ object BlurDrawHook {
     private var cardBackgroundActiveHost: WeakReference<View>? = null
     /** CardBackgroundView 持续抓屏 worker 运行标志（幂等） */
     private var cardBackgroundContinuousRunning = false
+    /** 小岛胶囊玻璃最近一次实际绘制时刻（renderSeedlingCardGlass 画玻璃时刷新）。
+     *  排除链 statusbar 项的活跃门控：TTL 窗内才排除状态栏窗口，防岛不在屏时误排时钟/图标。 */
+    @Volatile
+    private var lastCapsuleGlassDrawMs = 0L
+    /** 小岛胶囊宿主弱引用（画玻璃时登记），白名单引用判据用（零反射）。 */
+    private var capsuleGlassHost: WeakReference<View>? = null
+    /** 小岛玻璃撕除链：最近画过玻璃的容器弱引用 + 上帧是否有可见胶囊（gone 边沿 invalidate 用）。 */
+    private var capsuleContainerRef: WeakReference<View>? = null
+    private var lastCapsulePresent = false
+    private var capsuleDetachHookMounted = false
+    /** 胶囊逐帧宽度场缓存（混淆名启发式解析一次）+ 上帧动画宽（变化者优先判据）。 */
+    private var capsuleWidthField: Field? = null
+    private var capsuleLastAnimW = 0
     // ---- [spec/61 2026-08-23] 流体云展开大卡 attach 强制启动持续抓屏 + 系统控制中心模糊力度 ----
     /** CardBackgroundView attach hook 是否已挂（install 幂等） */
     private var cardBgAttachMounted = false
@@ -8586,6 +8601,41 @@ object BlurDrawHook {
         } catch (t: Throwable) {
             Lg.e(TAG, "Seedling card glass mount FAILED: $CLASS_CAPSULE_PLUGIN_CONTAINER#$METHOD_DISPATCH_DRAW", t)
         }
+        mountCapsuleDetachTeardown(api, classLoader)
+    }
+
+    /** 小岛玻璃撕除链：CapsuleView detach 窗口（岛移走/收起的必然事件）→ 清活跃标记 +
+     *  invalidate 最近画过玻璃的容器（重录时岛已不在 → 不画玻璃 → 清旧 display list 残留）。
+     *  基类 View.onDetachedFromWindow 全局 hook，拦截体字符串类名快路径，未命中立即 proceed。 */
+    private fun mountCapsuleDetachTeardown(api: XposedInterface, classLoader: ClassLoader) {
+        if (capsuleDetachHookMounted) return
+        try {
+            val method = View::class.java.getDeclaredMethod(METHOD_ON_DETACHED_FROM_WINDOW).apply { isAccessible = true }
+            api.hook(method)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .intercept { chain ->
+                    try {
+                        val thisView = try {
+                            chain.getThisObject() as? View
+                        } catch (t: Throwable) {
+                            null
+                        }
+                        if (thisView != null && thisView.javaClass.name == CLASS_CAPSULE_VIEW) {
+                            lastCapsulePresent = false
+                            logThrottled("seedling-detach", Log.INFO) { "seedling-card: capsule detached, teardown stale glass" }
+                            capsuleContainerRef?.get()?.let { it.invalidate() }
+                            invalidateRegisteredHostViews()
+                        }
+                    } catch (t: Throwable) {
+                        Lg.e(TAG, "seedling-card: detach teardown error", t)
+                    }
+                    chain.proceed()
+                }
+            capsuleDetachHookMounted = true
+            Lg.i(TAG, "Seedling capsule detach teardown mounted: View#$METHOD_ON_DETACHED_FROM_WINDOW")
+        } catch (t: Throwable) {
+            Lg.e(TAG, "Seedling capsule detach teardown mount FAILED", t)
+        }
     }
 
     /**
@@ -8626,6 +8676,15 @@ object BlurDrawHook {
         // 把 CapsuleView **居中**摆放 —— 拿外框当本体玻璃必然画大、超出胶囊（用户反馈「玻璃比岛大」）。
         val capsules = ArrayList<View>(4)
         collectCapsuleViews(containerView, capsules)
+        val present = capsules.any { it.visibility == View.VISIBLE }
+        if (!present && lastCapsulePresent) {
+            // 岛移走/收起边沿：容器此后不再 dispatchDraw，旧玻璃 display list 无人失效 →
+            // 主动 invalidate 宿主重录（不画玻璃）清残留；只边沿触发一次，非轮询。
+            logThrottled("seedling-gone", Log.INFO) { "seedling-card: capsule gone, invalidate to clear stale glass" }
+            invalidateRegisteredHostViews()
+        }
+        lastCapsulePresent = present
+        capsuleContainerRef = WeakReference(containerView)
         if (capsules.isEmpty()) {
             // [2026-09-16 用户需求] 胶囊 ↔ 展开大卡片互转期间插件会把 CapsuleView 从容器移除
             // （真机实证），此时**玻璃不显示**——用户明确要求「动画期间干脆不显示」，不做补绘。
@@ -8657,15 +8716,11 @@ object BlurDrawHook {
                 }
                 continue
             }
-            // ★ 可见胶囊宽度 = `CapsuleView.capsuleDrawableWidth`：背景/前景 Drawable 的 bounds 被限制在
-            //   这个宽度内并**水平居中**（CapsuleView.setCapsuleDrawableWidth:249-255），
-            //   高度取 CapsuleView 全高（bounds 用的就是 getMeasuredHeight()）。
-            //   该字段由动画逐帧更新 → 玻璃尺寸天然跟随小岛动效。
-            // 可见宽度直接用 CapsuleView 自身宽度。**不要读 Drawable bounds**：
-            // 真机实测 background 被本函数置空后读不到，foreground 的 bounds 是 3x3（无关小图），
-            // 拿它当宽度会让玻璃宽度在 402 与 3 之间跳 → 动画期间玻璃几乎不可见（实测）。
-            // 402 为用户确认「平齐」的尺寸。
-            val drawW = cvW
+            // 可见宽度优先取逐帧动画真值 capsuleDrawableWidth（插件宽度动画每帧 onDraw 重设，
+            // 真机字段名混淆 → 特征启发式：int 且 0<值<=measuredWidth，跨帧变化者优先）；
+            // 次选 foreground bounds 宽（动画期插件每帧重设 bounds）；都拿不到回落 measured（静态）。
+            val animW = readCapsuleAnimWidth(capsule, cvW)
+            val drawW = if (animW in 1..cvW) animW else cvW
             // ★ **不能用 CapsuleView.getLocationOnScreen()**：真机实测返回 (720,80) = 屏幕中心
             //   （玻璃画在岛中心，用户反馈"岛偏了"）。原因在插件里——`CapsuleContainer.q()`
             //   计算居中位置时 CapsuleView 尚未测量（measuredWidth=0 → (1440-0)/2=720），
@@ -8703,6 +8758,8 @@ object BlurDrawHook {
                 canvas, capsule, id, drawW, cvH, region,
                 offsetX = offX, offsetY = offY,
             )
+            lastCapsuleGlassDrawMs = SystemClock.uptimeMillis()
+            capsuleGlassHost = WeakReference(capsule)
         }
     }
 
@@ -8720,6 +8777,50 @@ object BlurDrawHook {
      * 插件 View 在独立 classloader → 用**字符串类名**比较（同 [mountCardBackgroundGlass]）。
      * 命中即停止下钻（CapsuleView 内部是内容 View，不是胶囊本体）。
      */
+    /** 逐帧胶囊宽度真值读取：优先混淆字段特征启发式（int 且 0<值<=measuredWidth，
+     *  跨帧变化者优先=动画宽度场），次选 foreground bounds 宽（插件动画每帧重设），
+     *  都拿不到返回 0（调用方回落 measured 静态宽）。缓存 Field 避免每帧反射扫描。 */
+    private fun readCapsuleAnimWidth(capsule: View, measuredW: Int): Int {
+        var f = capsuleWidthField
+        if (f == null) {
+            f = try {
+                capsule.javaClass.declaredFields.firstOrNull { fld ->
+                    fld.type == Int::class.javaPrimitiveType && run {
+                        fld.isAccessible = true
+                        val v = fld.getInt(capsule)
+                        v in 1..measuredW
+                    }
+                }
+            } catch (t: Throwable) {
+                null
+            }
+            capsuleWidthField = f
+        }
+        val prev = capsuleLastAnimW
+        var fieldW = 0
+        if (f != null) {
+            fieldW = try {
+                f.getInt(capsule)
+            } catch (t: Throwable) {
+                0
+            }
+            if (fieldW !in 1..measuredW) fieldW = 0
+        }
+        val fgW = try {
+            capsule.foreground?.bounds?.width() ?: 0
+        } catch (t: Throwable) {
+            0
+        }
+        val pick = when {
+            fieldW in 1..measuredW && prev > 0 && fieldW != prev -> fieldW
+            fgW in 1..measuredW -> fgW
+            fieldW in 1..measuredW -> fieldW
+            else -> 0
+        }
+        capsuleLastAnimW = if (pick > 0) pick else prev
+        return pick
+    }
+
     private fun collectCapsuleViews(parent: View, out: MutableList<View>, depth: Int = 0) {
         if (depth > 8) return
         if (parent.javaClass.name == CLASS_CAPSULE_VIEW) {
@@ -9520,8 +9621,11 @@ object BlurDrawHook {
 
     // ------------------------------------------------------------ 点按位置发光 ------------------------------------------------------------
 
-    /** 发光状态表：元素 id → 触点包络（主线程读写；上限 16，超出整表清）。 */
-    private val pressGlowStates = HashMap<Int, PressGlow.State>()
+    /** 发光状态表：**宿主 View id** → 触点包络（主线程读写；上限 16，超出整表清）。
+     *  玻璃区域表的键是 drawable id，触摸事件落在 View 上——两套 id 空间，靠别名表桥接。 */
+    private val pressGlowStates = HashMap<Int, MutableList<PressGlow.State>>()
+    /** 宿主 View id → 该 View 名下玻璃 drawable id 集合（渲染收口时登记）。 */
+    private val pressGlowAlias = HashMap<Int, MutableSet<Int>>()
     private var pressGlowMounted = false
     private var pressGlowPumpRunning = false
     @Volatile private var pressGlowEnabledValue = Prefs.DEFAULT_PRESS_GLOW
@@ -9594,29 +9698,119 @@ object BlurDrawHook {
 
     private fun notePressGlowTouch(view: View?, ev: MotionEvent?) {
         if (view == null || ev == null) return
-        val id = System.identityHashCode(view)
-        val active = pressGlowStates[id]
-        if (active == null) {
-            if (ev.actionMasked != MotionEvent.ACTION_DOWN) return
-            if (!pressGlowEnabledFor(id) || isPowerSaveGlassOff()) return
-            val entry = screenRegionMap[id] ?: return
-            if (entry.hostViewRef?.get() !== view) return
-            if (view.width <= 0 || view.height <= 0) return
-            pressGlowStates[id] = PressGlow.State(SystemClock.uptimeMillis(), null, ev.x, ev.y)
-            if (pressGlowStates.size > 16) pressGlowStates.clear()
-            logThrottled("press-glow-down", Log.INFO, 500L) {
-                "press-glow: down id=$id host=${entry.hostViewName} at=(${ev.x.toInt()},${ev.y.toInt()})"
+        if (isPowerSaveGlassOff()) return
+        val action = ev.actionMasked
+        val now = SystemClock.uptimeMillis()
+        when (action) {
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
+                // 新按压到来 = 上一条流可能已被别的窗口夺走且没收尾：按住超过 2s 的旧触点立即收尾
+                // （正常按住光斑保持；被夺流的冻结光斑在下一次任意按压时清掉，不再永久残留）
+                for ((oldHid, oldList) in pressGlowStates) {
+                    var changed = false
+                    for (i in oldList.indices) {
+                        val st = oldList[i]
+                        if (st.upAtMs == null && now - st.downAtMs > 2000L) {
+                            oldList[i] = st.copy(upAtMs = now)
+                            changed = true
+                        }
+                    }
+                    if (changed) pressGlowHostById(oldHid)?.invalidate()
+                }
+                if (view.width <= 0 || view.height <= 0) return
+                var host: View? = view
+                var hops = 0
+                var hid = System.identityHashCode(view)
+                while (host != null && hops < 12) {
+                    hid = System.identityHashCode(host)
+                    if (pressGlowAlias[hid]?.isNotEmpty() == true) break
+                    host = host.parent as? View
+                    hops++
+                }
+                if (host == null) {
+                    logThrottled("press-glow-miss", Log.INFO, 2000L) {
+                        "press-glow: down miss view=${view.javaClass.simpleName} (no glass host in chain)"
+                    }
+                    return
+                }
+                val anyId = pressGlowAlias[hid]?.firstOrNull() ?: return
+                if (!pressGlowEnabledFor(anyId)) return
+                val idx = ev.actionIndex
+                val pid = ev.getPointerId(idx)
+                val hloc = IntArray(2)
+                val vloc = IntArray(2)
+                host.getLocationOnScreen(hloc)
+                view.getLocationOnScreen(vloc)
+                val x = ev.getX(idx) + (vloc[0] - hloc[0])
+                val y = ev.getY(idx) + (vloc[1] - hloc[1])
+                val list = pressGlowStates.getOrPut(hid) { ArrayList(PressGlow.MAX_SPOTS) }
+                list.removeAll { it.pid == pid }
+                list.add(PressGlow.State(now, null, x, y, pid))
+                while (list.size > PressGlow.MAX_SPOTS) list.removeAt(0)
+                if (pressGlowStates.size > 16) pressGlowStates.clear()
+                logThrottled("press-glow-down", Log.INFO, 500L) {
+                    "press-glow: down host=${host.javaClass.simpleName} hid=$hid pid=$pid spots=${list.size} at=(${x.toInt()},${y.toInt()})"
+                }
+                host.invalidate()
             }
-        } else {
-            when (ev.actionMasked) {
-                MotionEvent.ACTION_MOVE -> pressGlowStates[id] = active.copy(x = ev.x, y = ev.y)
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    pressGlowStates[id] = active.copy(upAtMs = SystemClock.uptimeMillis())
-                    logThrottled("press-glow-up", Log.INFO, 500L) { "press-glow: up id=$id" }
+            MotionEvent.ACTION_MOVE -> {
+                if (pressGlowStates.isEmpty()) return
+                // 逐 pointer 按 id 找归属宿主并更新坐标（多指各归各的宿主）
+                val vloc = IntArray(2)
+                view.getLocationOnScreen(vloc)
+                val hloc = IntArray(2)
+                for ((hid, list) in pressGlowStates) {
+                    val host = pressGlowHostById(hid) ?: continue
+                    host.getLocationOnScreen(hloc)
+                    var touched = false
+                    for (i in list.indices) {
+                        val st = list[i]
+                        if (st.upAtMs != null) continue
+                        val idx = ev.findPointerIndex(st.pid)
+                        if (idx < 0) continue
+                        list[i] = st.copy(
+                            x = ev.getX(idx) + (vloc[0] - hloc[0]),
+                            y = ev.getY(idx) + (vloc[1] - hloc[1]),
+                        )
+                        touched = true
+                    }
+                    if (touched) host.invalidate()
                 }
             }
+            MotionEvent.ACTION_POINTER_UP -> {
+                val pid = ev.getPointerId(ev.actionIndex)
+                for ((hid, list) in pressGlowStates) {
+                    for (i in list.indices) {
+                        if (list[i].pid == pid && list[i].upAtMs == null) {
+                            list[i] = list[i].copy(upAtMs = now)
+                            logThrottled("press-glow-up", Log.INFO, 500L) { "press-glow: up hid=$hid pid=$pid" }
+                            pressGlowHostById(hid)?.invalidate()
+                        }
+                    }
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                // 主流结束：本视图窗口内全部未松手触点一起收尾（防单指残留常亮）
+                if (pressGlowStates.values.any { l -> l.any { it.upAtMs == null } }) {
+                    logThrottled("press-glow-upall", Log.INFO, 1000L) {
+                        "press-glow: up/cancel view=${view.javaClass.simpleName} action=$action (release all)"
+                    }
+                }
+                for ((hid, list) in pressGlowStates) {
+                    var any = false
+                    for (i in list.indices) {
+                        if (list[i].upAtMs == null) {
+                            list[i] = list[i].copy(upAtMs = now)
+                            any = true
+                        }
+                    }
+                    if (any) {
+                        logThrottled("press-glow-up", Log.INFO, 500L) { "press-glow: up-all hid=$hid" }
+                        pressGlowHostById(hid)?.invalidate()
+                    }
+                }
+            }
+            else -> return
         }
-        view.invalidate()
         pumpPressGlowFrames()
     }
 
@@ -9635,10 +9829,15 @@ object BlurDrawHook {
                             val it = pressGlowStates.entries.iterator()
                             while (it.hasNext()) {
                                 val e = it.next()
-                                if (PressGlow.finished(e.value, now)) {
+                                e.value.removeAll { st -> PressGlow.finished(st, now) }
+                                if (e.value.isEmpty()) {
                                     it.remove()
+                                    continue
                                 }
-                                screenRegionMap[e.key]?.hostViewRef?.get()?.invalidate()
+                                pressGlowHostById(e.key)?.invalidate()
+                                pressGlowAlias[e.key]?.forEach { did ->
+                                    screenRegionMap[did]?.hostViewRef?.get()?.invalidate()
+                                }
                             }
                         }
                     } catch (t: Throwable) {
@@ -9658,16 +9857,47 @@ object BlurDrawHook {
         }
     }
 
-    /** 绘制收口统一调用：把该元素当前光斑强度/位置/半径喂给 shader（无状态 = 强度 0 防残留）。 */
-    private fun applyPressGlowUniforms(shader: RuntimeShader, id: Int, w: Int, h: Int) {
-        val s = pressGlowStates[id]
-        val k = if (s == null || !pressGlowEnabledFor(id)) 0f
-        else PressGlow.intensity(s, SystemClock.uptimeMillis()) * pressGlowStrengthFor(id)
-        if (k > 0f && s != null) {
-            LiquidGlassShader.setPressGlowUniforms(shader, k, s.x, s.y, PressGlow.radiusPx(minOf(w, h).toFloat()))
-        } else {
-            LiquidGlassShader.setPressGlowUniforms(shader, 0f, 0f, 0f, 1f)
+    /** 宿主 View id → View（别名表里的 drawable 反查宿主）。 */
+    private fun pressGlowHostById(hid: Int): View? {
+        pressGlowAlias[hid]?.forEach { did ->
+            screenRegionMap[did]?.hostViewRef?.get()?.let { return it }
         }
+        return null
+    }
+
+    /** 绘制收口统一调用：登记 drawable→宿主别名 + 把宿主上的光斑喂给 shader（无状态 = 强度 0 防残留）。 */
+    private fun applyPressGlowUniforms(shader: RuntimeShader, id: Int, w: Int, h: Int) {
+        val host = screenRegionMap[id]?.hostViewRef?.get()
+        var hid = -1
+        if (host != null) {
+            hid = System.identityHashCode(host)
+            pressGlowAlias.getOrPut(hid) { HashSet() }.add(id)
+            if (pressGlowAlias.size > 128) {
+                pressGlowAlias.entries.removeIf { e ->
+                    e.value.isEmpty() || screenRegionMap[e.value.firstOrNull() ?: -1]?.hostViewRef?.get() == null
+                }
+            }
+        }
+        val list = if (hid >= 0) pressGlowStates[hid] else null
+        if (list.isNullOrEmpty() || !pressGlowEnabledFor(id)) {
+            LiquidGlassShader.setPressGlowUniforms(shader, 0f, 0f, 0f, 1f)
+            return
+        }
+        val now = SystemClock.uptimeMillis()
+        val strength = pressGlowStrengthFor(id)
+        val k = FloatArray(PressGlow.MAX_SPOTS)
+        val xs = FloatArray(PressGlow.MAX_SPOTS)
+        val ys = FloatArray(PressGlow.MAX_SPOTS)
+        for (i in 0 until minOf(list.size, PressGlow.MAX_SPOTS)) {
+            val st = list[i]
+            k[i] = PressGlow.intensity(st, now) * strength
+            xs[i] = st.x
+            ys[i] = st.y
+        }
+        LiquidGlassShader.setPressGlowSpots(
+            shader, k[0], xs[0], ys[0], k[1], xs[1], ys[1], k[2], xs[2], ys[2],
+            PressGlow.radiusPx(minOf(w, h).toFloat()),
+        )
     }
 
     // ------------------------------------------------------------ [doc/spec/134 第二轮] ···展开按钮玻璃 ------------------------------------------------------------
@@ -10431,7 +10661,8 @@ object BlurDrawHook {
     private fun isCardBackgroundHostActive(): Boolean {
         val host = cardBackgroundActiveHost?.get() ?: return false
         return try {
-            host.isAttachedToWindow && host.visibility == View.VISIBLE && host.width > 0 && host.height > 0
+            // width/height 瞬态 0 不算 gone（实测 gone 后岛仍可见 ⇒ 排除归零自抓屏）；detach/不可见才停
+            host.isAttachedToWindow && host.visibility == View.VISIBLE
         } catch (t: Throwable) {
             false
         }
@@ -10460,8 +10691,7 @@ object BlurDrawHook {
                     while (true) {
                         // 卡片收起/窗口销毁（detach/隐藏）→ 停止（零后台耗电）
                         if (!isCardBackgroundHostActive()) {
-                            cardBackgroundActiveHost = null
-                            Lg.i(TAG, "bg-element: seedling-cardview gone, continuous capture stopped")
+                            Lg.i(TAG, "bg-element: seedling-cardview inactive, continuous capture stopped")
                             break
                         }
                         if (isKeyguardLockedNow()) {
@@ -10496,6 +10726,22 @@ object BlurDrawHook {
     @Synchronized
     private fun resolveCardBackgroundSfc(): SurfaceControl? {
         val host = cardBackgroundActiveHost?.get() ?: return null
+        if (!host.isAttachedToWindow) return null
+        return try {
+            reflectViewRootSurfaceControl(host.rootView)
+        } catch (t: Throwable) {
+            null
+        }
+    }
+
+    /** 小岛胶囊所在状态栏窗口根 sfc（防小岛玻璃自采样）。活跃门控：胶囊玻璃最近实际绘制在
+     *  [CAPSULE_EXCLUDE_ACTIVE_MS] 窗内且宿主仍 attach 才排除；岛不在屏返回 null（不排状态栏，
+     *  防误排时钟/图标——排除层必须语义约束）。宿主窗口根=StatusBarWindowView（C16 实测）。 */
+    @Synchronized
+    private fun resolveStatusBarSfcForCapsule(): SurfaceControl? {
+        if (!seedlingCapsuleGlassEnabled) return null
+        if (SystemClock.uptimeMillis() - lastCapsuleGlassDrawMs > CAPSULE_EXCLUDE_ACTIVE_MS) return null
+        val host = capsuleGlassHost?.get() ?: return null
         if (!host.isAttachedToWindow) return null
         return try {
             reflectViewRootSurfaceControl(host.rootView)
@@ -13446,6 +13692,12 @@ object BlurDrawHook {
             ensurePreAgsCanvasRegion(drawable, canvas, boundsSf)
             val entry = screenRegionMap[id]
             val region = entry?.region
+            if (region != null && isSfPanelBackdrop(entry, region, boundsSf)) {
+                logThrottled("c15-glass-sf-backdrop", Log.INFO) {
+                    "c15-glass: sf mode skip backdrop id=$id region=$region host=${entry?.hostViewName}"
+                }
+                return false
+            }
             if (region != null && region.width() > 0f && region.height() > 0f) {
                 val short = minOf(region.width(), region.height()) / 2f
                 val corner = (entry?.cornerRadius ?: 0f).coerceIn(0f, short)
@@ -13601,6 +13853,19 @@ object BlurDrawHook {
         logThrottled("c15-map-$id", Log.INFO, 1000L) {
             "c15-map: id=$id via=$via host=$hostName region=$region bounds=$bounds identity=$matrixIdentity m=[${canvasMatrix.toShortString()}]"
         }
+    }
+
+    /** SF 档背景层判定：scrim 与铺满窗口的大块模糊层不申报，玻璃只交卡片等元素。 */
+    private fun isSfPanelBackdrop(entry: RegionEntry?, region: RectF, bounds: Rect): Boolean {
+        if (entry?.hostViewName?.contains("Scrim") == true) return true
+        val host = entry?.hostViewRef?.get()
+        val dm = host?.resources?.displayMetrics ?: return false
+        val sw = dm.widthPixels.toFloat()
+        val sh = dm.heightPixels.toFloat()
+        if (sw < 1f || sh < 1f) return false
+        val coversWindow = region.width() >= sw * 0.9f && region.height() >= sh * 0.9f
+        val coversBounds = bounds.width() >= sw * 0.9f && bounds.height() >= sh * 0.9f
+        return coversWindow || coversBounds
     }
 
     /** drawable.callback 链上溯宿主 View（BlurDrawable → PlatformBlurDrawable → View，最多 4 跳）。 */
@@ -16961,6 +17226,7 @@ object BlurDrawHook {
         if (simpleBannerActiveHost?.get()?.rootView === rootView) return true
         if (headsUpActiveHost?.get()?.rootView === rootView) return true
         if (cardBackgroundActiveHost?.get()?.rootView === rootView) return true
+        if (capsuleGlassHost?.get()?.rootView === rootView) return true
         // 音量弹窗：宿主还在窗口树上就排除（生命周期由 dismissH/attach 登记管理）；
         // 1.5s 活跃窗只兜「宿主没走 dismissH 且已 detach」的残留引用
         val volumeHost = volumeGlassHost?.get()
@@ -17602,6 +17868,14 @@ object BlurDrawHook {
                     null
                 }
             }),
+            ExcludeSpec(id = "statusbar", dedupe = true, resolve = {
+                try {
+                    resolveStatusBarSfcForCapsule()
+                } catch (t: Throwable) {
+                    Lg.e(TAG, "bg-element: resolve statusbar sfc failed", t)
+                    null
+                }
+            }),
             ExcludeSpec(id = "vol", dedupe = true, resolve = {
                 try {
                     resolveVolumeWindowSfc()
@@ -17662,14 +17936,14 @@ object BlurDrawHook {
         val menu = resolved["menu"]
         val menuPopup = resolved["menuPopup"]
         if (EngineLog.fullLogEnabled()) {
-            EngineLog.log("Excludes", "resolve shade=${exclName(shade)} hu=${exclName(hu, headsUpActiveHost?.get())} banner=${exclName(banner, simpleBannerActiveHost?.get())} card=${exclName(card, cardBackgroundActiveHost?.get())} vol=${exclName(vol, volumeGlassHost?.get())} menu=${exclName(menu)} menuPopup=${exclName(menuPopup, menuBridgeHost?.get())} n=${excludes.size}")
+            EngineLog.log("Excludes", "resolve shade=${exclName(shade)} hu=${exclName(hu, headsUpActiveHost?.get())} banner=${exclName(banner, simpleBannerActiveHost?.get())} card=${exclName(card, cardBackgroundActiveHost?.get())} statusbar=${exclName(resolved["statusbar"], capsuleGlassHost?.get())} vol=${exclName(vol, volumeGlassHost?.get())} menu=${exclName(menu)} menuPopup=${exclName(menuPopup, menuBridgeHost?.get())} n=${excludes.size}")
         }
         // 诊断日志（模块日志开关 + 节流）：一眼分辨两类根因——
         // 「解析不到」（banner=null / n 偏小）vs 「解析到了但 SF 不认 setExcludeLayers」（n≥1 仍叠加）。
         logThrottled("excludes", Log.DEBUG) {
             "bg-element: excludes n=${excludes.size} " +
                 "[shade=${exclName(shade)}, hu=${exclName(hu, headsUpActiveHost?.get())}, banner=${exclName(banner, simpleBannerActiveHost?.get())}, " +
-                "card=${exclName(card, cardBackgroundActiveHost?.get())}, vol=${exclName(vol, volumeGlassHost?.get())}, " +
+                "card=${exclName(card, cardBackgroundActiveHost?.get())}, statusbar=${exclName(resolved["statusbar"], capsuleGlassHost?.get())}, vol=${exclName(vol, volumeGlassHost?.get())}, " +
                 "menu=${exclName(menu)}, menuPopup=${exclName(menuPopup, menuBridgeHost?.get())}]"
         }
         return excludes

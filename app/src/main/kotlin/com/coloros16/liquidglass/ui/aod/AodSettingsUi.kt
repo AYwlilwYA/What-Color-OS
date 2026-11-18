@@ -554,12 +554,7 @@ object AodSettingsPages {
                     { it.homeAodIndependent },
                     { s, v -> s.homeAodIndependent = v },
                 ),
-                AodItem.Styles(
-                    R.string.settings_aod_home_aod_style,
-                    { it.homeAodStyleId },
-                    { s, v -> s.homeAodStyleId = v },
-                    showTitle = true,
-                ),
+                AodItem.Stub(R.string.settings_aod_home_aod_style),
             ),
         ),
     )

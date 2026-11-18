@@ -27,7 +27,7 @@ class LockLayoutSettingsTest {
 
         val aod = LockLayoutSettings.defaults(EditSurface.AOD)
         assertTrue(aod.pills().isEmpty())
-        assertEquals(EditAxis.HORIZONTAL_ONLY, EditSurface.AOD.axis)
+        assertEquals(EditAxis.FREE, EditSurface.AOD.axis)
     }
 
     @Test
@@ -73,14 +73,14 @@ class LockLayoutSettingsTest {
     }
 
     @Test
-    fun aodOnlyMovesHorizontally() {
+    fun aodMovesClockBothAxes() {
         val settings = LockLayoutSettings.defaults(EditSurface.AOD)
         val baseY = settings.clockY
         val result = settings.moveClock(0.6f, 0.8f)
         assertEquals(0.6f, settings.clockX, 1e-4f)
-        assertEquals(baseY, settings.clockY, 1e-4f)
-        assertEquals(baseY, result.y, 1e-4f)
-        assertNull(result.guideY)
+        assertEquals(0.8f, settings.clockY, 1e-4f)
+        assertEquals(0.8f, result.y, 1e-4f)
+        assertTrue("息屏纵向必须真的动了", kotlin.math.abs(settings.clockY - baseY) > 0.01f)
     }
 
     @Test

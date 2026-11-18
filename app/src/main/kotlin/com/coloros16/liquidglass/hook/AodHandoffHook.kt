@@ -55,6 +55,9 @@ object AodHandoffHook {
         "com.android.systemui.keyguard.shared.model.TransitionState"
     private const val METHOD_START = "startTransition"
     private const val METHOD_UPDATE = "updateTransition"
+    private const val METHOD_EMIT = "emitTransition"
+    private const val CLASS_TRANSITION_STEP =
+        "com.android.systemui.keyguard.shared.model.TransitionStep"
 
     private val throttleAt = ConcurrentHashMap<String, Long>()
 
@@ -85,6 +88,7 @@ object AodHandoffHook {
 
     private val startHits = AtomicLong()
     private val updateHits = AtomicLong()
+    private val emitHits = AtomicLong()
     private val replayDrops = AtomicLong()
 
     @Volatile private var installed = false
@@ -104,6 +108,10 @@ object AodHandoffHook {
     private var api: XposedInterface? = null
     private var fromGetter: Method? = null
     private var toGetter: Method? = null
+    private var stepFromGetter: Method? = null
+    private var stepToGetter: Method? = null
+    private var stepValueGetter: Method? = null
+    private var stepStateGetter: Method? = null
     private var bridge: TransitionBridge? = null
     @Volatile private var currentEdge: TransitionEdge? = null
 
@@ -143,6 +151,7 @@ object AodHandoffHook {
             } catch (t: Throwable) {
                 Lg.e(TAG, "aod-install $METHOD_START 失败 ${t.javaClass.simpleName}: ${t.message}", t)
             }
+            hook += mountEmit(api, repo, classLoader)
             val update = resolveUpdateMethod(repo, state, cont)
             if (update == null) {
                 Lg.e(TAG, "aod-install $METHOD_UPDATE 两种签名都取不到，进度泵不可用")
@@ -174,9 +183,80 @@ object AodHandoffHook {
         val gate = refreshGate()
         Lg.i(
             TAG,
-            "aod-install hook=$hook/2 installed=$installed gate=$gate " +
-                "hits start=${startHits.get()} upd=${updateHits.get()} bridge=${bridge != null}",
+            "aod-install hook=$hook/3 installed=$installed gate=$gate " +
+                "hits start=${startHits.get()} upd=${updateHits.get()} emit=${emitHits.get()} " +
+                "bridge=${bridge != null}",
         )
+    }
+
+    /**
+     * 挂状态变更汇聚点：所有转场状态都经它，含逐帧 RUNNING 进度。
+     *
+     * 有动画时进度由帧回调直接送这里，不经手动推进方法；
+     * 只挂手动方法会让有动画的转场整条进度泵静默失效。
+     */
+    private fun mountEmit(
+        api: XposedInterface,
+        repo: Class<*>,
+        classLoader: ClassLoader,
+    ): Int {
+        return try {
+            val step = Class.forName(CLASS_TRANSITION_STEP, false, classLoader)
+            stepFromGetter = step.getMethod("getFrom")
+            stepToGetter = step.getMethod("getTo")
+            stepValueGetter = step.getMethod("getValue")
+            stepStateGetter = step.getMethod("getTransitionState")
+            val emit = repo.getDeclaredMethod(
+                METHOD_EMIT, step, Boolean::class.javaPrimitiveType,
+            )
+            api.hook(emit)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .intercept { chain ->
+                    try {
+                        recordEmit(chain.getArg(0))
+                    } catch (t: Throwable) {
+                        logThrottled(
+                            "aod-arg",
+                            "emit 参数解析失败 ${t.javaClass.simpleName} emit=${emitHits.get()}",
+                        )
+                    }
+                    chain.proceed()
+                }
+            Lg.i(TAG, "aod-mount $METHOD_EMIT params=${emit.parameterTypes.size}")
+            1
+        } catch (t: Throwable) {
+            Lg.e(TAG, "aod-install $METHOD_EMIT 失败 ${t.javaClass.simpleName}: ${t.message}", t)
+            0
+        }
+    }
+
+    /** 汇聚点回调：一次拿全起点/终点/进度/状态，按状态分流建边与推进度。 */
+    private fun recordEmit(step: Any?) {
+        emitHits.incrementAndGet()
+        if (step == null) return
+        val from = stepFromGetter?.let { safeEnumName(it, step) }
+        val to = stepToGetter?.let { safeEnumName(it, step) }
+        if (from != null) lastFrom = from
+        if (to != null) lastTo = to
+        lastProgress = normalizeProgress(stepValueGetter?.invoke(step) as? Float ?: Float.NaN)
+        lastState = stepStateGetter?.invoke(step)?.toString() ?: "?"
+        resolveEdge()?.let { edge ->
+            if (currentEdge != edge) {
+                currentEdge = edge
+                logThrottled("aod-edge", "edge=$edge from=$lastFrom to=$lastTo src=emit")
+            }
+        } ?: run {
+            currentEdge = null
+            logThrottled(
+                "aod-edge-unknown",
+                "边未识别 from=$lastFrom to=$lastTo src=emit",
+                UNKNOWN_EDGE_LOG_MS,
+            )
+        }
+        if (!guard.stillCurrent(lastStartToken)) {
+            replayDrops.incrementAndGet()
+        }
+        feedBridge()
     }
 
     /**
@@ -348,9 +428,9 @@ object AodHandoffHook {
         val gate = refreshGate()
         val msg = String.format(
             Locale.US,
-            "start=%d upd=%d drop=%d from=%s to=%s uuid=%s p=%s state=%s " +
+            "start=%d upd=%d emit=%d drop=%d from=%s to=%s uuid=%s p=%s state=%s " +
                 "gen=%d wake=%d win=%b gate=%b stop=%b",
-            startHits.get(), updateHits.get(), replayDrops.get(),
+            startHits.get(), updateHits.get(), emitHits.get(), replayDrops.get(),
             lastFrom, lastTo, lastUuid, progressText(lastProgress), lastState,
             guard.generation(), guard.wakeSerial(), lastStartInWindow, gate, stopped,
         )

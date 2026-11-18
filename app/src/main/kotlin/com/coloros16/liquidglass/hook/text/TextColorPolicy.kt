@@ -26,7 +26,7 @@ object TextColorPolicy {
     fun resolveReadableTextColor(textView: TextView, originalColor: Int, screenX: Int, screenY: Int): Int? {
         val tvTag = textView.javaClass.name.substringAfterLast('.')
         // 预设覆盖：文字所在玻璃区域的宿主类绑定预设时，反色/强制白按预设值（未设键回落全局开关）
-        val hostCls = TextScopeMatcher.glassRegionHostAt(screenX, screenY)
+        val hostCls = TextScopeMatcher.glassRegionHostAt(screenX, screenY, textView)
         val ov = com.coloros16.liquidglass.glass.GlassRegistry.overridesForClass(hostCls)
         val forceWhite = ov?.get(com.coloros16.liquidglass.config.Prefs.KEY_TEXT_FORCE_WHITE_ENABLE)
             ?.let { it > 0.5f } ?: BlurDrawHook.textForceWhiteEnabled

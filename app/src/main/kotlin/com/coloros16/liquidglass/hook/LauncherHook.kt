@@ -316,11 +316,13 @@ object LauncherHook {
 
     /** [doc/spec/52] 壁纸文件解码源：整幅壁纸位图（inSampleSize 降采样）+ 逻辑原生尺寸 + 壁纸 id。
      *  渲染背景 = 从 [bitmap] 构建整条可滚动条带（见 buildVisibleCrop），offset 只平移 region。 */
-    private class WallpaperSource(
+    private data class WallpaperSource(
         val bitmap: Bitmap,
         val logicalWidth: Int,
         val logicalHeight: Int,
         val wallpaperId: Int,
+        /** 解码代数：每次真正重解码 +1（壁纸 id 不变的替换也能让渲染缓存失效）。 */
+        val decodeGen: Int = 0,
     )
 
     /** 渲染背景源决策：整屏快照 + 元素区域折算到快照坐标的 srcRect。 */
@@ -3486,6 +3488,10 @@ object LauncherHook {
      * - 静态壁纸 id 变 / 首次 → 置 wallpaperDecodePending + 入队 worker 解码。
      * - 动态壁纸 / WallpaperManager 拿不到 → 清静态源 + 入队回退 captureDisplay 抓屏。
      */
+    /** 壁纸重解码代数（渲染缓存键成分）。 */
+    @Volatile
+    private var wallpaperDecodeGen = 0
+
     private fun refreshWallpaperSourceIfChanged(force: Boolean = false) {
         val wm = wallpaperManager()
         if (wm == null) {
@@ -3514,8 +3520,9 @@ object LauncherHook {
             return
         }
         val src = wallpaperSource
-        if (src != null && src.wallpaperId == id && !wallpaperDecodePending) {
-            // 壁纸未变：no-op（静态壁纸内容不变，无需重抓/重解码）
+        if (src != null && src.wallpaperId == id && !wallpaperDecodePending && !force) {
+            // 壁纸未变且非强制：no-op。force=true（壁纸变更广播等明确事件）时即使 id 相同也重解码——
+            // ColorOS 换壁纸可能不换 id，靠代数让渲染缓存失效
             return
         }
         wallpaperDecodeTargetId = id
@@ -3934,7 +3941,8 @@ object LauncherHook {
                 wallpaperSource = null
                 return null
             }
-            wallpaperSource = decoded
+            wallpaperDecodeGen++
+            wallpaperSource = decoded.copy(decodeGen = wallpaperDecodeGen)
             wallpaperDecodeTargetId = decoded.wallpaperId
             syncWallpaperOffsetsFromSystem()
             Lg.i(
@@ -4502,7 +4510,9 @@ object LauncherHook {
 
     // ------------------------------------------------------------ 点按位置发光 ------------------------------------------------------------
 
-    private val pressGlowStates = HashMap<Int, PressGlow.State>()
+    /** 发光状态表：宿主 View id → 包络；区域表键是 drawable id，靠别名表桥接。 */
+    private val pressGlowStates = HashMap<Int, MutableList<PressGlow.State>>()
+    private val pressGlowAlias = HashMap<Int, MutableSet<Int>>()
     private var pressGlowMounted = false
     private var pressGlowPumpRunning = false
     @Volatile private var pressGlowEnabledValue = Prefs.DEFAULT_PRESS_GLOW
@@ -4575,29 +4585,119 @@ object LauncherHook {
 
     private fun notePressGlowTouch(view: View?, ev: MotionEvent?) {
         if (view == null || ev == null) return
-        val id = System.identityHashCode(view)
-        val active = pressGlowStates[id]
-        if (active == null) {
-            if (ev.actionMasked != MotionEvent.ACTION_DOWN) return
-            if (!pressGlowEnabledFor(id) || isPowerSaveGlassOff()) return
-            val entry = screenRegionMap[id] ?: return
-            if (entry.hostViewRef.get() !== view) return
-            if (view.width <= 0 || view.height <= 0) return
-            pressGlowStates[id] = PressGlow.State(SystemClock.uptimeMillis(), null, ev.x, ev.y)
-            if (pressGlowStates.size > 16) pressGlowStates.clear()
-            logOncePerSecond("pressGlowDown") {
-                Lg.i(TAG, "press-glow: down id=$id host=${entry.hostViewName} at=(${ev.x.toInt()},${ev.y.toInt()})")
+        if (isPowerSaveGlassOff()) return
+        val action = ev.actionMasked
+        val now = SystemClock.uptimeMillis()
+        when (action) {
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
+                // 新按压到来 = 上一条流可能已被别的窗口夺走且没收尾：按住超过 2s 的旧触点立即收尾
+                // （正常按住光斑保持；被夺流的冻结光斑在下一次任意按压时清掉，不再永久残留）
+                for ((oldHid, oldList) in pressGlowStates) {
+                    var changed = false
+                    for (i in oldList.indices) {
+                        val st = oldList[i]
+                        if (st.upAtMs == null && now - st.downAtMs > 2000L) {
+                            oldList[i] = st.copy(upAtMs = now)
+                            changed = true
+                        }
+                    }
+                    if (changed) pressGlowHostById(oldHid)?.invalidate()
+                }
+                if (view.width <= 0 || view.height <= 0) return
+                var host: View? = view
+                var hops = 0
+                var hid = System.identityHashCode(view)
+                while (host != null && hops < 12) {
+                    hid = System.identityHashCode(host)
+                    if (pressGlowAlias[hid]?.isNotEmpty() == true) break
+                    host = host.parent as? View
+                    hops++
+                }
+                if (host == null) {
+                    logOncePerSecond("pressGlowMiss") {
+                        Lg.i(TAG, "press-glow: down miss view=${view.javaClass.simpleName} (no glass host in chain)")
+                    }
+                    return
+                }
+                val anyId = pressGlowAlias[hid]?.firstOrNull() ?: return
+                if (!pressGlowEnabledFor(anyId)) return
+                val idx = ev.actionIndex
+                val pid = ev.getPointerId(idx)
+                val hloc = IntArray(2)
+                val vloc = IntArray(2)
+                host.getLocationOnScreen(hloc)
+                view.getLocationOnScreen(vloc)
+                val x = ev.getX(idx) + (vloc[0] - hloc[0])
+                val y = ev.getY(idx) + (vloc[1] - hloc[1])
+                val list = pressGlowStates.getOrPut(hid) { ArrayList(PressGlow.MAX_SPOTS) }
+                list.removeAll { it.pid == pid }
+                list.add(PressGlow.State(now, null, x, y, pid))
+                while (list.size > PressGlow.MAX_SPOTS) list.removeAt(0)
+                if (pressGlowStates.size > 16) pressGlowStates.clear()
+                logOncePerSecond("pressGlowDown") {
+                    Lg.i(TAG, "press-glow: down host=${host.javaClass.simpleName} hid=$hid pid=$pid spots=${list.size} at=(${x.toInt()},${y.toInt()})")
+                }
+                host.invalidate()
             }
-        } else {
-            when (ev.actionMasked) {
-                MotionEvent.ACTION_MOVE -> pressGlowStates[id] = active.copy(x = ev.x, y = ev.y)
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    pressGlowStates[id] = active.copy(upAtMs = SystemClock.uptimeMillis())
-                    logOncePerSecond("pressGlowUp") { Lg.i(TAG, "press-glow: up id=$id") }
+            MotionEvent.ACTION_MOVE -> {
+                if (pressGlowStates.isEmpty()) return
+                // 逐 pointer 按 id 找归属宿主并更新坐标（多指各归各的宿主）
+                val vloc = IntArray(2)
+                view.getLocationOnScreen(vloc)
+                val hloc = IntArray(2)
+                for ((hid, list) in pressGlowStates) {
+                    val host = pressGlowHostById(hid) ?: continue
+                    host.getLocationOnScreen(hloc)
+                    var touched = false
+                    for (i in list.indices) {
+                        val st = list[i]
+                        if (st.upAtMs != null) continue
+                        val idx = ev.findPointerIndex(st.pid)
+                        if (idx < 0) continue
+                        list[i] = st.copy(
+                            x = ev.getX(idx) + (vloc[0] - hloc[0]),
+                            y = ev.getY(idx) + (vloc[1] - hloc[1]),
+                        )
+                        touched = true
+                    }
+                    if (touched) host.invalidate()
                 }
             }
+            MotionEvent.ACTION_POINTER_UP -> {
+                val pid = ev.getPointerId(ev.actionIndex)
+                for ((hid, list) in pressGlowStates) {
+                    for (i in list.indices) {
+                        if (list[i].pid == pid && list[i].upAtMs == null) {
+                            list[i] = list[i].copy(upAtMs = now)
+                            logOncePerSecond("pressGlowUp") { Lg.i(TAG, "press-glow: up hid=$hid pid=$pid") }
+                            pressGlowHostById(hid)?.invalidate()
+                        }
+                    }
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                // 主流结束：本视图窗口内全部未松手触点一起收尾（防单指残留常亮）
+                if (pressGlowStates.values.any { l -> l.any { it.upAtMs == null } }) {
+                    logOncePerSecond("pressGlowUpAll") {
+                        Lg.i(TAG, "press-glow: up/cancel view=${view.javaClass.simpleName} action=$action (release all)")
+                    }
+                }
+                for ((hid, list) in pressGlowStates) {
+                    var any = false
+                    for (i in list.indices) {
+                        if (list[i].upAtMs == null) {
+                            list[i] = list[i].copy(upAtMs = now)
+                            any = true
+                        }
+                    }
+                    if (any) {
+                        logOncePerSecond("pressGlowUp") { Lg.i(TAG, "press-glow: up-all hid=$hid") }
+                        pressGlowHostById(hid)?.invalidate()
+                    }
+                }
+            }
+            else -> return
         }
-        view.invalidate()
         pumpPressGlowFrames()
     }
 
@@ -4616,10 +4716,15 @@ object LauncherHook {
                             val it = pressGlowStates.entries.iterator()
                             while (it.hasNext()) {
                                 val e = it.next()
-                                if (PressGlow.finished(e.value, now)) {
+                                e.value.removeAll { st -> PressGlow.finished(st, now) }
+                                if (e.value.isEmpty()) {
                                     it.remove()
+                                    continue
                                 }
-                                screenRegionMap[e.key]?.hostViewRef?.get()?.invalidate()
+                                pressGlowHostById(e.key)?.invalidate()
+                                pressGlowAlias[e.key]?.forEach { did ->
+                                    screenRegionMap[did]?.hostViewRef?.get()?.invalidate()
+                                }
                             }
                         }
                     } catch (t: Throwable) {
@@ -4639,16 +4744,47 @@ object LauncherHook {
         }
     }
 
-    /** 绘制收口统一调用：把该元素当前光斑强度/位置/半径喂给 shader（无状态 = 强度 0 防残留）。 */
-    private fun applyPressGlowUniforms(shader: RuntimeShader, id: Int, w: Int, h: Int) {
-        val s = pressGlowStates[id]
-        val k = if (s == null || !pressGlowEnabledFor(id)) 0f
-        else PressGlow.intensity(s, SystemClock.uptimeMillis()) * pressGlowStrengthFor(id)
-        if (k > 0f && s != null) {
-            LiquidGlassShader.setPressGlowUniforms(shader, k, s.x, s.y, PressGlow.radiusPx(minOf(w, h).toFloat()))
-        } else {
-            LiquidGlassShader.setPressGlowUniforms(shader, 0f, 0f, 0f, 1f)
+    /** 宿主 View id → View（别名表 drawable 反查）。 */
+    private fun pressGlowHostById(hid: Int): View? {
+        pressGlowAlias[hid]?.forEach { did ->
+            screenRegionMap[did]?.hostViewRef?.get()?.let { return it }
         }
+        return null
+    }
+
+    /** 绘制收口统一调用：登记 drawable→宿主别名 + 把宿主上的光斑喂给 shader（无状态 = 强度 0 防残留）。 */
+    private fun applyPressGlowUniforms(shader: RuntimeShader, id: Int, w: Int, h: Int) {
+        val host = screenRegionMap[id]?.hostViewRef?.get()
+        var hid = -1
+        if (host != null) {
+            hid = System.identityHashCode(host)
+            pressGlowAlias.getOrPut(hid) { HashSet() }.add(id)
+            if (pressGlowAlias.size > 128) {
+                pressGlowAlias.entries.removeIf { e ->
+                    e.value.isEmpty() || screenRegionMap[e.value.firstOrNull() ?: -1]?.hostViewRef?.get() == null
+                }
+            }
+        }
+        val list = if (hid >= 0) pressGlowStates[hid] else null
+        if (list.isNullOrEmpty() || !pressGlowEnabledFor(id)) {
+            LiquidGlassShader.setPressGlowUniforms(shader, 0f, 0f, 0f, 1f)
+            return
+        }
+        val now = SystemClock.uptimeMillis()
+        val strength = pressGlowStrengthFor(id)
+        val k = FloatArray(PressGlow.MAX_SPOTS)
+        val xs = FloatArray(PressGlow.MAX_SPOTS)
+        val ys = FloatArray(PressGlow.MAX_SPOTS)
+        for (i in 0 until minOf(list.size, PressGlow.MAX_SPOTS)) {
+            val st = list[i]
+            k[i] = PressGlow.intensity(st, now) * strength
+            xs[i] = st.x
+            ys[i] = st.y
+        }
+        LiquidGlassShader.setPressGlowSpots(
+            shader, k[0], xs[0], ys[0], k[1], xs[1], ys[1], k[2], xs[2], ys[2],
+            PressGlow.radiusPx(minOf(w, h).toFloat()),
+        )
     }
 
     // ------------------------------------------------------------ [spec/85 补接 / spec/90 #3] 门控辅助

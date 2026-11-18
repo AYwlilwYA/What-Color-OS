@@ -42,15 +42,24 @@ class SnapEngineTest {
     }
 
     @Test
-    fun aodHasNoVerticalGuides() {
+    fun aodHasVerticalGuidesToo() {
         val aodGuides = SnapEngine.guides(EditSurface.AOD)
-        assertTrue(aodGuides.none { it.axis == com.coloros16.liquidglass.engine.edit.SnapAxis.Y })
+        assertTrue(aodGuides.any { it.axis == com.coloros16.liquidglass.engine.edit.SnapAxis.Y })
 
-        val result = SnapEngine.snap(0.5f, 0.5f, aodGuides, EditAxis.HORIZONTAL_ONLY)
+        val result = SnapEngine.snap(0.5f, 0.5f, aodGuides, EditSurface.AOD.axis)
         assertEquals(0.5f, result.x, 1e-6f)
         assertEquals(GuideKind.CENTER_X, result.guideX)
-        assertNull(result.guideY)
+        assertEquals(GuideKind.CENTER_Y, result.guideY)
         assertEquals(0.5f, result.y, 1e-6f)
+    }
+
+    /** 阳性对照：HORIZONTAL_ONLY 约束本身仍生效（只是息屏不再用它）。 */
+    @Test
+    fun horizontalOnlyAxisStillIgnoresVerticalGuides() {
+        val guides = SnapEngine.guides(EditSurface.LOCK)
+        val result = SnapEngine.snap(0.5f, 0.5f, guides, EditAxis.HORIZONTAL_ONLY)
+        assertNull(result.guideY)
+        assertEquals(-1f, result.guideYPosition, 1e-6f)
     }
 
     @Test

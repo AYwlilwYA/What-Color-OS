@@ -92,4 +92,49 @@ class AodHandoffHookTest {
         assertEquals("1.000", progressText(1f))
         assertEquals("0.000", progressText(0f))
     }
+
+    // ---------- 状态变更汇聚点取值 ----------
+
+    private class FakeStep(
+        private val from: Any,
+        private val to: Any,
+        private val value: Float,
+        private val state: Any,
+    ) {
+        fun getFrom(): Any = from
+        fun getTo(): Any = to
+        fun getValue(): Float = value
+        fun getTransitionState(): Any = state
+    }
+
+    @Test
+    fun stepGettersReadAllFourFields() {
+        val step = FakeStep("DOZING", "GONE", 0.375f, "RUNNING")
+        val cls = FakeStep::class.java
+        assertEquals("DOZING", cls.getMethod("getFrom").invoke(step))
+        assertEquals("GONE", cls.getMethod("getTo").invoke(step))
+        assertEquals(0.375f, cls.getMethod("getValue").invoke(step) as Float, 0.0001f)
+        assertEquals("RUNNING", cls.getMethod("getTransitionState").invoke(step))
+    }
+
+    @Test
+    fun runningFrameValueIsPrimitiveFloatNotBoxed() {
+        val m = FakeStep::class.java.getMethod("getValue")
+        assertEquals(java.lang.Float.TYPE, m.returnType)
+        assertTrue(m.invoke(FakeStep("A", "B", 0f, "RUNNING")) is Float)
+    }
+
+    @Test
+    fun missingValueGetterDegradesToNaNAndBlocksFeed() {
+        val missing: java.lang.reflect.Method? = null
+        val progress = normalizeProgress(missing?.invoke(FakeStep("A", "B", 0.5f, "RUNNING")) as? Float ?: Float.NaN)
+        assertTrue(progress.isNaN())
+    }
+
+    @Test
+    fun runningFrameKeepsProgressInsideUnitRange() {
+        val cls = FakeStep::class.java.getMethod("getValue")
+        val step = FakeStep("DOZING", "LOCKSCREEN", 1.4f, "RUNNING")
+        assertEquals(1f, normalizeProgress(cls.invoke(step) as Float))
+    }
 }

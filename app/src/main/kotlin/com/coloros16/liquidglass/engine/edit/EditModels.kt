@@ -2,13 +2,13 @@ package com.coloros16.liquidglass.engine.edit
 
 import kotlin.math.abs
 
-/** 编辑轴约束：息屏只允许水平平移，纵向留给防烧屏。 */
+/** 编辑轴约束：FREE 两轴自由，HORIZONTAL_ONLY 只允许水平平移。 */
 enum class EditAxis { FREE, HORIZONTAL_ONLY }
 
-/** 编辑面：锁屏自由摆放，息屏只水平。 */
+/** 编辑面：锁屏与息屏都自由摆放，息屏纵向叠加防烧屏漂移。 */
 enum class EditSurface(val axis: EditAxis) {
     LOCK(EditAxis.FREE),
-    AOD(EditAxis.HORIZONTAL_ONLY),
+    AOD(EditAxis.FREE),
 }
 
 /** 时钟附加信息。 */
@@ -97,18 +97,21 @@ data class LockWidget(
 }
 
 /** 底部大丸内容：无 / 手电筒 / 相机 / 拨号 / 录音 / 计算器 / 扫一扫 / 收付款。 */
-enum class PillType(val id: String) {
-    NONE("pill.none"),
-    FLASHLIGHT("pill.flashlight"),
-    CAMERA("pill.camera"),
-    DIAL("pill.dial"),
-    RECORDER("pill.recorder"),
-    CALCULATOR("pill.calculator"),
-    SCAN("pill.scan"),
-    PAY("pill.pay");
+enum class PillType(val id: String, val nameKey: String) {
+    NONE("pill.none", "settings_aod_edit_pill_none"),
+    FLASHLIGHT("pill.flashlight", "settings_aod_edit_pill_flashlight"),
+    CAMERA("pill.camera", "settings_aod_edit_pill_camera"),
+    DIAL("pill.dial", "settings_aod_edit_pill_dial"),
+    RECORDER("pill.recorder", "settings_aod_edit_pill_recorder"),
+    CALCULATOR("pill.calculator", "settings_aod_edit_pill_calculator"),
+    SCAN("pill.scan", "settings_aod_edit_pill_scan"),
+    PAY("pill.pay", "settings_aod_edit_pill_pay");
 
     companion object {
         fun from(id: String?): PillType? = values().firstOrNull { it.id == id }
+
+        /** 面板选项顺序：无在最前，其余按枚举声明序。 */
+        fun choices(): List<PillType> = values().toList()
     }
 }
 

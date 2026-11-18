@@ -21,19 +21,11 @@ object EditAnchorOverlay {
     fun active(settings: LockLayoutSettings): Boolean =
         !isDefaultPosition(settings) || !isDefaultScale(settings)
 
-    /**
-     * 叠加后的锚点；[base] 为转场/静止态锚点。
-     *
-     * 息屏纵向不随编辑改变（[EditAxis] 约束已在配置层生效，这里再兜一次）。
-     */
+    /** 叠加后的锚点；[base] 为转场/静止态锚点，两轴位置都取用户值。 */
     fun apply(base: ClockAnchor, settings: LockLayoutSettings): ClockAnchor {
         if (!active(settings)) return base
         val x = settings.clockX.coerceIn(0f, 1f)
-        val y = if (settings.surface == EditSurface.AOD) {
-            base.centerY
-        } else {
-            settings.clockY.coerceIn(0f, 1f)
-        }
+        val y = settings.clockY.coerceIn(0f, 1f)
         val scale = base.scale * settings.clockScale
         return base.copy(centerX = x, centerY = y, scale = scale)
     }

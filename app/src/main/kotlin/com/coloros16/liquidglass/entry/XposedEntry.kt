@@ -167,7 +167,7 @@ class XposedEntry : XposedModule() {
         }
         Lg.i(TAG, "hot-reload: old hooks unhooked=$unhooked/$pkg, reinstalling into $pkg")
         try {
-            doInstall(pkg, cl)
+            doInstall(pkg, cl, hotReload = true)
         } catch (t: Throwable) {
             Lg.e(TAG, "hot-reload: reinstall threw ${t.javaClass.name}: ${t.message}", t)
         }
@@ -175,7 +175,7 @@ class XposedEntry : XposedModule() {
     }
 
     /** [doc/spec/110] 安装主入口（onPackageLoaded 与 onHotReloaded 共用同一套门槛与分发）。 */
-    private fun doInstall(packageName: String, classLoader: ClassLoader) {
+    private fun doInstall(packageName: String, classLoader: ClassLoader, hotReload: Boolean = false) {
         Lg.e("lg-boot", "host=$packageName pid=${android.os.Process.myPid()}")
         // 模块默认全关（Prefs.masterEnabled=false 直接跳过，零侵入）。
         if (!Prefs.masterEnabled(this)) {
@@ -184,7 +184,7 @@ class XposedEntry : XposedModule() {
         }
         // 热重载后新类静态为空，重装一次文件日志门控
         installLogGate()
-        if (packageName == PACKAGE_SYSTEMUI && crashGuardBlocks(this)) {
+        if (packageName == PACKAGE_SYSTEMUI && crashGuardBlocks(this, hotReload)) {
             return
         }
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
@@ -265,50 +265,58 @@ class XposedEntry : XposedModule() {
     /**
      * 循环崩守卫：窗口内到达安装点的不同 SystemUI pid 达到阈值 → 强制关总开关并跳过本次安装。
      * 账本用 commit 落盘（进程随时会崩，apply 异步写可能丢）；读写失败一律 fail-open 不拦安装。
+     *
+     * 两条豁免（只豁免「不是崩溃」的重启，真崩循环照拦）：
+     * - 热重载：同进程换代码，pid 不变本就不计数，但会刷新账本时间戳，故整条跳过。
+     * - 装机宽限：模块 APK 刚更新过（lastUpdateTime 变了）→ 清账本重新起算，
+     *   且本次安装点落在宽限窗内不计数；窗口过后同一包连续崩仍会攒满阈值。
      */
-    private fun crashGuardBlocks(module: XposedEntry): Boolean {
-        val windowMs = 2 * 60_000L
-        val threshold = 4
+    private fun crashGuardBlocks(module: XposedEntry, hotReload: Boolean = false): Boolean {
         return try {
             val prefs = Prefs.read(module)
-            val now = System.currentTimeMillis()
-            val pid = android.os.Process.myPid()
-            val entries = (prefs.getString(Prefs.KEY_CRASH_GUARD_PIDS, "") ?: "")
-                .split(';')
-                .mapNotNull { part ->
-                    val bits = part.split(',')
-                    val ts = bits.getOrNull(0)?.toLongOrNull()
-                    val p = bits.getOrNull(1)?.toIntOrNull()
-                    if (ts != null && p != null && now - ts in 0L until windowMs) p to ts else null
-                }
-            val byPid = HashMap<Int, Long>()
-            for ((p, ts) in entries) byPid[p] = maxOf(byPid[p] ?: 0L, ts)
-            byPid[pid] = now
-            if (byPid.size >= threshold) {
-                prefs.edit()
-                    .putBoolean(Prefs.KEY_MASTER, false)
-                    .putString(Prefs.KEY_CRASH_GUARD_PIDS, "")
-                    .commit()
-                Lg.e(
-                    TAG,
-                    "crash-guard: ${byPid.size} distinct systemui pids within ${windowMs / 60_000}min " +
-                        "pids=${byPid.keys.sorted()}, master forced OFF",
-                )
-                true
-            } else {
-                prefs.edit()
-                    .putString(
-                        Prefs.KEY_CRASH_GUARD_PIDS,
-                        byPid.entries.joinToString(";") { "${it.value},${it.key}" },
-                    )
-                    .commit()
-                Lg.e(TAG, "crash-guard pid=$pid window=${byPid.size}/$threshold")
-                false
+            val d = CrashGuardPolicy.decide(
+                now = System.currentTimeMillis(),
+                pid = android.os.Process.myPid(),
+                ledger = prefs.getString(Prefs.KEY_CRASH_GUARD_PIDS, "") ?: "",
+                apkStamp = moduleApkStamp(module),
+                lastStamp = prefs.getLong(Prefs.KEY_CRASH_GUARD_APK_STAMP, 0L),
+                hotReload = hotReload,
+            )
+            if (d.reason == "hot-reload") {
+                Lg.i(TAG, "crash-guard skip: hot-reload")
+                return false
             }
+            val edit = prefs.edit()
+                .putString(Prefs.KEY_CRASH_GUARD_PIDS, d.ledger)
+                .putLong(Prefs.KEY_CRASH_GUARD_APK_STAMP, d.apkStamp)
+            if (d.forceMasterOff) edit.putBoolean(Prefs.KEY_MASTER, false)
+            edit.commit()
+            if (d.block) {
+                Lg.e(TAG, "crash-guard: ${d.reason}, master forced OFF")
+            } else {
+                Lg.i(TAG, "crash-guard ${d.reason}")
+            }
+            d.block
         } catch (t: Throwable) {
             Lg.e(TAG, "crash-guard failed ${t.javaClass.simpleName}: ${t.message}, continue install")
             false
         }
+    }
+
+    /**
+     * 模块自身 APK 的 lastUpdateTime（装机即变）；取不到返回 0 = 不启用宽限，守卫按原口径工作。
+     * 宿主进程内 processContext 拿到的是宿主 context，故模块包名写死常量而非 ctx.packageName。
+     */
+    private fun moduleApkStamp(module: XposedEntry): Long = try {
+        val ctx = Lg.processContext()
+        if (ctx == null) {
+            0L
+        } else {
+            ctx.packageManager.getPackageInfo(PACKAGE_SELF, 0).lastUpdateTime
+        }
+    } catch (t: Throwable) {
+        Lg.i(TAG, "crash-guard apk stamp unavailable ${t.javaClass.simpleName}")
+        0L
     }
 
     /**
@@ -429,6 +437,8 @@ class XposedEntry : XposedModule() {
         const val PACKAGE_QUICK_SEARCH_BOX = "com.heytap.quicksearchbox"
 
         const val PACKAGE_DEMO = "com.coloros16.liquidglass.demo"
+        /** 模块自身包名（守卫读自己的 APK 更新时间用；宿主进程内 ctx.packageName 是宿主）。 */
+        const val PACKAGE_SELF = "com.coloros16.liquidglass"
         /** [doc/spec/110] 宿主 classLoader 缓存（onPackageLoaded 存 / onHotReloaded 读）。 */
         private val cachedLoaders = java.util.concurrent.ConcurrentHashMap<String, ClassLoader>()
         /** [doc/spec/110] 模块版本标记（热重载完成日志用，便于 daemon 侧对账 loaded version）。 */

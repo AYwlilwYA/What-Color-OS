@@ -48,6 +48,9 @@ if [ "$rc" -ne 0 ]; then
   exit 1
 fi
 
+echo "== 符号获取件对账（真 sf_bin 的 generate 地址） =="
+python3 "$T/test/test_elfsym.py" || { echo "UNITTEST elfsym: FAIL"; exit 1; }
+
 echo "== service.sh 语法 + 行为单测 =="
 sh -n "$T/service.sh" || { echo "ASSERT-FAIL service.sh syntax"; exit 1; }
 bash "$T/test/test_service_sh.sh" || { echo "UNITTEST service.sh: FAIL"; exit 1; }

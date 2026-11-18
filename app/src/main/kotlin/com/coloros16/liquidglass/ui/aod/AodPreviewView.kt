@@ -27,13 +27,21 @@ import com.coloros16.liquidglass.engine.ClockAnchor
 import com.coloros16.liquidglass.engine.ClockStateMachine
 import com.coloros16.liquidglass.engine.ContentLayerConfig
 import com.coloros16.liquidglass.engine.Easing
+import com.coloros16.liquidglass.engine.EffectOverlayPolicy
 import com.coloros16.liquidglass.engine.ElementPose
 import com.coloros16.liquidglass.engine.MaskGeometry
 import com.coloros16.liquidglass.engine.MaskLayerConfig
 import com.coloros16.liquidglass.engine.MaskShape
 import com.coloros16.liquidglass.engine.PhotoStyle
 import com.coloros16.liquidglass.engine.PhotoStyleMotion
+import com.coloros16.liquidglass.engine.CloudSpec
+import com.coloros16.liquidglass.engine.DotSpec
+import com.coloros16.liquidglass.engine.GradientStop
+import com.coloros16.liquidglass.engine.LinearSpec
+import com.coloros16.liquidglass.engine.RadialSpec
+import com.coloros16.liquidglass.engine.RidgePath
 import com.coloros16.liquidglass.engine.SceneLayerConfig
+import com.coloros16.liquidglass.engine.SceneSkyMath
 import com.coloros16.liquidglass.engine.SceneSample
 import com.coloros16.liquidglass.engine.SceneState
 import com.coloros16.liquidglass.engine.SceneTimeline
@@ -48,6 +56,8 @@ import com.coloros16.liquidglass.engine.TransitionProfile
 import com.coloros16.liquidglass.engine.from
 import com.coloros16.liquidglass.engine.effect.EffectCatalog
 import com.coloros16.liquidglass.engine.effect.EffectTextureCatalog
+import com.coloros16.liquidglass.engine.effect.HomeMotion
+import com.coloros16.liquidglass.engine.effect.IconEntranceState
 import com.coloros16.liquidglass.engine.home.HomeGeometry
 import com.coloros16.liquidglass.engine.home.HomeLayout
 import com.coloros16.liquidglass.engine.to
@@ -76,30 +86,33 @@ class AodPreviewView @JvmOverloads constructor(
             invalidate()
         }
 
-    /** 锁屏壁纸效果 id：有原版贴图的走法线折射，模糊/景深走各自管线。 */
+    /** 壁纸效果 id：有原版贴图的走法线折射，模糊/景深走各自管线；选中即预处理。 */
     var lockWallpaperEffect: String = EffectCatalog.LOCK_WP_NONE
         set(value) {
             if (field == value) return
             field = value
             effectLayerKey = ""
+            warmEffectLayer()
             invalidate()
         }
 
-    /** 锁屏特殊效果 id：景深走移轴带模糊。 */
+    /** 特殊壁纸效果 id：景深走移轴带模糊；选中即预处理。 */
     var lockSpecialEffect: String = EffectCatalog.LOCK_SP_NONE
         set(value) {
             if (field == value) return
             field = value
             effectLayerKey = ""
+            warmEffectLayer()
             invalidate()
         }
 
-    /** 锁屏壁纸效果强度 0–1：魅族玻璃折射幅度。 */
+    /** 壁纸效果强度 0–1：魅族玻璃折射幅度。 */
     var lockWallpaperIntensity: Float = 0.6f
         set(value) {
             if (field == value) return
             field = value
             effectLayerKey = ""
+            warmEffectLayer()
             invalidate()
         }
 
@@ -153,6 +166,17 @@ class AodPreviewView @JvmOverloads constructor(
 
     /** 启航旋转速度（度/秒），0=停转。 */
     var aodRotateSpeed: Float = 12f
+
+    /** 桌面图标入场效果 id 与三项参数；进桌面边按 index 错峰求值。 */
+    var homeIconEffect: String = EffectCatalog.HOME_ICON_FOREGROUND_FLY
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
+        }
+    var homeIconDurationMs: Float = 420f
+    var homeIconStaggerMs: Float = 28f
+    var homeIconTravelPercent: Float = 60f
         set(value) {
             if (field == value) return
             field = value
@@ -234,7 +258,7 @@ class AodPreviewView @JvmOverloads constructor(
             val last = lensLastNanos
             lensLastNanos = frameTimeNanos
             if (last != 0L) {
-                val speed = if (edge == null && scene == SceneState.AOD && allowAodDynamic) {
+                val speed = if (lensSpinActive()) {
                     (aodRotateSpeed / SailLensMotion.SPIN_DEG_PER_SEC).coerceIn(0f, 2f)
                 } else {
                     0f
@@ -245,16 +269,28 @@ class AodPreviewView @JvmOverloads constructor(
                     speed,
                 )
             }
-            if (lensSpinning || motionAnimating()) {
+            if (lensSpinning || motionAnimating() || lensSpinActive()) {
                 invalidate()
                 scheduleLensTick()
             }
         }
     }
 
+    /**
+     * 镜片壁纸是否该自转：息屏静止态，以及从息屏出发的展开边全程。
+     *
+     * 展开期继续自转才看得到「边转边放大归位」；进息屏的收缩边保持冻结。
+     */
+    private fun lensSpinActive(): Boolean {
+        if (!allowAodDynamic || style.id != AodStyleCatalog.ID_SAIL) return false
+        val activeEdge = if (scrubP >= 0f) SceneTimeline.edgeAt(scrubP) else edge
+        if (activeEdge == null) return scene == SceneState.AOD
+        return activeEdge == TransitionEdge.AOD_TO_LOCK || activeEdge == TransitionEdge.AOD_TO_HOME
+    }
+
     /** 息屏动态帧泵按需武装：总闸开且（启航转/混色或照片摆）才逐帧，静止零回调。 */
     private fun syncMotionTick() {
-        if (motionAnimating()) scheduleLensTick() else if (!lensSpinning) stopLensTick()
+        if (motionAnimating() || lensSpinActive()) scheduleLensTick() else if (!lensSpinning) stopLensTick()
     }
 
     private val clockThin = Typeface.create("sans-serif-thin", Typeface.NORMAL)
@@ -311,50 +347,20 @@ class AodPreviewView @JvmOverloads constructor(
     private val iconBitmapCache = HashMap<Int, Pair<Drawable, Bitmap>>()
     private val labelMetrics = Paint.FontMetrics()
 
-    private val stars = FloatArray(96 * 4)
-    private val moonMarks = FloatArray(38 * 4)
+    private val sceneFields = SceneSkyMath.fields()
+    private val stars = sceneFields.first
+    private val moonMarks = sceneFields.second
+    private val cloudBlobs = SceneSkyMath.cloudBlobs()
+    private val backRidge = SceneSkyMath.backRidge()
+    private val frontRidge = SceneSkyMath.frontRidge()
 
-    private val cloudBlobs = floatArrayOf(
-        0.06f, 0.88f, 0.46f, 0.11f,
-        0.28f, 0.92f, 0.52f, 0.09f,
-        0.52f, 0.86f, 0.58f, 0.10f,
-        0.78f, 0.91f, 0.50f, 0.08f,
-        0.18f, 0.74f, 0.34f, 0.05f,
-        0.64f, 0.76f, 0.42f, 0.05f,
-    )
-
-    private val backRidge = floatArrayOf(
-        0.00f, 0.792f, 0.16f, 0.716f, 0.31f, 0.792f, 0.47f, 0.678f,
-        0.62f, 0.772f, 0.79f, 0.702f, 1.00f, 0.786f,
-    )
-
-    private val frontRidge = floatArrayOf(
-        0.00f, 0.900f, 0.19f, 0.842f, 0.38f, 0.918f, 0.55f, 0.826f,
-        0.71f, 0.906f, 0.86f, 0.852f, 1.00f, 0.918f,
-    )
+    private val starDots = ArrayList<DotSpec>()
+    private val cloudSpecs = ArrayList<CloudSpec>()
+    private val moonCraterSpecs = ArrayList<RadialSpec>()
 
     init {
         applyStyle(style)
         refreshTime()
-        val rnd = Random(11L)
-        var i = 0
-        while (i < stars.size) {
-            stars[i] = rnd.nextFloat()
-            stars[i + 1] = rnd.nextFloat() * 0.60f
-            stars[i + 2] = 0.6f + rnd.nextFloat() * 1.35f
-            stars[i + 3] = 0.18f + rnd.nextFloat() * 0.82f
-            i += 4
-        }
-        i = 0
-        while (i < moonMarks.size) {
-            val angle = rnd.nextFloat() * 6.2831855f
-            val dist = (0.10f + rnd.nextFloat() * 0.52f)
-            moonMarks[i] = (kotlin.math.cos(angle) * dist).coerceIn(-0.82f, 0.82f)
-            moonMarks[i + 1] = (kotlin.math.sin(angle) * dist).coerceIn(-0.82f, 0.82f)
-            moonMarks[i + 2] = 0.018f + rnd.nextFloat() * 0.062f
-            moonMarks[i + 3] = 0.06f + rnd.nextFloat() * 0.10f
-            i += 4
-        }
     }
 
     private fun applyStyle(value: AodStyle) {
@@ -417,7 +423,9 @@ class AodPreviewView @JvmOverloads constructor(
     /** 设置系统壁纸底图（接管壁纸时的背景）。 */
     fun setWallpaper(bitmap: Bitmap?) {
         wallpaper = bitmap
+        effectLayerKey = ""
         syncLensSource()
+        warmEffectLayer()
         invalidate()
     }
 
@@ -448,6 +456,12 @@ class AodPreviewView @JvmOverloads constructor(
         this.t = t.coerceIn(0f, 1f)
         this.scrubP = -1f
         editDelegate.state = scene
+        if (edge != null && edge != prevEdge) {
+            lensAngleDeg = when (edge) {
+                TransitionEdge.LOCK_TO_HOME, TransitionEdge.HOME_TO_LOCK -> lensPose.angleDeg
+                else -> lensAngleDeg
+            }
+        }
         if (edge != null) {
             editDelegate.cancelTouch()
             clockTailEdge = null
@@ -592,7 +606,7 @@ class AodPreviewView @JvmOverloads constructor(
         framePaint.color = 0x2EFFFFFF
         canvas.drawRoundRect(phoneRect, corner, corner, framePaint)
 
-        if (lensSpinning || motionAnimating()) scheduleLensTick() else stopLensTick()
+        if (lensSpinning || motionAnimating() || lensSpinActive()) scheduleLensTick() else stopLensTick()
     }
 
     /** 息屏动态是否需要在场逐帧：总闸开 + 息屏在场 + 该样式有动参数。 */
@@ -878,15 +892,7 @@ class AodPreviewView @JvmOverloads constructor(
 
         val realWallpaper = if (useSystemWallpaper) wallpaper else null
         val backdrop = realWallpaper ?: sceneSky
-        val lockVisible = scene == SceneState.LOCK || (effEdge != null && effEdge.to == SceneState.LOCK)
-        val effectLayer = if (lockVisible && backdrop != null) requestEffectLayer(backdrop, w, h) else null
-        if (effectLayer != null) {
-            drawBitmapCover(canvas, effectLayer, w, h, layers.wallpaperScale, 0f, 0f)
-        } else if (backdrop != null) {
-            drawBitmapCover(canvas, backdrop, w, h, layers.wallpaperScale, 0f, 0f)
-        } else {
-            drawAmbientWallpaper(canvas, w, h)
-        }
+        drawEffectBackdrop(canvas, w, h, backdrop, effEdge, effT)
         fill.style = Paint.Style.FILL
         fill.shader = null
         fill.color = alphaColor(0xFF02040A.toInt(), layers.dim)
@@ -896,14 +902,14 @@ class AodPreviewView @JvmOverloads constructor(
         aodLayerAlpha = if (effEdge == null) layers.aodAlpha else sailFade.aodAlpha
         contentGate = sailFade.contentGate
         if (aodLayerAlpha > 0.002f) {
-            lensSpinning = scene == SceneState.AOD && effEdge == null
+            lensSpinning = lensSpinActive()
             com.coloros16.liquidglass.engine.effect.AodMotion.evaluate(
                 SystemClock.uptimeMillis(), allowAodDynamic, aodColorMix, aodRotateSpeed, aodPhotoTilt, aodMotion,
             )
             val layer = canvas.saveLayerAlpha(0f, 0f, w, h, (aodLayerAlpha * 255f).toInt())
             fill.color = Color.BLACK
             canvas.drawRect(0f, 0f, w, h, fill)
-            if (effEdge == null) lensPose.angleDeg = lensAngleDeg
+            lensPose.angleDeg = lensAngleDeg
             lensRenderer.draw(
                 canvas, w, h, lensPose, SailLensMotion.lensZoom(lensPose.scale),
                 colorMix = if (scene == SceneState.AOD) aodMotion.colorMix else 0f,
@@ -966,15 +972,7 @@ class AodPreviewView @JvmOverloads constructor(
 
         val realWallpaper = if (useSystemWallpaper) wallpaper else null
         val backdrop = stylePhoto ?: realWallpaper ?: sceneSky
-        val lockVisible = scene == SceneState.LOCK || (effEdge != null && effEdge.to == SceneState.LOCK)
-        val effectLayer = if (lockVisible && backdrop != null) requestEffectLayer(backdrop, w, h) else null
-        if (effectLayer != null) {
-            drawBitmapCover(canvas, effectLayer, w, h, layers.wallpaperScale, 0f, 0f)
-        } else if (backdrop != null) {
-            drawBitmapCover(canvas, backdrop, w, h, layers.wallpaperScale, 0f, 0f)
-        } else {
-            drawAmbientWallpaper(canvas, w, h)
-        }
+        drawEffectBackdrop(canvas, w, h, backdrop, effEdge, effT)
         fill.style = Paint.Style.FILL
         fill.shader = null
         fill.color = alphaColor(0xFF02040A.toInt(), layers.dim)
@@ -1036,7 +1034,8 @@ class AodPreviewView @JvmOverloads constructor(
     private fun captureRevealTarget(canvas: Canvas, w: Float, h: Float, effEdge: TransitionEdge?): Bitmap? {
         val target = effEdge?.to ?: scene
         if (target == SceneState.AOD) return null
-        val key = "${target.name}:${w.toInt()}x${h.toInt()}:${wallpaper?.hashCode() ?: 0}"
+        val key = "${target.name}:${w.toInt()}x${h.toInt()}:${wallpaper?.hashCode() ?: 0}" +
+            ":$lockWallpaperEffect:$lockSpecialEffect:$lockWallpaperIntensity:${effectLayerKey}"
         revealCacheKey?.let { if (it == key) return revealCache }
         val rw = (w / 2f).toInt().coerceAtLeast(2)
         val rh = (h / 2f).toInt().coerceAtLeast(2)
@@ -1045,11 +1044,7 @@ class AodPreviewView @JvmOverloads constructor(
         off.scale(rw / w, rh / h)
         val realWallpaper = if (useSystemWallpaper) wallpaper else null
         val backdrop = stylePhoto ?: realWallpaper ?: sceneSky
-        if (backdrop != null) {
-            drawBitmapCover(off, backdrop, w, h, layers.wallpaperScale, 0f, 0f)
-        } else {
-            drawAmbientWallpaper(off, w, h)
-        }
+        drawEffectBackdrop(off, w, h, backdrop, null, 0f, target)
         when (target) {
             SceneState.LOCK -> drawLockOverlay(off, w, h, 1f, 0f)
             SceneState.HOME -> {
@@ -1131,6 +1126,7 @@ class AodPreviewView @JvmOverloads constructor(
         zoom: Float,
         dx: Float,
         dy: Float,
+        alpha: Float = 1f,
     ) {
         val bw = bitmap.width.toFloat()
         val bh = bitmap.height.toFloat()
@@ -1141,168 +1137,132 @@ class AodPreviewView @JvmOverloads constructor(
         dst.set((w - dw) / 2f + dx, (h - dh) / 2f + dy, (w + dw) / 2f + dx, (h + dh) / 2f + dy)
         iconPaint.shader = null
         iconPaint.colorFilter = null
-        iconPaint.alpha = 255
+        iconPaint.alpha = EffectOverlayPolicy.alphaByte(alpha)
         canvas.drawBitmap(bitmap, src, dst, iconPaint)
+        iconPaint.alpha = 255
     }
 
     private fun drawSceneSky(canvas: Canvas, w: Float, h: Float, u: Float) {
-        val top = mix3(0xFF03050A.toInt(), 0xFF060B16.toInt(), 0xFF0A1426.toInt(), u)
-        val mid = mix3(0xFF070D18.toInt(), 0xFF0C1626.toInt(), 0xFF132340.toInt(), u)
-        val low = mix3(0xFF0F1A2B.toInt(), 0xFF1B2C49.toInt(), 0xFF2B4268.toInt(), u)
-        val glow = mix3(0xFF1B2739.toInt(), 0xFF2C4467.toInt(), 0xFF48678F.toInt(), u)
         fill.style = Paint.Style.FILL
-        fill.shader = LinearGradient(
-            0f, 0f, 0f, h,
-            intArrayOf(top, mid, low, glow),
-            floatArrayOf(0f, 0.46f, 0.80f, 1f), Shader.TileMode.CLAMP,
-        )
+        fill.shader = linearOf(SceneSkyMath.skyGradient(w, h, u))
         canvas.drawRect(0f, 0f, w, h, fill)
         fill.shader = null
-        radial(canvas, w * 0.50f, h * 1.04f, w * 0.85f, alphaColor(0xFF9FB4D8.toInt(), 0.10f), 0x009FB4D8)
-        radial(canvas, w * 0.76f, h * 0.30f, w * 0.70f, alphaColor(0xFF6E86B8.toInt(), 0.06f), 0x006E86B8)
+        for (g in SceneSkyMath.skyGlows(w, h)) radialOf(canvas, g)
     }
 
     private fun drawMilkyWay(canvas: Canvas, w: Float, h: Float) {
-        val alpha = (1f - sceneSample.light * 0.85f).coerceIn(0.05f, 1f) * 0.55f
         val save = canvas.save()
-        canvas.rotate(-24f, w * 0.52f, h * 0.34f)
-        fill.style = Paint.Style.FILL
-        fill.shader = LinearGradient(
-            0f, h * 0.16f, 0f, h * 0.52f,
-            intArrayOf(
-                0x00B9D0FF,
-                Color.argb((alpha * 58f).toInt(), 205, 219, 245),
-                Color.argb((alpha * 34f).toInt(), 205, 219, 245),
-                0x00B9D0FF,
-            ),
-            floatArrayOf(0f, 0.32f, 0.62f, 1f), Shader.TileMode.CLAMP,
+        canvas.rotate(
+            SceneSkyMath.MILKYWAY_ANGLE_DEG,
+            w * SceneSkyMath.MILKYWAY_PIVOT_X,
+            h * SceneSkyMath.MILKYWAY_PIVOT_Y,
         )
-        canvas.drawRect(-w * 0.3f, h * 0.16f, w * 1.3f, h * 0.52f, fill)
+        fill.style = Paint.Style.FILL
+        fill.shader = linearOf(SceneSkyMath.milkyWayGradient(w, h, sceneSample.light))
+        canvas.drawRect(
+            w * SceneSkyMath.MILKYWAY_LEFT, h * SceneSkyMath.MILKYWAY_TOP,
+            w * SceneSkyMath.MILKYWAY_RIGHT, h * SceneSkyMath.MILKYWAY_BOTTOM, fill,
+        )
         fill.shader = null
         canvas.restoreToCount(save)
     }
 
     private fun drawSceneStars(canvas: Canvas, w: Float, h: Float) {
-        val alphaBase = (1f - sceneSample.light * 0.86f).coerceIn(0.06f, 1f)
-        val zoom = sceneSample.cameraScale
-        val dx = (0.5f - sceneSample.cameraX) * w * 0.20f
-        val dy = (0.5f - sceneSample.cameraY) * h * 0.12f
+        SceneSkyMath.stars(
+            stars, w, h, sceneSample.light,
+            sceneSample.cameraX, sceneSample.cameraY, sceneSample.cameraScale,
+            density * uiScale, starDots,
+        )
         fill.style = Paint.Style.FILL
         fill.shader = null
-        var i = 0
-        while (i < stars.size) {
-            val nx = stars[i]
-            val ny = stars[i + 1]
-            val radius = stars[i + 2]
-            val brightness = stars[i + 3]
-            val fade = if (ny > 0.46f) 1f - (ny - 0.46f) / 0.14f * 0.82f else 1f
-            val a = (alphaBase * brightness * fade * 255f).toInt().coerceIn(0, 255)
-            if (a > 4) {
-                val sx = ((nx - 0.5f) * zoom + 0.5f) * w + dx
-                val sy = ((ny - 0.5f) * zoom + 0.5f) * h + dy
-                val starR = radius * 0.55f * density * uiScale * 0.5f
-                fill.color = Color.argb(a, 226, 236, 252)
-                canvas.drawCircle(sx, sy, starR, fill)
-                if (brightness > 0.90f) {
-                    fill.color = Color.argb(a / 8, 210, 228, 255)
-                    canvas.drawCircle(sx, sy, starR * 3.2f, fill)
-                }
-            }
-            i += 4
+        for (d in starDots) {
+            fill.color = d.argb
+            canvas.drawCircle(d.cx, d.cy, d.radius, fill)
         }
     }
 
     private fun drawClouds(canvas: Canvas, w: Float, h: Float, strength: Float, layer: Int) {
-        val parallax = (0.5f - sceneSample.cameraX) * w * 0.34f
-        val vertical = (0.5f - sceneSample.cameraY) * h * 0.16f
-        var i = 0
-        while (i < cloudBlobs.size) {
-            val cx = cloudBlobs[i] * w + parallax * (if (layer == 0) 0.65f else 1f)
-            val cy = cloudBlobs[i + 1] * h + vertical * (if (layer == 0) 0.5f else 0.8f)
-            val rx = cloudBlobs[i + 2] * w
-            val ry = rx * 0.17f
-            val a = cloudBlobs[i + 3] * strength * (if (layer == 0) 1f else 0.8f)
-            if (a > 0.002f) {
-                val save = canvas.save()
-                canvas.translate(cx, cy)
-                canvas.scale(1f, ry / rx)
-                fill.style = Paint.Style.FILL
-                fill.shader = RadialGradient(
-                    0f, 0f, rx,
-                    intArrayOf(
-                        Color.argb((a * 255f).toInt(), 158, 176, 208),
-                        Color.argb((a * 120f).toInt(), 138, 156, 190),
-                        0x0080919F,
-                    ),
-                    floatArrayOf(0f, 0.58f, 1f), Shader.TileMode.CLAMP,
-                )
-                canvas.drawCircle(0f, 0f, rx, fill)
-                fill.shader = null
-                canvas.restoreToCount(save)
-            }
-            i += 4
+        SceneSkyMath.clouds(
+            cloudBlobs, w, h, strength, layer,
+            sceneSample.cameraX, sceneSample.cameraY, cloudSpecs,
+        )
+        for (c in cloudSpecs) {
+            val save = canvas.save()
+            canvas.translate(c.cx, c.cy)
+            canvas.scale(1f, c.yScale)
+            fill.style = Paint.Style.FILL
+            fill.shader = radialOf(c.rx, c.stops)
+            canvas.drawCircle(0f, 0f, c.rx, fill)
+            fill.shader = null
+            canvas.restoreToCount(save)
         }
     }
 
     private fun drawMountains(canvas: Canvas, w: Float, h: Float, u: Float) {
-        val drift = (0.47f - sceneSample.cameraY) * h * 0.42f
-        val backTop = mix3(0xFF0B1220.toInt(), 0xFF101A2D.toInt(), 0xFF16233C.toInt(), u)
-        val backBottom = mix3(0xFF05080F.toInt(), 0xFF080C15.toInt(), 0xFF0A1020.toInt(), u)
-        buildRidge(backRidge, w, h, drift)
+        val drift = SceneSkyMath.ridgeDrift(h, sceneSample.cameraY)
+        buildRidge(SceneSkyMath.ridgePath(backRidge, w, h, drift))
         fill.style = Paint.Style.FILL
-        fill.shader = LinearGradient(
-            0f, h * 0.66f + drift, 0f, h,
-            intArrayOf(backTop, backBottom), null, Shader.TileMode.CLAMP,
-        )
+        fill.shader = linearOf(SceneSkyMath.ridgeBackGradient(w, h, u, drift))
         canvas.drawPath(path, fill)
         fill.shader = null
 
-        val frontTop = mix3(0xFF060A10.toInt(), 0xFF080D16.toInt(), 0xFF0C1220.toInt(), u)
-        buildRidge(frontRidge, w, h, drift)
+        buildRidge(SceneSkyMath.ridgePath(frontRidge, w, h, drift))
         fill.style = Paint.Style.FILL
-        fill.shader = LinearGradient(
-            0f, h * 0.78f + drift, 0f, h,
-            intArrayOf(frontTop, 0xFF010204.toInt()), null, Shader.TileMode.CLAMP,
-        )
+        fill.shader = linearOf(SceneSkyMath.ridgeFrontGradient(w, h, u, drift))
         canvas.drawPath(path, fill)
         fill.shader = null
     }
 
-    private fun buildRidge(points: FloatArray, w: Float, h: Float, drift: Float) {
+    private fun buildRidge(r: RidgePath) {
         path.reset()
-        path.moveTo(-w * 0.06f, h * 1.06f)
-        path.lineTo(-w * 0.06f, h * points[1] + drift)
-        var i = 2
-        while (i < points.size) {
-            val prevX = w * points[i - 2]
-            val prevY = h * points[i - 1] + drift
-            val nextX = w * points[i]
-            val nextY = h * points[i + 1] + drift
-            val midX = (prevX + nextX) / 2f
-            path.cubicTo(midX, prevY, midX, nextY, nextX, nextY)
-            i += 2
-        }
-        path.lineTo(w * 1.06f, h * 1.06f)
+        path.moveTo(r.startX, r.startY)
+        path.lineTo(r.firstX, r.firstY)
+        for (c in r.cubics) path.cubicTo(c.c1x, c.c1y, c.c2x, c.c2y, c.x, c.y)
+        path.lineTo(r.endX, r.endY)
         path.close()
     }
 
+    private fun linearOf(s: LinearSpec): LinearGradient = LinearGradient(
+        s.x0, s.y0, s.x1, s.y1,
+        IntArray(s.stops.size) { s.stops[it].argb },
+        FloatArray(s.stops.size) { s.stops[it].position },
+        Shader.TileMode.CLAMP,
+    )
+
+    private fun radialOf(radius: Float, stops: List<GradientStop>): RadialGradient = RadialGradient(
+        0f, 0f, radius,
+        IntArray(stops.size) { stops[it].argb },
+        FloatArray(stops.size) { stops[it].position },
+        Shader.TileMode.CLAMP,
+    )
+
+    private fun radialShaderOf(s: RadialSpec): RadialGradient = if (s.stops.size == 2) {
+        RadialGradient(s.cx, s.cy, s.radius, s.stops[0].argb, s.stops[1].argb, Shader.TileMode.CLAMP)
+    } else {
+        RadialGradient(
+            s.cx, s.cy, s.radius,
+            IntArray(s.stops.size) { s.stops[it].argb },
+            FloatArray(s.stops.size) { s.stops[it].position },
+            Shader.TileMode.CLAMP,
+        )
+    }
+
+    private fun radialOf(canvas: Canvas, s: RadialSpec) {
+        fill.style = Paint.Style.FILL
+        fill.shader = radialShaderOf(s)
+        canvas.drawCircle(s.cx, s.cy, s.radius, fill)
+        fill.shader = null
+    }
+
     private fun drawSceneMoon(canvas: Canvas, w: Float, h: Float, pose: ElementPose) {
-        val radius = w * 0.355f * pose.scale
+        val radius = SceneSkyMath.moonRadius(w, pose.scale)
         val cx = pose.x * w
         val cy = pose.y * h
 
-        radial(canvas, cx, cy, radius * 2.0f, alphaColor(0xFFA7C2EE.toInt(), 0.07f), 0x00A7C2EE)
-        radial(canvas, cx, cy, radius * 1.15f, alphaColor(0xFFDCE7F7.toInt(), 0.11f), 0x00DCE7F7)
+        for (g in SceneSkyMath.moonGlows(cx, cy, radius)) radialOf(canvas, g)
 
         fill.style = Paint.Style.FILL
-        fill.shader = RadialGradient(
-            cx - radius * 0.30f, cy - radius * 0.38f, radius * 1.30f,
-            intArrayOf(
-                0xFFFFFFFF.toInt(), 0xFFFEF9EF.toInt(), 0xFFF1E7D5.toInt(),
-                0xFFD5C8B2.toInt(), 0xFFA79B87.toInt(), 0xFF6E665A.toInt(),
-            ),
-            floatArrayOf(0f, 0.22f, 0.46f, 0.66f, 0.85f, 1f), Shader.TileMode.CLAMP,
-        )
+        fill.shader = radialShaderOf(SceneSkyMath.moonBody(cx, cy, radius))
         canvas.drawCircle(cx, cy, radius, fill)
         fill.shader = null
 
@@ -1311,76 +1271,39 @@ class AodPreviewView @JvmOverloads constructor(
         val save = canvas.save()
         canvas.clipPath(path)
 
-        radial(canvas, cx - radius * 0.28f, cy - radius * 0.06f, radius * 0.58f, 0x3D2A2519, 0x00272319)
-        radial(canvas, cx + radius * 0.22f, cy + radius * 0.32f, radius * 0.50f, 0x382A2519, 0x00272319)
-        radial(canvas, cx + radius * 0.32f, cy - radius * 0.24f, radius * 0.42f, 0x2B2A2519, 0x00272319)
-        radial(canvas, cx - radius * 0.46f, cy + radius * 0.34f, radius * 0.46f, 0x33262118, 0x00262118)
+        for (g in SceneSkyMath.moonSeas(cx, cy, radius)) radialOf(canvas, g)
 
-        var i = 0
-        while (i < moonMarks.size) {
-            val mx = cx + moonMarks[i] * radius
-            val my = cy + moonMarks[i + 1] * radius
-            val mr = moonMarks[i + 2] * radius
-            val ma = moonMarks[i + 3]
-            fill.style = Paint.Style.FILL
-            fill.shader = RadialGradient(
-                mx, my, mr * 1.55f,
-                intArrayOf(
-                    Color.argb((ma * 255f).toInt(), 68, 60, 49),
-                    Color.argb((ma * 70f).toInt(), 124, 113, 96),
-                    0x00786E60,
-                ),
-                floatArrayOf(0f, 0.48f, 1f), Shader.TileMode.CLAMP,
-            )
-            canvas.drawCircle(mx, my, mr * 1.55f, fill)
-            fill.shader = null
-            i += 4
-        }
+        SceneSkyMath.moonCraters(moonMarks, cx, cy, radius, moonCraterSpecs)
+        for (g in moonCraterSpecs) radialOf(canvas, g)
 
-        radial(canvas, cx - radius * 0.44f, cy - radius * 0.50f, radius * 0.86f, 0x24FFFFFF, 0x00FFFFFF)
+        radialOf(canvas, SceneSkyMath.moonSpecular(cx, cy, radius))
 
-        fill.shader = LinearGradient(
-            cx + radius * 0.95f, cy - radius * 0.75f, cx - radius * 0.85f, cy + radius * 0.95f,
-            intArrayOf(0x00000000, 0x12000000, 0x8F05070C.toInt()),
-            floatArrayOf(0f, 0.42f, 1f), Shader.TileMode.CLAMP,
-        )
+        fill.shader = linearOf(SceneSkyMath.moonTerminator(cx, cy, radius))
         canvas.drawCircle(cx, cy, radius, fill)
         fill.shader = null
 
-        fill.shader = RadialGradient(
-            cx + radius * 0.52f, cy + radius * 0.42f, radius * 1.18f,
-            intArrayOf(0xE60A0E16.toInt(), 0xC80A0E16.toInt(), 0x000A0E16),
-            floatArrayOf(0f, 0.62f, 1f), Shader.TileMode.CLAMP,
-        )
+        fill.shader = radialShaderOf(SceneSkyMath.moonNightSide(cx, cy, radius))
         canvas.drawCircle(cx, cy, radius, fill)
         fill.shader = null
         canvas.restoreToCount(save)
 
         stroke.style = Paint.Style.STROKE
-        stroke.strokeWidth = dp(1.2f)
-        stroke.shader = LinearGradient(
-            cx - radius, cy - radius, cx + radius, cy + radius,
-            intArrayOf(0x33FFFFFF, 0x0DFFFFFF, 0x00FFFFFF),
-            floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP,
-        )
-        canvas.drawCircle(cx, cy, radius - dp(0.6f), stroke)
+        stroke.strokeWidth = dp(SceneSkyMath.MOON_STROKE_DP)
+        stroke.shader = linearOf(SceneSkyMath.moonRimGradient(cx, cy, radius))
+        canvas.drawCircle(cx, cy, radius - dp(SceneSkyMath.MOON_STROKE_INSET_DP), stroke)
         stroke.shader = null
 
         path.reset()
         path.addOval(
-            r(cx - radius * 1.05f, cy + radius * 0.42f, cx + radius * 1.05f, cy + radius * 0.92f),
+            r(
+                cx + radius * SceneSkyMath.MOON_VEIL_LEFT, cy + radius * SceneSkyMath.MOON_VEIL_TOP,
+                cx + radius * SceneSkyMath.MOON_VEIL_RIGHT, cy + radius * SceneSkyMath.MOON_VEIL_BOTTOM,
+            ),
             Path.Direction.CW,
         )
         val veil = canvas.save()
         canvas.clipPath(path)
-        fill.style = Paint.Style.FILL
-        fill.shader = RadialGradient(
-            cx, cy + radius * 0.64f, radius * 0.90f,
-            intArrayOf(Color.argb(46, 168, 186, 218), Color.argb(20, 150, 168, 200), 0x0096A8C8),
-            floatArrayOf(0f, 0.6f, 1f), Shader.TileMode.CLAMP,
-        )
-        canvas.drawCircle(cx, cy + radius * 0.64f, radius * 0.90f, fill)
-        fill.shader = null
+        radialOf(canvas, SceneSkyMath.moonVeil(cx, cy, radius))
         canvas.restoreToCount(veil)
     }
 
@@ -1410,8 +1333,8 @@ class AodPreviewView @JvmOverloads constructor(
 
     /** 全场景只画一颗时钟，位置/缩放/透明度/旋转由时钟状态机逐帧插值；布局配置的偏移随插值一起过渡。 */
     private fun drawSceneClock(canvas: Canvas, w: Float, h: Float) {
-        if (edge == null && scrubP < 0f &&
-            editDelegate.drawClockOverride(canvas, w, h, timeText, dateText)
+        if (sceneSpec == null && edge == null && scrubP < 0f && clockTailEdge == null &&
+            editDelegate.drawClockOverride(canvas, w, h, timeText, dateText, sceneClockColor())
         ) return
         val pose = clockMachine.pose
         val a = pose.alpha.coerceIn(0f, 1f)
@@ -1426,8 +1349,11 @@ class AodPreviewView @JvmOverloads constructor(
         val off = editDelegate.clockOffset(effEdge, effT)
         val cx = (pose.centerX + off.first) * w
         val cy = (pose.centerY + off.second + drift) * h
-        val clockScale = pose.scale * clockEntryScale()
-        if (editDelegate.drawSceneClockAt(canvas, w, h, cx, cy, a, pose.rotationDeg, effEdge, effT, timeText, dateText, clockScale)) return
+        val entry = AodClockEntry.blend(clockEntryScale(), editDelegate.aodWeight(effEdge, effT))
+        val clockScale = pose.scale * entry
+        val tookOver = editDelegate.drawSceneClockAt(canvas, w, h, cx, cy, a, pose.rotationDeg, effEdge, effT, timeText, dateText, clockScale, sceneClockColor())
+        logClockScale(tookOver, pose.scale, entry, clockScale, effEdge, effT)
+        if (tookOver) return
         val layer = if (a < 0.999f) {
             canvas.saveLayerAlpha(0f, 0f, w, h, (a * 255f).toInt())
         } else {
@@ -1442,6 +1368,19 @@ class AodPreviewView @JvmOverloads constructor(
         if (rotated >= 0) canvas.restoreToCount(rotated)
         if (layer >= 0) canvas.restoreToCount(layer)
     }
+
+    /** 时钟字号链路诊断：节流打印接管方与三个乘子，定位跨态字号跳变。 */
+    private fun logClockScale(tookOver: Boolean, poseScale: Float, entry: Float, final: Float, edge: TransitionEdge?, t: Float) {
+        val now = SystemClock.uptimeMillis()
+        val key = "$tookOver|${(final * 200f).toInt()}|${edge?.name}|${(t * 20f).toInt()}"
+        if (key == clockScaleLogKey && now - clockScaleLogAt < 1500L) return
+        clockScaleLogKey = key
+        clockScaleLogAt = now
+        Lg.i(TAG, "clock-scale delegate=$tookOver pose=$poseScale entry=$entry final=$final edge=$edge t=$t scene=$scene scrub=$scrubP")
+    }
+
+    private var clockScaleLogKey = ""
+    private var clockScaleLogAt = 0L
 
     private fun sceneClockColor(): Int = when {
         scrubP >= 0f -> if (scrubP <= 0.5f) {
@@ -1620,16 +1559,56 @@ class AodPreviewView @JvmOverloads constructor(
         text.setShadowLayer(
             HomeLayout.LABEL_SHADOW_RADIUS_DP * geo.density, 0f, 0f, HomeLayout.LABEL_SHADOW_COLOR,
         )
+        val w = canvas.width.toFloat()
+        val h = canvas.height.toFloat()
+        val entranceMs = iconEntranceElapsedMs()
         for (index in 0 until count) {
             val left = geo.cellIconLeftPx(index)
             val top = geo.cellIconTopPx(index)
-            drawAppIcon(canvas, index, left + geo.iconSizePx / 2f, top + geo.iconSizePx / 2f, geo.iconSizePx)
             val label = homeIcons.getOrNull(index)?.label ?: previewApps[index].label
             text.getFontMetrics(labelMetrics)
-            canvas.drawText(label, left + geo.iconSizePx / 2f, geo.cellLabelTopPx(index) - labelMetrics.ascent, text)
+            val labelX = left + geo.iconSizePx / 2f
+            val labelY = geo.cellLabelTopPx(index) - labelMetrics.ascent
+            if (entranceMs < 0L) {
+                drawAppIcon(canvas, index, labelX, top + geo.iconSizePx / 2f, geo.iconSizePx)
+                canvas.drawText(label, labelX, labelY, text)
+                continue
+            }
+            HomeMotion.iconEntrance(
+                homeIconEffect, index, count, entranceMs,
+                homeIconDurationMs, homeIconStaggerMs, homeIconTravelPercent, iconPose,
+            )
+            val save = canvas.save()
+            canvas.translate(iconPose.x * w, iconPose.y * h)
+            canvas.scale(iconPose.scale, iconPose.scale, labelX, top + geo.iconSizePx / 2f)
+            if (iconPose.rotationDeg != 0f) {
+                canvas.rotate(iconPose.rotationDeg, labelX, top + geo.iconSizePx / 2f)
+            }
+            val alphaLayer = canvas.saveLayerAlpha(
+                0f, 0f, w, h, (iconPose.alpha.coerceIn(0f, 1f) * 255f).toInt(),
+            )
+            drawAppIcon(canvas, index, labelX, top + geo.iconSizePx / 2f, geo.iconSizePx)
+            canvas.drawText(label, labelX, labelY, text)
+            canvas.restoreToCount(alphaLayer)
+            canvas.restoreToCount(save)
         }
         text.clearShadowLayer()
     }
+
+    /**
+     * 图标入场已播时长；不在进桌面边返回 -1（按静态画）。
+     *
+     * 拖动期把整轨进度折算成毫秒，与播放期同一条求值曲线。
+     */
+    private fun iconEntranceElapsedMs(): Long {
+        val effEdge = if (scrubP >= 0f) SceneTimeline.edgeAt(scrubP) else edge
+        if (effEdge != TransitionEdge.LOCK_TO_HOME && effEdge != TransitionEdge.AOD_TO_HOME) return -1L
+        val effT = if (scrubP >= 0f) SceneTimeline.localT(scrubP) else t
+        val total = SystemSceneMotion.durationOf(effEdge)
+        return (effT.coerceIn(0f, 1f) * total).toLong()
+    }
+
+    private val iconPose = IconEntranceState()
 
     private fun drawAppIcon(canvas: Canvas, index: Int, cx: Float, cy: Float, size: Float) {
         val icon = homeIcons.getOrNull(index)
@@ -1769,18 +1748,7 @@ class AodPreviewView @JvmOverloads constructor(
         fill.shader = null
     }
 
-    private fun lerpColor(a: Int, b: Int, t: Float): Int {
-        val f = t.coerceIn(0f, 1f)
-        return Color.argb(
-            (Color.alpha(a) + (Color.alpha(b) - Color.alpha(a)) * f).toInt(),
-            (Color.red(a) + (Color.red(b) - Color.red(a)) * f).toInt(),
-            (Color.green(a) + (Color.green(b) - Color.green(a)) * f).toInt(),
-            (Color.blue(a) + (Color.blue(b) - Color.blue(a)) * f).toInt(),
-        )
-    }
-
-    private fun mix3(a: Int, b: Int, c: Int, u: Float): Int =
-        if (u <= 0.5f) lerpColor(a, b, u * 2f) else lerpColor(b, c, (u - 0.5f) * 2f)
+    private fun lerpColor(a: Int, b: Int, t: Float): Int = SceneSkyMath.lerpColor(a, b, t)
 
     private fun drawWallpaperBackground(canvas: Canvas, w: Float, h: Float, scrim: Float): Boolean {
         val bitmap = (if (useSystemWallpaper) wallpaper else null) ?: sceneSky ?: return false
@@ -1804,20 +1772,59 @@ class AodPreviewView @JvmOverloads constructor(
         val top = (h - height) / 2f
         dst.set(left, top, left + width, top + height)
         src.set(0, 0, bitmap.width, bitmap.height)
-        val layer = if (scene == SceneState.LOCK || (edge != null && edge!!.to == SceneState.LOCK)) requestEffectLayer(bitmap, w, h) else null
-        if (layer != null) {
+        val effEdge = if (scrubP >= 0f) SceneTimeline.edgeAt(scrubP) else edge
+        val effT = if (scrubP >= 0f) SceneTimeline.localT(scrubP) else t
+        val layer = requestEffectLayer(bitmap, w, h)
+        val visibility = EffectOverlayPolicy.visibilityAt(scene, effEdge, effT)
+        canvas.drawBitmap(bitmap, src, dst, fill)
+        if (layer != null && EffectOverlayPolicy.drawable(visibility)) {
             src.set(0, 0, layer.width, layer.height)
             val ls = maxOf(w / layer.width, h / layer.height) * zoom
             val lw = layer.width * ls
             val lh = layer.height * ls
             dst.set((w - lw) / 2f, (h - lh) / 2f, (w + lw) / 2f, (h + lh) / 2f)
+            iconPaint.alpha = EffectOverlayPolicy.alphaByte(visibility)
             canvas.drawBitmap(layer, src, dst, iconPaint)
-        } else {
-            canvas.drawBitmap(bitmap, src, dst, fill)
+            iconPaint.alpha = 255
         }
         fill.color = Color.argb((scrim.coerceIn(0f, 1f) * 255f).toInt(), 0, 0, 0)
         canvas.drawRect(0f, 0f, w, h, fill)
         return true
+    }
+
+    /**
+     * 壁纸底图 + 效果层：构建门只看效果是否选中（选中即预处理，与当前态无关），
+     * 显示门按跨三态可见度决定叠多少（息屏 0、锁屏/桌面 1）。
+     */
+    private fun drawEffectBackdrop(
+        canvas: Canvas,
+        w: Float,
+        h: Float,
+        backdrop: Bitmap?,
+        effEdge: TransitionEdge?,
+        effT: Float,
+        state: SceneState = scene,
+    ) {
+        if (backdrop == null) {
+            drawAmbientWallpaper(canvas, w, h)
+            return
+        }
+        val layer = requestEffectLayer(backdrop, w, h)
+        drawBitmapCover(canvas, backdrop, w, h, layers.wallpaperScale, 0f, 0f)
+        val visibility = EffectOverlayPolicy.visibilityAt(state, effEdge, effT)
+        if (layer != null && EffectOverlayPolicy.drawable(visibility)) {
+            drawBitmapCover(canvas, layer, w, h, layers.wallpaperScale, 0f, 0f, visibility)
+        }
+    }
+
+    /** 效果参数一变就按当前预览尺寸预热，不等切到锁屏才构建。 */
+    private fun warmEffectLayer() {
+        if (!EffectOverlayPolicy.needsBuild(lockWallpaperEffect, lockSpecialEffect)) return
+        val pw = phoneRect.width()
+        val ph = phoneRect.height()
+        if (pw < 2f || ph < 2f) return
+        val bitmap = (if (useSystemWallpaper) wallpaper else null) ?: sceneSky ?: return
+        requestEffectLayer(bitmap, pw, ph)
     }
 
     /**
@@ -1833,7 +1840,7 @@ class AodPreviewView @JvmOverloads constructor(
         val blurred = wp == EffectCatalog.LOCK_WP_BLUR
         val depth = sp == EffectCatalog.LOCK_SP_BOKEH
         if (meizu == null && !textured && !blurred && !depth) return null
-        val size = com.coloros16.liquidglass.engine.EffectOverlayPolicy.targetSize(w.toInt(), h.toInt())
+        val size = EffectOverlayPolicy.targetSize(w.toInt(), h.toInt())
         val tw = size[0].coerceAtLeast(1)
         val th = size[1].coerceAtLeast(1)
         val intensity = lockWallpaperIntensity
@@ -1983,6 +1990,7 @@ class AodPreviewView @JvmOverloads constructor(
                 sceneSky = bitmap
                 sceneSkyLoading = false
                 syncLensSource()
+                warmEffectLayer()
                 invalidate()
             }
         }, "aod-scene-sky").start()

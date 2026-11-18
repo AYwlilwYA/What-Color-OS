@@ -52,4 +52,16 @@ object AodClockEntry {
     /** 补尾是否已结束。 */
     fun tailDone(elapsedMs: Long, edgeMs: Long): Boolean =
         elapsedMs >= tailMs(edgeMs)
+
+    /**
+     * 进场系数按息屏权重混合：起点端仍是锁屏/桌面时钟，不该被息屏入场缩小。
+     *
+     * [aodWeight] 为当前姿态里息屏端的占比（0=纯锁屏/桌面，1=纯息屏）。
+     * 权重走 [SystemSceneMotion.AOD_CLOCK] 同一条曲线，与入场系数同相，
+     * 避免起步段线性权重压过缓入的姿态曲线导致字号先回缩。
+     */
+    fun blend(entryScale: Float, aodWeight: Float): Float {
+        val w = SystemSceneMotion.AOD_CLOCK.map(aodWeight.coerceIn(0f, 1f)).coerceIn(0f, 1f)
+        return 1f + (entryScale - 1f) * w
+    }
 }

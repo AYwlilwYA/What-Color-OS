@@ -14,6 +14,14 @@ object BuiltinGlassPresets {
 
     fun isBuiltin(id: String): Boolean = id.startsWith(ID_PREFIX)
 
+    /** params 里以 0/1 浮点编码、落全局时要写回 Boolean 的键（hook 侧按 getBoolean 读）。 */
+    val BOOLEAN_PARAM_KEYS = setOf(
+        Prefs.KEY_MASK_ENABLE,
+        Prefs.KEY_MASK_DIM_FOLLOW_MASK,
+        Prefs.KEY_TEXT_CONTRAST_ENABLE,
+        Prefs.KEY_TEXT_FORCE_WHITE_ENABLE,
+    )
+
     /** 套用预设时默认全开的玻璃对象开关（不含全局总闸与诊断/探针类）。 */
     val OBJECT_SWITCH_KEYS = listOf(
         Prefs.KEY_VOLUME_SEEKBAR_GLASS,
@@ -159,6 +167,98 @@ object BuiltinGlassPresets {
             Prefs.KEY_TEXT_FORCE_WHITE_ENABLE to 1f,
         )),
     )
+
+    /**
+     * 风格的跨功能配套参数（顶层一键套用时连画质/抓屏与倾斜透视一起改）：
+     * iOS 双档开动态倾斜（iOS 观感的一部分），其余风格关；画质按风格开销分档。
+     * Int 键单列（写入走 writePrefInt），Float 键与 params 同路。
+     */
+    data class Companion(
+        val ints: Map<String, Int> = emptyMap(),
+        val floats: Map<String, Float> = emptyMap(),
+        val bools: Map<String, Boolean> = emptyMap(),
+    )
+
+    /**
+     * 鸿蒙官方弹簧真值 → 桌面动画参数（LauncherAnimHook 键空间）。
+     * ArkUI springMotion 无参默认 response=0.55s / dampingFraction=0.825（规格文档+System API 双源）；
+     * 官方问答弹性起调推荐 (0.6, 0.8)。刚度=(2π/response)²（COUISpringForce.setResponse 同款换算），
+     * 阻尼比×100 取整（hook 运行时 ÷100）。打开/打断用推荐弹性档，关闭用系统默认档稍稳。
+     */
+    fun harmonySpringInts(): Map<String, Int> {
+        fun stiffness(responseS: Double): Int =
+            ((2.0 * Math.PI / responseS) * (2.0 * Math.PI / responseS)).toInt()
+        val openStiffness = stiffness(0.6)
+        val closeStiffness = stiffness(0.55)
+        val out = LinkedHashMap<String, Int>()
+        for (group in Prefs.ANIM_GROUPS) {
+            val close = group == Prefs.ANIM_GROUP_CLOSE
+            val stiff = if (close) closeStiffness else openStiffness
+            val damping = if (close) 83 else 80
+            for (param in Prefs.ANIM_SPRING_PARAMS) {
+                out[Prefs.animKey(group, param)] =
+                    if (param.endsWith("_damping")) damping else stiff
+            }
+            out[Prefs.animKey(group, Prefs.ANIM_PARAM_FADE_DURATION)] = if (close) 420 else 340
+        }
+        return out
+    }
+
+    fun companionOf(id: String): Companion = when (id.removePrefix(ID_PREFIX)) {
+        "ios_clear", "crystal" -> Companion(
+            ints = mapOf(
+                Prefs.KEY_PANEL_CAPTURE_HZ to Prefs.PANEL_CAPTURE_HZ_MAX,
+                Prefs.KEY_BG_PERIODIC_CAPTURE_INTERVAL_MS to 500,
+                Prefs.KEY_ANIM_TILT_STRENGTH to 100,
+                Prefs.KEY_ANIM_TILT_PERSPECTIVE to 100,
+            ),
+            floats = mapOf(Prefs.KEY_BG_CAPTURE_SCALE to 1.0f),
+            bools = mapOf(Prefs.KEY_ANIM_TILT_ENABLED to true),
+        )
+        "ios_frost" -> Companion(
+            ints = mapOf(
+                Prefs.KEY_PANEL_CAPTURE_HZ to Prefs.DEFAULT_PANEL_CAPTURE_HZ,
+                Prefs.KEY_BG_PERIODIC_CAPTURE_INTERVAL_MS to 750,
+                Prefs.KEY_ANIM_TILT_STRENGTH to 100,
+                Prefs.KEY_ANIM_TILT_PERSPECTIVE to 100,
+            ),
+            floats = mapOf(Prefs.KEY_BG_CAPTURE_SCALE to 0.5f),
+            bools = mapOf(Prefs.KEY_ANIM_TILT_ENABLED to true),
+        )
+        "harmony_soft" -> Companion(
+            ints = mapOf(
+                Prefs.KEY_PANEL_CAPTURE_HZ to Prefs.DEFAULT_PANEL_CAPTURE_HZ,
+                Prefs.KEY_BG_PERIODIC_CAPTURE_INTERVAL_MS to 750,
+            ) + harmonySpringInts(),
+            floats = mapOf(Prefs.KEY_BG_CAPTURE_SCALE to 0.5f),
+            bools = mapOf(Prefs.KEY_ANIM_TILT_ENABLED to false) +
+                Prefs.ANIM_GROUPS.associate { Prefs.animEnabledKey(it) to true },
+        )
+        else -> Companion(
+            ints = mapOf(
+                Prefs.KEY_PANEL_CAPTURE_HZ to Prefs.DEFAULT_PANEL_CAPTURE_HZ,
+                Prefs.KEY_BG_PERIODIC_CAPTURE_INTERVAL_MS to 750,
+            ),
+            floats = mapOf(Prefs.KEY_BG_CAPTURE_SCALE to 0.5f),
+            bools = mapOf(Prefs.KEY_ANIM_TILT_ENABLED to false),
+        )
+    }
+
+    /**
+     * 按当前全局键值推断命中的风格档（与画质档 currentPresetTier 同口径）：
+     * 配方里每个键都相等才算命中；用户手改任一键后不匹配任何档 = 返回 null。
+     * [valueOf] 由调用方注入读键实现（Float 键读 float、BOOLEAN_PARAM_KEYS 读 boolean 转 0/1）。
+     */
+    fun matchCurrent(valueOf: (String) -> Float?): String? {
+        for (p in all()) {
+            val hit = p.params.all { (key, want) ->
+                val got = valueOf(key) ?: return@all false
+                kotlin.math.abs(got - want) < 1e-4f
+            }
+            if (hit) return p.id
+        }
+        return null
+    }
 
     /** 缺失的内置条目补进现有列表（按 id 判重；用户改过的同名条目不覆盖）。 */
     fun seedInto(existing: List<GlassRegistry.Preset>): List<GlassRegistry.Preset> {

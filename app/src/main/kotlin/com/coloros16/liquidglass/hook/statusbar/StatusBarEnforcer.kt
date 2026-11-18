@@ -258,6 +258,15 @@ object StatusBarEnforcer {
         }
         applied = false
         try {
+            val views = ArrayList<View>(notifClockOrig.keys)
+            restoreNotifClock(views.firstOrNull(), views.getOrNull(1), null)
+            // 首个以外的残留项逐个还原（restoreNotifClock 一次只处理传入的两个）
+            views.drop(2).forEach { restoreNotifClock(it, null, null) }
+            notifSettingsOrig.keys.toList().forEach { applyNotifHideSettings(it, false) }
+        } catch (t: Throwable) {
+            logThrottled("sb-restore-notif", "sb-skip notif restore ${t.javaClass.simpleName}")
+        }
+        try {
             containerRef?.get()?.let { restoreOrder(it) }
         } catch (_: Throwable) {
         }
@@ -278,8 +287,53 @@ object StatusBarEnforcer {
         try {
             findAncestorRoot(container, "keyguard_header")?.let { applyRoot(it, cfg) }
             findAncestorRoot(container, "quick_qs_status_icons")?.let { applyRoot(it, cfg) }
+            findAncestorRoot(container, "header")?.let { applyRoot(it, cfg) }
         } catch (t: Throwable) {
             logThrottled("sb-side-err", "sb-skip side root ${t.javaClass.simpleName}")
+        }
+    }
+
+    /**
+     * 下拉第一行左侧容器（运营商所在行）的缩放与偏移。
+     * 默认值（100%/0/0）零写入；改过则记原变换，回默认或关闸时还原。
+     */
+    private fun applyQsClock(root: View, cfg: StatusBarConfig) {
+        val v = childView(root, "qs_clock_container")
+        if (v == null) {
+            logThrottled("sb-qsclock-miss", "sb-qsclock skip 容器缺失")
+            return
+        }
+        if (!cfg.qsClockTouched) {
+            if (originalTransform.containsKey(v)) {
+                restoreTransform(v)
+                logThrottled("sb-qsclock-restore", "sb-qsclock restore 回系统原样")
+            }
+            return
+        }
+        val density = root.resources.displayMetrics.density
+        val tx = cfg.qsClockDxDp * density
+        val ty = cfg.qsClockDyDp * density
+        originalTransform.getOrPut(v) {
+            floatArrayOf(v.scaleX, v.scaleY, v.translationX, v.translationY)
+        }
+        if (v.scaleX == cfg.qsClockScale && v.scaleY == cfg.qsClockScale &&
+            v.translationX == tx && v.translationY == ty
+        ) {
+            return
+        }
+        try {
+            v.pivotX = 0f
+            v.pivotY = v.height / 2f
+            v.scaleX = cfg.qsClockScale
+            v.scaleY = cfg.qsClockScale
+            v.translationX = tx
+            v.translationY = ty
+            logThrottled(
+                "sb-qsclock-apply",
+                "sb-qsclock apply scale=${cfg.qsClockScale} dx=${cfg.qsClockDxDp}dp dy=${cfg.qsClockDyDp}dp h=${v.height}",
+            )
+        } catch (t: Throwable) {
+            logThrottled("sb-qsclock-err", "sb-skip qsclock ${t.javaClass.simpleName}")
         }
     }
 
@@ -327,7 +381,396 @@ object StatusBarEnforcer {
         } catch (t: Throwable) {
             logThrottled("sb-apply-clock", "sb-skip clock ${t.javaClass.simpleName}")
         }
+        try {
+            applyQsClock(root, cfg)
+        } catch (t: Throwable) {
+            logThrottled("sb-apply-qsclock", "sb-skip qs_clock ${t.javaClass.simpleName}")
+        }
+        try {
+            applyNotifClock(root, cfg)
+        } catch (t: Throwable) {
+            logThrottled("sb-apply-notifclock", "sb-skip notif_clock ${t.javaClass.simpleName}")
+        }
         applyMargins(root, cfg)
+    }
+
+    // ------------------------------------------------------------ 通知中心大时钟（分离式面板）
+
+    /** 通知中心时钟的原约束快照（按 View 记，关功能时逐项还原）。 */
+    private class NotifClockOrig(
+        val startToStart: Int, val startToEnd: Int,
+        val endToStart: Int, val endToEnd: Int,
+        val topToTop: Int, val topToBottom: Int,
+        val bottomToTop: Int, val bottomToBottom: Int,
+        val baselineToBaseline: Int,
+        val marginStart: Int, val marginEnd: Int, val topMargin: Int, val bottomMargin: Int,
+        val width: Int, val height: Int,
+        val horizontalBias: Float,
+        val scaleX: Float, val scaleY: Float, val pivotX: Float, val pivotY: Float,
+        val textSizePx: Float,
+        val visibility: Int,
+    )
+
+    private val notifClockOrig = WeakHashMap<View, NotifClockOrig>()
+
+    /** ConstraintLayout.LayoutParams 字段读写器（宿主自带该类，反射一次缓存）。 */
+    private object ConstraintLp {
+        private val fields = ConcurrentHashMap<String, java.lang.reflect.Field>()
+
+        fun isInstance(lp: Any?): Boolean =
+            lp != null && lp.javaClass.name == "androidx.constraintlayout.widget.ConstraintLayout\$LayoutParams"
+
+        private fun field(lp: Any, name: String): java.lang.reflect.Field? =
+            fields.getOrPut(name) {
+                try {
+                    var c: Class<*>? = lp.javaClass
+                    while (c != null) {
+                        try {
+                            return@getOrPut c.getDeclaredField(name).apply { isAccessible = true }
+                        } catch (_: NoSuchFieldException) {
+                            c = c.superclass
+                        }
+                    }
+                    throw NoSuchFieldException(name)
+                } catch (t: Throwable) {
+                    throw t
+                }
+            }
+
+        fun int(lp: Any, name: String, def: Int): Int = try {
+            field(lp, name)?.getInt(lp) ?: def
+        } catch (_: Throwable) {
+            def
+        }
+
+        fun float(lp: Any, name: String, def: Float): Float = try {
+            field(lp, name)?.getFloat(lp) ?: def
+        } catch (_: Throwable) {
+            def
+        }
+
+        fun setInt(lp: Any, name: String, value: Int): Boolean = try {
+            field(lp, name)?.setInt(lp, value)
+            true
+        } catch (_: Throwable) {
+            false
+        }
+
+        fun setFloat(lp: Any, name: String, value: Float): Boolean = try {
+            field(lp, name)?.setFloat(lp, value)
+            true
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    private const val UNSET = -1
+
+    /**
+     * 通知中心大时钟与日期：容器 settings_button_container 内的 qs_footer_clock / oplus_date。
+     * 大小走 scale（系统自己在下拉过程逐帧写 scale，这里按倍数叠加而非覆盖）；
+     * 位置与日期上下排走约束改写；全部先记原值，关闸或回默认逐项还原。
+     */
+    private fun applyNotifClock(root: View, cfg: StatusBarConfig) {
+        val container = childView(root, "settings_button_container") as? ViewGroup
+        if (container == null) {
+            if (cfg.notifClockTouched || (cfg.notifClockEnable && cfg.notifHideSettingsBtn)) {
+                logThrottled("sb-notifclock-miss", "sb-notifclock skip 容器缺失 settings_button_container")
+            }
+            return
+        }
+        val clock = childView(container, "qs_footer_clock") as? android.widget.TextView
+        val date = childView(container, "oplus_date") as? android.widget.TextView
+        val settings = childView(container, "settings_button")
+        if (clock == null) {
+            logThrottled("sb-notifclock-noclock", "sb-notifclock skip 时钟缺失 qs_footer_clock")
+            return
+        }
+        val active = cfg.notifClockEnable
+        if (!active) {
+            restoreNotifClock(clock, date, settings)
+            return
+        }
+        try {
+            applyNotifHideSettings(settings, cfg.notifHideSettingsBtn)
+        } catch (t: Throwable) {
+            logThrottled("sb-notifsettings-err", "sb-skip notif_settings ${t.javaClass.simpleName}")
+        }
+        if (!cfg.notifClockTouched) {
+            restoreNotifClock(clock, date, null)
+            return
+        }
+        val density = root.resources.displayMetrics.density
+        noteNotifOrig(clock)
+        if (date != null) noteNotifOrig(date)
+        try {
+            applyNotifClockScale(clock, cfg.notifClockScale)
+        } catch (t: Throwable) {
+            logThrottled("sb-notifscale-err", "sb-skip notif_scale ${t.javaClass.simpleName}")
+        }
+        try {
+            applyNotifDateStyle(date, cfg, density)
+        } catch (t: Throwable) {
+            logThrottled("sb-notifdate-err", "sb-skip notif_date ${t.javaClass.simpleName}")
+        }
+        try {
+            applyNotifLayout(container, clock, date, cfg, density)
+        } catch (t: Throwable) {
+            logThrottled("sb-notiflayout-err", "sb-skip notif_layout ${t.javaClass.simpleName}")
+        }
+    }
+
+    private fun noteNotifOrig(v: View) {
+        if (notifClockOrig.containsKey(v)) return
+        val lp = v.layoutParams
+        val tv = v as? android.widget.TextView
+        notifClockOrig[v] = NotifClockOrig(
+            startToStart = if (lp != null) ConstraintLp.int(lp, "startToStart", UNSET) else UNSET,
+            startToEnd = if (lp != null) ConstraintLp.int(lp, "startToEnd", UNSET) else UNSET,
+            endToStart = if (lp != null) ConstraintLp.int(lp, "endToStart", UNSET) else UNSET,
+            endToEnd = if (lp != null) ConstraintLp.int(lp, "endToEnd", UNSET) else UNSET,
+            topToTop = if (lp != null) ConstraintLp.int(lp, "topToTop", UNSET) else UNSET,
+            topToBottom = if (lp != null) ConstraintLp.int(lp, "topToBottom", UNSET) else UNSET,
+            bottomToTop = if (lp != null) ConstraintLp.int(lp, "bottomToTop", UNSET) else UNSET,
+            bottomToBottom = if (lp != null) ConstraintLp.int(lp, "bottomToBottom", UNSET) else UNSET,
+            baselineToBaseline = if (lp != null) ConstraintLp.int(lp, "baselineToBaseline", UNSET) else UNSET,
+            marginStart = (lp as? ViewGroup.MarginLayoutParams)?.marginStart ?: 0,
+            marginEnd = (lp as? ViewGroup.MarginLayoutParams)?.marginEnd ?: 0,
+            topMargin = (lp as? ViewGroup.MarginLayoutParams)?.topMargin ?: 0,
+            bottomMargin = (lp as? ViewGroup.MarginLayoutParams)?.bottomMargin ?: 0,
+            width = lp?.width ?: ViewGroup.LayoutParams.WRAP_CONTENT,
+            height = lp?.height ?: ViewGroup.LayoutParams.WRAP_CONTENT,
+            horizontalBias = if (lp != null) ConstraintLp.float(lp, "horizontalBias", 0.5f) else 0.5f,
+            scaleX = v.scaleX, scaleY = v.scaleY, pivotX = v.pivotX, pivotY = v.pivotY,
+            textSizePx = tv?.textSize ?: 0f,
+            visibility = v.visibility,
+        )
+    }
+
+    /**
+     * 时钟大小：系统在下拉动画里逐帧写 scaleX/scaleY，这里记它当前值当基准做乘法，
+     * 并把上次自己乘过的倍数除掉，避免每次布局累乘放大。
+     */
+    private fun applyNotifClockScale(clock: View, scale: Float) {
+        val last = notifScaleApplied[clock] ?: 1f
+        if (last == scale) return
+        val baseX = clock.scaleX / last
+        val baseY = clock.scaleY / last
+        clock.pivotX = 0f
+        clock.pivotY = clock.height / 2f
+        clock.scaleX = baseX * scale
+        clock.scaleY = baseY * scale
+        notifScaleApplied[clock] = scale
+        logThrottled("sb-notifscale", "sb-notifscale scale=$scale base=$baseX h=${clock.height}")
+    }
+
+    private val notifScaleApplied = WeakHashMap<View, Float>()
+
+    /** 日期字号与显隐：0 = 跟随系统（还原原字号）；位置 3 = 隐藏。 */
+    private fun applyNotifDateStyle(date: android.widget.TextView?, cfg: StatusBarConfig, density: Float) {
+        if (date == null) return
+        val orig = notifClockOrig[date]
+        val hide = cfg.notifDatePosition == 3
+        val wantVis = if (hide) View.GONE else (orig?.visibility ?: View.VISIBLE)
+        if (date.visibility != wantVis) {
+            date.visibility = wantVis
+            logThrottled("sb-notifdate-vis", "sb-notifdate vis=$wantVis")
+        }
+        if (hide) return
+        val wantPx = if (cfg.notifDateSizeSp > 0) cfg.notifDateSizeSp * density else (orig?.textSizePx ?: 0f)
+        if (wantPx > 0f && kotlin.math.abs(date.textSize - wantPx) > 0.5f) {
+            date.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, wantPx)
+            logThrottled("sb-notifdate-size", "sb-notifdate size=${cfg.notifDateSizeSp}sp px=$wantPx")
+        }
+    }
+
+    /** 水平位置与日期上下排：改 ConstraintLayout 约束（非 ConstraintLayout 宿主直接降级）。 */
+    private fun applyNotifLayout(
+        container: ViewGroup,
+        clock: android.widget.TextView,
+        date: android.widget.TextView?,
+        cfg: StatusBarConfig,
+        density: Float,
+    ) {
+        val clockLp = clock.layoutParams
+        if (!ConstraintLp.isInstance(clockLp)) {
+            logThrottled("sb-notiflayout-lp", "sb-notiflayout skip lp=${clockLp?.javaClass?.simpleName}")
+            return
+        }
+        val parentId = container.id
+        val clockId = clock.id
+        val settingsId = childView(container, "settings_button")?.id ?: UNSET
+        val gapPx = (cfg.notifClockDateGapDp * density).toInt()
+        val vertical = cfg.notifDatePosition == 1 || cfg.notifDatePosition == 2
+        val dateAbove = cfg.notifDatePosition == 1
+        var changed = false
+
+        // 时钟水平约束：先清四向，再按目标方向重建
+        changed = ConstraintLp.setInt(clockLp, "startToStart", UNSET) || changed
+        changed = ConstraintLp.setInt(clockLp, "startToEnd", UNSET) || changed
+        changed = ConstraintLp.setInt(clockLp, "endToStart", UNSET) || changed
+        changed = ConstraintLp.setInt(clockLp, "endToEnd", UNSET) || changed
+        when (cfg.notifClockGravity) {
+            1 -> {
+                changed = ConstraintLp.setInt(clockLp, "startToStart", parentId) || changed
+            }
+            2 -> {
+                changed = ConstraintLp.setInt(clockLp, "startToStart", parentId) || changed
+                changed = ConstraintLp.setInt(clockLp, "endToEnd", parentId) || changed
+                changed = ConstraintLp.setFloat(clockLp, "horizontalBias", 0.5f) || changed
+            }
+            3 -> {
+                changed = ConstraintLp.setInt(clockLp, "endToEnd", parentId) || changed
+            }
+            else -> {
+                val o = notifClockOrig[clock]
+                if (o != null) {
+                    ConstraintLp.setInt(clockLp, "startToStart", o.startToStart)
+                    ConstraintLp.setInt(clockLp, "startToEnd", o.startToEnd)
+                    ConstraintLp.setInt(clockLp, "endToStart", o.endToStart)
+                    ConstraintLp.setInt(clockLp, "endToEnd", o.endToEnd)
+                    ConstraintLp.setFloat(clockLp, "horizontalBias", o.horizontalBias)
+                }
+            }
+        }
+
+        if (date != null && cfg.notifDatePosition != 3) {
+            val dateLp = date.layoutParams
+            if (ConstraintLp.isInstance(dateLp)) {
+                val dateId = date.id
+                ConstraintLp.setInt(dateLp, "startToStart", UNSET)
+                ConstraintLp.setInt(dateLp, "startToEnd", UNSET)
+                ConstraintLp.setInt(dateLp, "endToStart", UNSET)
+                ConstraintLp.setInt(dateLp, "endToEnd", UNSET)
+                ConstraintLp.setInt(dateLp, "baselineToBaseline", UNSET)
+                ConstraintLp.setInt(dateLp, "topToTop", UNSET)
+                ConstraintLp.setInt(dateLp, "topToBottom", UNSET)
+                ConstraintLp.setInt(dateLp, "bottomToTop", UNSET)
+                ConstraintLp.setInt(dateLp, "bottomToBottom", UNSET)
+                val dm = dateLp as? ViewGroup.MarginLayoutParams
+                if (vertical) {
+                    // 上下排：日期与时钟同侧对齐，纵向靠边，间距走 margin
+                    ConstraintLp.setInt(dateLp, "startToStart", clockId)
+                    ConstraintLp.setInt(dateLp, "endToEnd", clockId)
+                    ConstraintLp.setFloat(dateLp, "horizontalBias", 0f)
+                    if (dateAbove) {
+                        ConstraintLp.setInt(dateLp, "bottomToTop", clockId)
+                        ConstraintLp.setInt(dateLp, "topToTop", parentId)
+                        dm?.bottomMargin = gapPx
+                        dm?.topMargin = 0
+                    } else {
+                        ConstraintLp.setInt(dateLp, "topToBottom", clockId)
+                        ConstraintLp.setInt(dateLp, "bottomToBottom", parentId)
+                        dm?.topMargin = gapPx
+                        dm?.bottomMargin = 0
+                    }
+                    dm?.marginStart = 0
+                    dm?.marginEnd = 0
+                    // 纵向排布时时钟不再撑满高度，避免与日期争位
+                    ConstraintLp.setInt(clockLp, "topToTop", if (dateAbove) UNSET else parentId)
+                    ConstraintLp.setInt(clockLp, "bottomToBottom", if (dateAbove) parentId else UNSET)
+                    ConstraintLp.setInt(clockLp, "topToBottom", if (dateAbove) dateId else UNSET)
+                    ConstraintLp.setInt(clockLp, "bottomToTop", if (dateAbove) UNSET else dateId)
+                    changed = true
+                } else {
+                    // 同行：日期接在时钟右侧，基线对齐，间距走 marginStart
+                    ConstraintLp.setInt(dateLp, "startToEnd", clockId)
+                    if (settingsId != UNSET) ConstraintLp.setInt(dateLp, "endToStart", settingsId)
+                    ConstraintLp.setInt(dateLp, "baselineToBaseline", clockId)
+                    dm?.marginStart = gapPx
+                    dm?.topMargin = 0
+                    dm?.bottomMargin = 0
+                    val o = notifClockOrig[clock]
+                    if (o != null) {
+                        ConstraintLp.setInt(clockLp, "topToTop", o.topToTop)
+                        ConstraintLp.setInt(clockLp, "topToBottom", o.topToBottom)
+                        ConstraintLp.setInt(clockLp, "bottomToTop", o.bottomToTop)
+                        ConstraintLp.setInt(clockLp, "bottomToBottom", o.bottomToBottom)
+                    }
+                    changed = true
+                }
+                date.layoutParams = dateLp
+            }
+        }
+        if (changed) {
+            clock.layoutParams = clockLp
+            container.requestLayout()
+            logThrottled(
+                "sb-notiflayout",
+                "sb-notiflayout gravity=${cfg.notifClockGravity} datePos=${cfg.notifDatePosition} gap=${cfg.notifClockDateGapDp}dp",
+            )
+        }
+    }
+
+    /** 隐藏通知设置按钮（记原可见性，关闭时还原）。 */
+    private fun applyNotifHideSettings(settings: View?, hide: Boolean) {
+        if (settings == null) {
+            if (hide) logThrottled("sb-notifsettings-miss", "sb-notifsettings skip 按钮缺失 settings_button")
+            return
+        }
+        if (hide) {
+            if (!notifSettingsOrig.containsKey(settings)) notifSettingsOrig[settings] = settings.visibility
+            if (settings.visibility != View.GONE) {
+                settings.visibility = View.GONE
+                logThrottled("sb-notifsettings", "sb-notifsettings hidden")
+            }
+        } else {
+            val o = notifSettingsOrig.remove(settings) ?: return
+            if (settings.visibility != o) {
+                settings.visibility = o
+                logThrottled("sb-notifsettings-restore", "sb-notifsettings restore vis=$o")
+            }
+        }
+    }
+
+    private val notifSettingsOrig = WeakHashMap<View, Int>()
+
+    /** 通知中心时钟整体还原：约束、margin、尺寸、缩放、字号、可见性逐项回原值。 */
+    private fun restoreNotifClock(clock: View?, date: View?, settings: View?) {
+        listOfNotNull(clock, date).forEach { v ->
+            val o = notifClockOrig.remove(v) ?: return@forEach
+            try {
+                val lp = v.layoutParams
+                if (ConstraintLp.isInstance(lp)) {
+                    ConstraintLp.setInt(lp, "startToStart", o.startToStart)
+                    ConstraintLp.setInt(lp, "startToEnd", o.startToEnd)
+                    ConstraintLp.setInt(lp, "endToStart", o.endToStart)
+                    ConstraintLp.setInt(lp, "endToEnd", o.endToEnd)
+                    ConstraintLp.setInt(lp, "topToTop", o.topToTop)
+                    ConstraintLp.setInt(lp, "topToBottom", o.topToBottom)
+                    ConstraintLp.setInt(lp, "bottomToTop", o.bottomToTop)
+                    ConstraintLp.setInt(lp, "bottomToBottom", o.bottomToBottom)
+                    ConstraintLp.setInt(lp, "baselineToBaseline", o.baselineToBaseline)
+                    ConstraintLp.setFloat(lp, "horizontalBias", o.horizontalBias)
+                    (lp as? ViewGroup.MarginLayoutParams)?.let {
+                        it.marginStart = o.marginStart
+                        it.marginEnd = o.marginEnd
+                        it.topMargin = o.topMargin
+                        it.bottomMargin = o.bottomMargin
+                    }
+                    lp.width = o.width
+                    lp.height = o.height
+                    v.layoutParams = lp
+                }
+                v.scaleX = o.scaleX
+                v.scaleY = o.scaleY
+                v.pivotX = o.pivotX
+                v.pivotY = o.pivotY
+                notifScaleApplied.remove(v)
+                if (v is android.widget.TextView && o.textSizePx > 0f) {
+                    v.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, o.textSizePx)
+                }
+                v.visibility = o.visibility
+                (v.parent as? View)?.requestLayout()
+            } catch (t: Throwable) {
+                logThrottled("sb-notifrestore-err", "sb-skip notif_restore ${t.javaClass.simpleName}")
+            }
+        }
+        if (settings != null) {
+            val o = notifSettingsOrig.remove(settings)
+            if (o != null) settings.visibility = o
+        }
+        if (clock != null || date != null) logThrottled("sb-notifrestore", "sb-notifclock restore 回系统原样")
     }
 
     /** 通知图标区移到右侧容器首位（记原父/原序，关闭时原位还原）。 */
@@ -407,6 +850,8 @@ object StatusBarEnforcer {
         val density = root.resources.displayMetrics.density
         applyContainerPadding(root, "status_bar_start_side_container", cfg.marginLeftDp, cfg.marginRightDp, density)
         applyContainerPadding(root, "status_bar_end_side_container", cfg.marginLeftDp, cfg.marginRightDp, density)
+        // 控制中心顶栏走独立键：header 已 clipToPadding=false，内缩不裁子 View
+        applyContainerPadding(root, "header", cfg.ccMarginLeftDp, cfg.ccMarginRightDp, density)
     }
 
     /** 左右边距：dp < 0 = 用记录的原值（即系统默认）。只改水平方向。 */
@@ -718,11 +1163,10 @@ object StatusBarEnforcer {
         }
         val children = collectOrderChildren(container)
         if (children.size < 2) {
-            logThrottled(
-                "sb-order-few",
-                "sb-order skip 子View不足 n=${children.size} cfg=${cfg.iconOrder.size}项" +
-                    " duo=${cfg.duoEnable}(三合一开启会隐藏 mobile/wifi 致可排序项不足)",
-            )
+            val msg = "sb-order skip 子View不足 n=${children.size} cfg=${cfg.iconOrder.size}项" +
+                " duo=${cfg.duoEnable}(三合一开启会隐藏 mobile/wifi 致可排序项不足)"
+            logThrottled("sb-order-few", msg)
+            orderReceipt(msg)
             return
         }
         if (defaultOrder == null) defaultOrder = children.map { WeakReference(it) }
@@ -792,7 +1236,10 @@ object StatusBarEnforcer {
                 live.forEachIndexed { index, v -> container.addView(v, index) }
                 container.requestLayout()
                 container.invalidate()
-                logThrottled("sb-apply-order", "sb-apply order=${live.joinToString(",") { slotOf(it) }} mode=readd")
+                val done = "sb-apply order=${live.joinToString(",") { slotOf(it) }} mode=readd"
+                logThrottled("sb-apply-order", done)
+                orderReceiptAt = 0L
+                orderReceipt(done)
             } catch (t: Throwable) {
                 logThrottled("sb-order-readd-err", "sb-skip order readd ${t.javaClass.simpleName}")
             }
@@ -824,6 +1271,8 @@ object StatusBarEnforcer {
                 }
             }
             Lg.e(TAG, "sb-order rollback restored=$restored/${detached.size}")
+            orderReceiptAt = 0L
+            orderReceipt("sb-order rollback restored=$restored/${detached.size}")
             try {
                 container.requestLayout()
                 container.invalidate()
@@ -836,7 +1285,10 @@ object StatusBarEnforcer {
             container.invalidate()
         } catch (_: Throwable) {
         }
-        logThrottled("sb-apply-order", "sb-apply order=${live.joinToString(",") { slotOf(it) }} mode=attach")
+        val done = "sb-apply order=${live.joinToString(",") { slotOf(it) }} mode=attach"
+        logThrottled("sb-apply-order", done)
+        orderReceiptAt = 0L
+        orderReceipt(done)
     }
 
     private fun collectOrderChildren(container: ViewGroup): ArrayList<View> {
@@ -868,6 +1320,29 @@ object StatusBarEnforcer {
         if (desired == children) return
         doReorder(container, desired)
         logThrottled("sb-restore-order", "sb-restore order=${desired.joinToString(",") { slotOf(it) }}")
+    }
+
+    /** 排序关键节点落盘回执：logcat 单进程配额会整批丢安装/首帧期日志，文件不受影响。 */
+    private var orderReceiptAt = 0L
+
+    private fun orderReceipt(msg: String) {
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - orderReceiptAt < 5_000L) return
+        orderReceiptAt = now
+        try {
+            val ctx = Lg.processContext()
+            if (ctx == null) {
+                logThrottled("sb-order-receipt-noctx", "sb-order-receipt skip: context 未就绪")
+                return
+            }
+            val f = java.io.File(ctx.filesDir, "sb-order-receipt.txt")
+            f.appendText("${System.currentTimeMillis()} $msg\n")
+            if (f.length() > 16_384L) {
+                f.writeText(f.readLines().takeLast(30).joinToString("\n") + "\n")
+            }
+        } catch (t: Throwable) {
+            logThrottled("sb-order-receipt-err", "sb-order-receipt failed ${t.javaClass.simpleName}")
+        }
     }
 
     /** 系统拖拽排序开始/结束（hook 侧回传）：拖拽期间冻结模块重排，避免抢同一批子 View。 */

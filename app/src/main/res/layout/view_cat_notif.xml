@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <!-- ===== 通知动效 ===== -->
+        <LinearLayout style="@style/ShellGroupHead">
+            <TextView style="@style/ShellGroupTitle" android:text="@string/notif_group_motion" />
+            <TextView android:id="@+id/infoNotifMotion" style="@style/ShellGroupInfo" />
+            <View style="@style/ShellGroupRule" />
+        </LinearLayout>
+        <com.google.android.material.card.MaterialCardView style="@style/ShellPlate" android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="14dp">
+            <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:divider="@drawable/bg_seam_line_inset" android:dividerHeight="1dp" android:showDividers="middle">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
+                    <com.coloros16.liquidglass.ui.LgSwitch android:id="@+id/switchNotifTiltCat" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_notif_tilt_enabled" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100" android:minHeight="0dp" />
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_notif_tilt_enabled_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
+                </LinearLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- ===== 通知文字 ===== -->
+        <LinearLayout style="@style/ShellGroupHead">
+            <TextView style="@style/ShellGroupTitle" android:text="@string/notif_group_text" />
+            <TextView android:id="@+id/infoNotifText" style="@style/ShellGroupInfo" />
+            <View style="@style/ShellGroupRule" />
+        </LinearLayout>
+        <com.google.android.material.card.MaterialCardView style="@style/ShellPlate" android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="14dp">
+            <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:divider="@drawable/bg_seam_line_inset" android:dividerHeight="1dp" android:showDividers="middle">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
+                    <com.coloros16.liquidglass.ui.LgSwitch android:id="@+id/switchNotifHeadsUpFollow" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_heads_up_text_follow" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100" android:minHeight="0dp" />
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_heads_up_text_follow_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
+                </LinearLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+    </LinearLayout>
+</ScrollView>

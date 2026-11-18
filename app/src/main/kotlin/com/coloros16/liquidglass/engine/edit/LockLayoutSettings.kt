@@ -5,7 +5,7 @@ import java.util.Locale
 /**
  * 锁屏 / 息屏编辑配置（纯 JVM）。
  *
- * 位置一律归一化比例；息屏受 [EditSurface.AOD] 约束，纵向不随拖动改变。
+ * 位置一律归一化比例，两轴都可拖动；缩放范围由 [MIN_CLOCK_SCALE] / [MAX_CLOCK_SCALE] 约束。
  * 持久化用版本化文本，未知键忽略、非法值回退默认。
  */
 class LockLayoutSettings(val surface: EditSurface = EditSurface.LOCK) {
@@ -70,7 +70,7 @@ class LockLayoutSettings(val surface: EditSurface = EditSurface.LOCK) {
         return true
     }
 
-    /** 拖动时钟；息屏只采纳横向结果，纵向保持原值。 */
+    /** 拖动时钟；按编辑面轴约束采纳结果，FREE 两轴都写回。 */
     fun moveClock(x: Float, y: Float, threshold: Float = SnapEngine.DEFAULT_THRESHOLD): SnapResult {
         val targetY = if (surface.axis == EditAxis.FREE) y else clockY
         val result = SnapEngine.snap(x, targetY, SnapEngine.guides(surface), surface.axis, threshold)

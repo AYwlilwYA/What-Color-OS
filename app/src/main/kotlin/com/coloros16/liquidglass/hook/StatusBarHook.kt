@@ -55,9 +55,13 @@ object StatusBarHook {
         try {
             android.os.Handler(android.os.Looper.getMainLooper()).post {
                 try {
-                    StatusBarCompat.gate(cl, allowProbe = true)
+                    val host = StatusBarCompat.hostLoader(cl)
+                    val g = StatusBarCompat.gate(host, allowProbe = true)
+                    writeInstallReceipt("sb-gate-deferred ok ${g.summary()}")
+                    api?.let { retryCarrierOnHostLoader(it, cl) }
                 } catch (t: Throwable) {
                     Lg.i(TAG, "sb-gate-deferred 失败 ${t.javaClass.simpleName}")
+                    writeInstallReceipt("sb-gate-deferred FAIL ${t.javaClass.simpleName}")
                 }
             }
         } catch (t: Throwable) {
@@ -72,11 +76,11 @@ object StatusBarHook {
             return
         }
         this.api = api
-        val cl = StatusBarCompat.hostLoader(classLoader)
         // 热重载回调线程内取 PM / 触发类初始化会 futex 卡死整条安装链：
-        // 此处只做零探测定档，完整 gate（读版本+解析 id）挪到主线程首帧后补。
+        // 关键路径只用框架入参 loader + 零探测定档，宿主 loader 解析与完整 gate 挪到主线程补。
+        val cl = StatusBarCompat.cachedLoaderOr(classLoader)
         val gates = StatusBarCompat.gate(cl, allowProbe = false)
-        scheduleFullGate(cl)
+        scheduleFullGate(classLoader)
         val profile = gates.structure.profile
         var hook = 0
         if (profile.hasFragmentEntry) {
@@ -89,7 +93,8 @@ object StatusBarHook {
         hook += hookDarkDispatcher(api, cl)
         hook += hookUpdateStatesGoneClear(api, cl)
         if (hook > 0) hook += hookBatteryVis(api, cl)
-        installed = hook > 0
+        val carrier = hookCarrierText(api, cl)
+        installed = hook > 0 || carrier > 0
         try {
             StatusBarEnforcer.attachOrderPrefs(Prefs.read(api))
         } catch (t: Throwable) {
@@ -97,12 +102,41 @@ object StatusBarHook {
         }
         val cfg = StatusBarSettings.snapshot(api)
         lastEnabled = cfg.enabled
-        Lg.i(
-            TAG,
-            "sb-install hook=$hook/6 installed=$installed gate=${cfg.enabled} any=${cfg.anyFeature} " +
-                "fragmentEntry=${profile.hasFragmentEntry} clockSec=${profile.hasClockSeconds} " +
-                "gates=${gates.summary()}",
-        )
+        val summary = "sb-install hook=$hook/6 carrier=$carrier/2 installed=$installed gate=${cfg.enabled} any=${cfg.anyFeature} " +
+            "fragmentEntry=${profile.hasFragmentEntry} clockSec=${profile.hasClockSeconds} " +
+            "gates=${gates.summary()}"
+        Lg.i(TAG, summary)
+        writeInstallReceipt(summary)
+    }
+
+    /**
+     * 安装回执落盘：logcat 有单进程配额（LOG_FLOWCTRL 300 条/秒），安装期整批被丢导致
+     * 「汇总行零命中」无法区分「没跑」与「跑了但日志丢」。回执写模块私有目录，不受配额影响。
+     */
+    private fun writeInstallReceipt(summary: String) {
+        val pid = android.os.Process.myPid()
+        val ts = System.currentTimeMillis()
+        try {
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                try {
+                    val ctx = Lg.processContext()
+                    if (ctx == null) {
+                        Lg.i(TAG, "sb-receipt skip: context 未就绪")
+                        return@post
+                    }
+                    val f = java.io.File(ctx.filesDir, "sb-install-receipt.txt")
+                    f.appendText("$ts pid=$pid $summary\n")
+                    if (f.length() > 32_768L) {
+                        f.writeText(f.readLines().takeLast(40).joinToString("\n") + "\n")
+                    }
+                    logThrottled("sb-receipt-path", "sb-receipt path=${f.absolutePath}")
+                } catch (t: Throwable) {
+                    Lg.i(TAG, "sb-receipt write failed ${t.javaClass.simpleName}: ${t.message}")
+                }
+            }
+        } catch (t: Throwable) {
+            Lg.i(TAG, "sb-receipt post failed ${t.javaClass.simpleName}")
+        }
     }
 
     private fun hookViewCreated(api: XposedInterface, cl: ClassLoader): Int = try {
@@ -116,6 +150,10 @@ object StatusBarHook {
                 try {
                     val root = chain.getArg(0) as? View
                     if (root != null) {
+                        // 根视图到手即证宿主类可加载，用它自己的 loader 补装运营商 hook
+                        if (!carrierInstalled.get()) {
+                            hookCarrierText(api, root.javaClass.classLoader ?: cl)
+                        }
                         withConfig { cfg -> StatusBarEnforcer.onStatusBarView(root, cfg) }
                     }
                 } catch (t: Throwable) {
@@ -128,6 +166,133 @@ object StatusBarHook {
         1
     } catch (t: Throwable) {
         Lg.e(TAG, "sb-install onViewCreated 失败 ${t.javaClass.simpleName}: ${t.message}", t)
+        0
+    }
+
+    /**
+     * 运营商文字替换：两代宿主各挂一处，任一装上即生效，都装不上只降级本功能。
+     * 新世代 setTextWithAnima 入口改入参；旧世代在回调内改字段后由系统自己 setText。
+     */
+    private fun hookCarrierText(api: XposedInterface, cl: ClassLoader): Int {
+        if (carrierInstalled.get()) return carrierCount.get()
+        var ok = 0
+        ok += hookCarrierAnim(api, cl)
+        ok += hookCarrierLegacy(api, cl)
+        if (ok > 0) {
+            carrierInstalled.set(true)
+            carrierCount.set(ok)
+        } else {
+            logThrottled("sb-carrier-none", "sb-carrier 两代宿主均未命中，等宿主 loader 就绪后重试")
+        }
+        return ok
+    }
+
+    private val carrierInstalled = AtomicBoolean(false)
+    private val carrierCount = java.util.concurrent.atomic.AtomicInteger(0)
+
+    /**
+     * 宿主 loader 就绪后补装运营商 hook：安装线程只有框架入参 loader（实测在 C15 加载不到
+     * SystemUI 主 dex），完整 gate 在主线程解析出宿主 loader 后由该事件驱动补一次。
+     */
+    private fun retryCarrierOnHostLoader(api: XposedInterface, fallback: ClassLoader) {
+        if (carrierInstalled.get()) return
+        val host = StatusBarCompat.cachedLoaderOr(fallback)
+        val n = hookCarrierText(api, host)
+        writeInstallReceipt("sb-carrier-deferred n=$n/2 loader=${host.javaClass.name}")
+    }
+
+    /** 新世代：AnimateChangeTextView.setTextWithAnima(CharSequence, float)，只改运营商实例。 */
+    private fun hookCarrierAnim(api: XposedInterface, cl: ClassLoader): Int = try {
+        val cls = Class.forName(StatusBarCompat.FQCN_CARRIER_ANIM, false, cl)
+        val second = try {
+            Class.forName(StatusBarCompat.FQCN_CARRIER_SECOND, false, cl)
+        } catch (_: Throwable) {
+            null
+        }
+        val method = cls.getDeclaredMethod(
+            "setTextWithAnima", CharSequence::class.java, Float::class.javaPrimitiveType,
+        )
+        api.hook(method)
+            .setExceptionMode(ExceptionMode.PROTECTIVE)
+            .intercept { chain ->
+                try {
+                    val self = chain.getThisObject()
+                    // 基类方法体内会强转子类，非运营商实例一律放行不动
+                    if (self != null && (second == null || second.isInstance(self))) {
+                        val raw = chain.getArg(0) as? CharSequence
+                        val cfg = StatusBarSettings.snapshot(api)
+                        val repl = if (cfg.enabled) cfg.carrierReplacement else ""
+                        if (repl.isNotEmpty() && raw?.toString() != repl) {
+                            val args = chain.getArgs().toTypedArray()
+                            args[0] = repl
+                            logThrottled("sb-carrier-apply", "sb-carrier apply gen=anim len=${repl.length}")
+                            return@intercept chain.proceed(args)
+                        }
+                    }
+                } catch (t: Throwable) {
+                    applyErrors.incrementAndGet()
+                    logThrottled("sb-carrier-anim-err", "sb-skip carrier anim ${t.javaClass.simpleName}")
+                }
+                chain.proceed()
+            }
+        Lg.i(TAG, "sb-carrier gen=anim hooked second=${second != null}")
+        1
+    } catch (t: Throwable) {
+        Lg.i(TAG, "sb-carrier gen=anim 未命中 ${t.javaClass.simpleName}: ${t.message}")
+        0
+    }
+
+    /** 旧世代：OplusQSCarrierText$1.updateCarrierInfo，改回调信息里的 carrierText 字段。 */
+    private fun hookCarrierLegacy(api: XposedInterface, cl: ClassLoader): Int = try {
+        val owner = Class.forName(StatusBarCompat.FQCN_CARRIER_LEGACY, false, cl)
+        val infoCls = Class.forName(
+            StatusBarCompat.FQCN_CARRIER_CONTROLLER + "\$OplusCarrierTextCallbackInfo", false, cl,
+        )
+        val field = infoCls.getDeclaredField("carrierText").apply { isAccessible = true }
+        var hooked = 0
+        // ART 不保留 InnerClasses 属性，declaredClasses 恒空（实测 inners=0）⇒ 按名逐个试
+        val candidates = ArrayList<Class<*>>()
+        for (i in 1..6) {
+            try {
+                candidates.add(Class.forName("${StatusBarCompat.FQCN_CARRIER_LEGACY}\$$i", false, cl))
+            } catch (_: Throwable) {
+            }
+        }
+        Lg.i(TAG, "sb-carrier gen=legacy owner=${owner.name} candidates=${candidates.size}")
+        for (inner in candidates) {
+            val m = try {
+                inner.getDeclaredMethod("updateCarrierInfo", infoCls)
+            } catch (t: Throwable) {
+                Lg.i(TAG, "sb-carrier gen=legacy ${inner.name} 无 updateCarrierInfo ${t.javaClass.simpleName}")
+                continue
+            }
+            try {
+                api.hook(m)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .intercept { chain ->
+                        try {
+                            val cfg = StatusBarSettings.snapshot(api)
+                            val repl = if (cfg.enabled) cfg.carrierReplacement else ""
+                            val info = chain.getArg(0)
+                            if (repl.isNotEmpty() && info != null && field.get(info)?.toString() != repl) {
+                                field.set(info, repl)
+                                logThrottled("sb-carrier-apply", "sb-carrier apply gen=legacy len=${repl.length}")
+                            }
+                        } catch (t: Throwable) {
+                            applyErrors.incrementAndGet()
+                            logThrottled("sb-carrier-legacy-err", "sb-skip carrier legacy ${t.javaClass.simpleName}")
+                        }
+                        chain.proceed()
+                    }
+                hooked++
+            } catch (t: Throwable) {
+                Lg.i(TAG, "sb-carrier gen=legacy hook 失败 ${t.javaClass.simpleName}")
+            }
+        }
+        Lg.i(TAG, "sb-carrier gen=legacy hooked n=$hooked")
+        if (hooked > 0) 1 else 0
+    } catch (t: Throwable) {
+        Lg.i(TAG, "sb-carrier gen=legacy 未命中 ${t.javaClass.simpleName}: ${t.message}")
         0
     }
 

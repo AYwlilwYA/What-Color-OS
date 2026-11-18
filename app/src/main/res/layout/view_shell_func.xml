@@ -98,7 +98,7 @@
                     android:layout_height="wrap_content" />
 
                 <include
-                    android:id="@+id/funcRowWallpaper"
+                    android:id="@+id/funcRowNotif"
                     layout="@layout/item_row"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content" />

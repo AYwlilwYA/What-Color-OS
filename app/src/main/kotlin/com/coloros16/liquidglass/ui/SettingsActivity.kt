@@ -40,6 +40,7 @@ import android.view.ViewGroup
 import android.view.ViewOutlineProvider
 import android.view.ViewTreeObserver
 import android.view.animation.PathInterpolator
+import android.view.inputmethod.EditorInfo
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.CheckBox
@@ -186,6 +187,7 @@ class SettingsActivity : AppCompatActivity() {
         // 其他组件：音量条 + 第三方 App（相册/计算器/智能侧边栏）的组件级玻璃开关
         Category("components", R.string.cat_components, R.string.cat_components_desc, R.layout.view_cat_components),
         Category("statusbar", R.string.cat_statusbar, R.string.cat_statusbar_desc, R.layout.view_cat_statusbar),
+        Category("notif", R.string.cat_notif, R.string.cat_notif_desc, R.layout.view_cat_notif),
         Category("wallpaper", R.string.cat_wallpaper, R.string.cat_wallpaper_desc, R.layout.view_cat_wallpaper),
         // [2026-09-17] 追踪器分类页已删除（追踪器整体移除，无存活控件）
         Category("log", R.string.cat_log, R.string.cat_log_desc, R.layout.view_cat_log),
@@ -713,6 +715,7 @@ class SettingsActivity : AppCompatActivity() {
         setRowIcon(view.findViewById(R.id.homeSponsorRow), R.drawable.ic_row_heart)
         setRowIcon(view.findViewById(R.id.homeAuthorRow), R.drawable.ic_row_person)
         setRowIcon(view.findViewById(R.id.homeGroupRow), R.drawable.ic_row_people)
+        bindHomeStyleRows(view)
         loadSponsors(view)
         view.findViewById<View>(R.id.infoHomeJump)?.setOnClickListener {
             showConceptInfo(R.string.settings_home_quick_jump, R.string.info_quick_jump)
@@ -876,7 +879,7 @@ class SettingsActivity : AppCompatActivity() {
             FuncEntry(
                 R.id.funcRowPanel, "panel",
                 R.string.settings_func_panel, R.string.settings_func_panel_desc,
-                "面板 通知 控制中心 音量 飘散 动效 灰底 panel notification volume",
+                "下拉 下拉中心 面板 通知中心 控制中心 时钟 音量 飘散 动效 灰底 panel notification volume",
             ),
             FuncEntry(
                 R.id.funcRowLauncher, "launcher",
@@ -896,12 +899,12 @@ class SettingsActivity : AppCompatActivity() {
             FuncEntry(
                 R.id.funcRowStatusbar, "cat/statusbar",
                 R.string.settings_func_statusbar, R.string.settings_func_statusbar_desc,
-                "状态栏 时钟 信号 电量 wifi 5G 图标 排序 双卡 statusbar clock signal",
+                "状态栏 时钟 运营商 信号 电量 wifi 5G 图标 排序 双卡 statusbar clock carrier signal",
             ),
             FuncEntry(
-                R.id.funcRowWallpaper, "cat/wallpaper",
-                R.string.settings_func_wallpaper, R.string.settings_func_wallpaper_desc,
-                "壁纸 3d 相机 曲线 视差 2d 静态 视频 特效 wallpaper camera video",
+                R.id.funcRowNotif, "cat/notif",
+                R.string.settings_func_notif, R.string.settings_func_notif_desc,
+                "通知 横幅 倾斜 飞入 文字 跟随 背景 heads up notification tilt",
             ),
         )
         val devText = getString(R.string.settings_in_development)
@@ -929,6 +932,7 @@ class SettingsActivity : AppCompatActivity() {
                     "launcher" -> R.drawable.ic_row_launcher
                     "seedling" -> R.drawable.ic_row_cloud
                     "cat/statusbar" -> R.drawable.ic_row_statusbar
+                    "cat/notif" -> R.drawable.ic_row_panel
                     else -> R.drawable.ic_row_moon
                 },
             )
@@ -1030,7 +1034,8 @@ class SettingsActivity : AppCompatActivity() {
         FuncSub(R.string.settings_corner_class_assign, "classassign-corner", "圆角 类名 分配"),
         FuncSub(R.string.settings_notification_popup_glass, "panel", "通知 长按"),
         FuncSub(R.string.settings_notification_dissolve, "panel", "飘散 粒子 删除"),
-        FuncSub(R.string.settings_notif_tilt_enabled, "panel", "倾斜 飞入 通知"),
+        FuncSub(R.string.settings_notif_tilt_enabled, "cat/notif", "倾斜 飞入 通知"),
+        FuncSub(R.string.settings_heads_up_text_follow, "cat/notif", "通知 横幅 文字 跟随 背景"),
         FuncSub(R.string.settings_keep_system_cc_blur, "panel", "控制中心 模糊 保留"),
         FuncSub(R.string.settings_remove_panel_mix_color, "panel", "灰底 控制中心"),
         FuncSub(R.string.settings_cc_blur_strength, "panel", "控制中心 模糊 强度"),
@@ -1490,7 +1495,83 @@ class SettingsActivity : AppCompatActivity() {
             }
             setRowIcon(row, R.drawable.ic_row_sparkle)
         }
+        bindStylePresetRows(view)
     }
+
+    /** 玻璃风格五档：与画质三档同级，点击直写全局默认键立即生效。 */
+    private fun bindStylePresetRows(view: View) {
+        fillStyleRows(view.findViewById(R.id.presetStyleList))
+    }
+
+    /** 主页顶层一键风格：同一份五档与套用逻辑，跨功能配套一起写。 */
+    private fun bindHomeStyleRows(view: View) {
+        fillStyleRows(view.findViewById(R.id.homeStyleList))
+    }
+
+    private fun fillStyleRows(list: LinearLayout) {
+        list.removeAllViews()
+        val current = currentStylePresetId()
+        for (preset in com.coloros16.liquidglass.glass.BuiltinGlassPresets.all()) {
+            val row = layoutInflater.inflate(R.layout.item_row, list, false)
+            setupRow(
+                row,
+                preset.name,
+                getString(styleDescRes(preset.id)),
+                if (preset.id == current) getString(R.string.settings_preset_tier_current) else null,
+            ).setOnClickListener {
+                applyStylePreset(preset)
+                bindCurrentPage()
+            }
+            setRowIcon(row, R.drawable.ic_row_sparkle)
+            list.addView(row)
+        }
+    }
+
+    private fun styleDescRes(id: String): Int = when (id.removePrefix(com.coloros16.liquidglass.glass.BuiltinGlassPresets.ID_PREFIX)) {
+        "ios_clear" -> R.string.settings_preset_style_ios_clear_desc
+        "ios_frost" -> R.string.settings_preset_style_ios_frost_desc
+        "harmony_soft" -> R.string.settings_preset_style_harmony_soft_desc
+        "crystal" -> R.string.settings_preset_style_crystal_desc
+        else -> R.string.settings_preset_style_classic_frost_desc
+    }
+
+    /** 套用风格档：params 逐键直写全局默认键（布尔键写 Boolean），对象开关全开，立即生效。 */
+    private fun applyStylePreset(preset: GlassRegistry.Preset) {
+        for ((key, value) in preset.params) {
+            if (key in com.coloros16.liquidglass.glass.BuiltinGlassPresets.BOOLEAN_PARAM_KEYS) {
+                writePrefBoolean(key, value > 0.5f)
+            } else {
+                writePrefFloat(key, value)
+            }
+        }
+        for (key in com.coloros16.liquidglass.glass.BuiltinGlassPresets.OBJECT_SWITCH_KEYS) {
+            writePrefBoolean(key, true)
+        }
+        val comp = com.coloros16.liquidglass.glass.BuiltinGlassPresets.companionOf(preset.id)
+        for ((key, value) in comp.ints) writePrefInt(key, value)
+        for ((key, value) in comp.floats) writePrefFloat(key, value)
+        for ((key, value) in comp.bools) writePrefBoolean(key, value)
+        xmlPrefs.edit()
+            .putString(Prefs.KEY_UI_GLASS_PRESET, Prefs.GLASS_PRESET_DEFAULT_ID)
+            .apply()
+        glassPresetsCache = null
+        Lg.i(TAG_NAV, "style preset applied: id=${preset.id} keys=${preset.params.size} companion=${comp.ints.size + comp.floats.size + comp.bools.size} objects=on")
+        Toast.makeText(
+            this,
+            getString(R.string.settings_preset_style_applied, preset.name),
+            Toast.LENGTH_SHORT,
+        ).show()
+    }
+
+    /** 当前风格档按全局键值推断（与画质三档同口径）；手改任一参数后不匹配 = null，标记消失。 */
+    private fun currentStylePresetId(): String? =
+        com.coloros16.liquidglass.glass.BuiltinGlassPresets.matchCurrent { key ->
+            if (key in com.coloros16.liquidglass.glass.BuiltinGlassPresets.BOOLEAN_PARAM_KEYS) {
+                if (prefBoolean(key, false)) 1f else 0f
+            } else {
+                prefFloat(key, Float.NaN)
+            }
+        }
 
     /** 玻璃化对象·系统界面：音量条玻璃（通知中心/控制中心跟随玻璃总开关）。 */
     private fun bindObjSystem(view: View) {
@@ -2264,6 +2345,7 @@ class SettingsActivity : AppCompatActivity() {
             "desktop" -> bindDesktop(view)
             "components" -> bindComponents(view)
             "statusbar" -> bindStatusBar(view)
+            "notif" -> bindNotif(view)
             "wallpaper" -> bindWallpaper(view)
             "log" -> bindLog(view)
             "config" -> bindConfig(view)
@@ -3247,6 +3329,29 @@ class SettingsActivity : AppCompatActivity() {
             switchRemoveMixColor, removeMixColorListener,
             Prefs.KEY_REMOVE_PANEL_MIX_COLOR, Prefs.DEFAULT_REMOVE_PANEL_MIX_COLOR
         )
+
+        bindGlassSwitch(view, R.id.switchCcTileGlass, Prefs.KEY_DOUBLE_LAYER_GLASS, Prefs.DEFAULT_DOUBLE_LAYER_GLASS)
+        bindGlassSwitch(view, R.id.switchCcTileOnBlue, Prefs.KEY_TILE_ON_BLUE_GLASS, Prefs.DEFAULT_TILE_ON_BLUE_GLASS)
+        bindGlassSwitch(
+            view, R.id.switchCcTileHideSecondary,
+            Prefs.KEY_QS_HIDE_SECONDARY_GLASS, Prefs.DEFAULT_QS_HIDE_SECONDARY_GLASS,
+        )
+        bindGlassSwitch(
+            view, R.id.switchCcProgressFill,
+            Prefs.KEY_CONTROL_PROGRESS_FILL, Prefs.DEFAULT_CONTROL_PROGRESS_FILL,
+        )
+        bindIntSeekBarStep(
+            seek = view.findViewById(R.id.seekCcMarginLeft), valueText = view.findViewById(R.id.ccMarginLeftValue),
+            key = Prefs.KEY_CC_MARGIN_LEFT, default = Prefs.DEFAULT_CC_MARGIN_LEFT,
+            max = Prefs.CC_MARGIN_MAX - Prefs.CC_MARGIN_MIN, step = 1, offset = Prefs.CC_MARGIN_MIN,
+            format = { v -> if (v < 0) getString(R.string.sb_notif_gravity_system) else "${v}dp" },
+        )
+        bindIntSeekBarStep(
+            seek = view.findViewById(R.id.seekCcMarginRight), valueText = view.findViewById(R.id.ccMarginRightValue),
+            key = Prefs.KEY_CC_MARGIN_RIGHT, default = Prefs.DEFAULT_CC_MARGIN_RIGHT,
+            max = Prefs.CC_MARGIN_MAX - Prefs.CC_MARGIN_MIN, step = 1, offset = Prefs.CC_MARGIN_MIN,
+            format = { v -> if (v < 0) getString(R.string.sb_notif_gravity_system) else "${v}dp" },
+        )
     }
 
     /** 文字与可读性：文字反色 / 弹出通知文字跟随。 */
@@ -3322,6 +3427,10 @@ class SettingsActivity : AppCompatActivity() {
 
     /** 流体云：展开卡片玻璃化 + 判定参数（spec/44）。 */
     private fun bindSeedling(view: View) {
+        // 流体云接管开关（预留项，渲染侧未接线）
+        bindGlassSwitch(view, R.id.switchSeedlingTakeover, Prefs.KEY_SEEDLING_TAKEOVER_ENABLE, Prefs.DEFAULT_SEEDLING_TAKEOVER_ENABLE)
+        // 接管态玻璃材质开关（预留项）
+        bindGlassSwitch(view, R.id.switchSeedlingTakeoverGlass, Prefs.KEY_SEEDLING_TAKEOVER_GLASS, Prefs.DEFAULT_SEEDLING_TAKEOVER_GLASS)
         // 流体云展开卡片玻璃化开关（默认关；改动需重启 SystemUI 生效）
         val switchSeedling = view.findViewById<Switch>(R.id.switchSeedlingCardGlass)
         val seedlingListener = CompoundButton.OnCheckedChangeListener { _, checked ->
@@ -3705,6 +3814,30 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
+    /** 通知分类页：通知倾斜 + 通知横幅文字跟随（与面板/可读性页共用同一配置键，两处联动）。 */
+    private fun bindNotif(view: View) {
+        val tilt = view.findViewById<Switch>(R.id.switchNotifTiltCat)
+        if (tilt != null) {
+            val l = CompoundButton.OnCheckedChangeListener { _, checked ->
+                writePrefBoolean(Prefs.KEY_NOTIF_TILT_ENABLE, checked)
+            }
+            tilt.setOnCheckedChangeListener(l)
+            refreshBooleanSwitch(tilt, l, Prefs.KEY_NOTIF_TILT_ENABLE, Prefs.DEFAULT_NOTIF_TILT_ENABLE)
+        } else {
+            logNavThrottled("bind-missing-notif-tilt", "bind skipped: switchNotifTiltCat not in layout")
+        }
+        val follow = view.findViewById<Switch>(R.id.switchNotifHeadsUpFollow)
+        if (follow != null) {
+            val l = CompoundButton.OnCheckedChangeListener { _, checked ->
+                writePrefBoolean(Prefs.KEY_HEADS_UP_TEXT_FOLLOW, checked)
+            }
+            follow.setOnCheckedChangeListener(l)
+            refreshBooleanSwitch(follow, l, Prefs.KEY_HEADS_UP_TEXT_FOLLOW, Prefs.DEFAULT_HEADS_UP_TEXT_FOLLOW)
+        } else {
+            logNavThrottled("bind-missing-notif-follow", "bind skipped: switchNotifHeadsUpFollow not in layout")
+        }
+    }
+
     /** 通知卡倾斜：开关 + 角度 + 飞入缩放。 */
     private fun bindNotifTiltControls(view: View) {
         val switch = view.findViewById<Switch>(R.id.switchNotifTilt)
@@ -3777,7 +3910,7 @@ class SettingsActivity : AppCompatActivity() {
         row.setOnClickListener { pushScreen("glass") }
     }
 
-    /** 息屏与锁屏：二级菜单（接管开关 + 显示设置 / 配置入口）。 */
+    /** 息屏与壁纸：二级菜单（接管开关 + 显示设置 / 配置 / 壁纸服务入口）。 */
     private fun bindAodPage(view: View) {
         val existing = view.tag as? AodMenuController
         if (existing != null) {
@@ -3792,6 +3925,7 @@ class SettingsActivity : AppCompatActivity() {
             openDisplay = { pushScreen("aod-display") },
             openConfigs = { pushScreen("aod-configs") },
             openPage = { pageId -> pushScreen("aodui/$pageId") },
+            openWallpaper = { pushScreen("cat/wallpaper") },
         )
         view.tag = controller
         controller.bind()
@@ -4652,7 +4786,111 @@ class SettingsActivity : AppCompatActivity() {
             Prefs.STATUSBAR_MARGIN_MIN,
         ) { v -> if (v < 0) "默认" else "${v}dp" }
 
+        bindStatusBarCarrier(view)
+        bindStatusBarNotifClock(view)
         bindStatusBarOrder(view)
+    }
+
+    /** 运营商文字：开关 + 文本框，失焦或按完成时落盘。 */
+    private fun bindStatusBarCarrier(view: View) {
+        bindGlassSwitch(
+            view, R.id.switchSbCarrierText,
+            Prefs.KEY_CARRIER_TEXT_ENABLE, Prefs.DEFAULT_CARRIER_TEXT_ENABLE,
+        )
+        val edit = view.findViewById<EditText>(R.id.editSbCarrierText) ?: return
+        val stored = frameworkPrefs()?.getString(Prefs.KEY_CARRIER_TEXT_CUSTOM, Prefs.DEFAULT_CARRIER_TEXT_CUSTOM)
+            ?: xmlPrefs.getString(Prefs.KEY_CARRIER_TEXT_CUSTOM, Prefs.DEFAULT_CARRIER_TEXT_CUSTOM)
+        edit.setText(stored.orEmpty())
+        val save = {
+            val text = edit.text?.toString()?.trim().orEmpty()
+            val current = frameworkPrefs()?.getString(Prefs.KEY_CARRIER_TEXT_CUSTOM, Prefs.DEFAULT_CARRIER_TEXT_CUSTOM)
+                ?: xmlPrefs.getString(Prefs.KEY_CARRIER_TEXT_CUSTOM, Prefs.DEFAULT_CARRIER_TEXT_CUSTOM)
+            if (text != current.orEmpty()) writePrefString(Prefs.KEY_CARRIER_TEXT_CUSTOM, text)
+        }
+        edit.setOnFocusChangeListener { _, hasFocus -> if (!hasFocus) save() }
+        edit.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_DONE) {
+                save()
+                edit.clearFocus()
+                true
+            } else {
+                false
+            }
+        }
+    }
+
+    /** 通知中心时钟：总开关 + 两个下拉选项 + 三条滑杆 + 隐藏设置按钮。 */
+    private fun bindStatusBarNotifClock(view: View) {
+        bindGlassSwitch(
+            view, R.id.switchSbNotifClock,
+            Prefs.KEY_NOTIF_CLOCK_ENABLE, Prefs.DEFAULT_NOTIF_CLOCK_ENABLE,
+        )
+        bindGlassSwitch(
+            view, R.id.switchSbNotifHideSettings,
+            Prefs.KEY_NOTIF_HIDE_SETTINGS_BTN, Prefs.DEFAULT_NOTIF_HIDE_SETTINGS_BTN,
+        )
+        bindIntChoiceSpinner(
+            view.findViewById(R.id.spSbNotifClockGravity),
+            Prefs.KEY_NOTIF_CLOCK_GRAVITY, Prefs.DEFAULT_NOTIF_CLOCK_GRAVITY,
+            listOf(
+                getString(R.string.sb_notif_gravity_system),
+                getString(R.string.sb_notif_gravity_left),
+                getString(R.string.sb_notif_gravity_center),
+                getString(R.string.sb_notif_gravity_right),
+            ),
+        )
+        bindIntChoiceSpinner(
+            view.findViewById(R.id.spSbNotifDatePosition),
+            Prefs.KEY_NOTIF_DATE_POSITION, Prefs.DEFAULT_NOTIF_DATE_POSITION,
+            listOf(
+                getString(R.string.sb_notif_date_system),
+                getString(R.string.sb_notif_date_above),
+                getString(R.string.sb_notif_date_below),
+                getString(R.string.sb_notif_date_hidden),
+            ),
+        )
+        bindIntSeekBarStep(
+            view.findViewById(R.id.seekSbNotifClockGap), view.findViewById(R.id.valSbNotifClockGap),
+            Prefs.KEY_NOTIF_CLOCK_DATE_GAP, Prefs.DEFAULT_NOTIF_CLOCK_DATE_GAP,
+            Prefs.NOTIF_CLOCK_DATE_GAP_MAX - Prefs.NOTIF_CLOCK_DATE_GAP_MIN, 1,
+            Prefs.NOTIF_CLOCK_DATE_GAP_MIN,
+        ) { v -> "${v}dp" }
+        bindIntSeekBarStep(
+            view.findViewById(R.id.seekSbNotifClockScale), view.findViewById(R.id.valSbNotifClockScale),
+            Prefs.KEY_NOTIF_CLOCK_SCALE, Prefs.DEFAULT_NOTIF_CLOCK_SCALE,
+            Prefs.NOTIF_CLOCK_SCALE_MAX - Prefs.NOTIF_CLOCK_SCALE_MIN, 5,
+            Prefs.NOTIF_CLOCK_SCALE_MIN,
+        ) { v -> "${v}%" }
+        bindIntSeekBarStep(
+            view.findViewById(R.id.seekSbNotifDateSize), view.findViewById(R.id.valSbNotifDateSize),
+            Prefs.KEY_NOTIF_DATE_SIZE, Prefs.DEFAULT_NOTIF_DATE_SIZE,
+            Prefs.NOTIF_DATE_SIZE_MAX - Prefs.NOTIF_DATE_SIZE_MIN, 1,
+            Prefs.NOTIF_DATE_SIZE_MIN,
+        ) { v -> if (v == 0) getString(R.string.sb_notif_date_size_system) else "${v}sp" }
+    }
+
+    /** 整型选项下拉：position 即配置值，回显读框架配置。 */
+    private fun bindIntChoiceSpinner(spinner: Spinner?, key: String, default: Int, labels: List<String>) {
+        if (spinner == null) {
+            logNavThrottled("bind-missing-spinner-$key", "bind skipped: spinner 缺失 ($key)")
+            return
+        }
+        spinner.adapter = ArrayAdapter(this@SettingsActivity, android.R.layout.simple_spinner_item, labels).apply {
+            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        }
+        val stored = frameworkPrefs()?.let { Prefs.readIntCompat(it, key, default) }
+            ?: Prefs.readIntCompat(xmlPrefs, key, default)
+        spinner.setSelection(stored.coerceIn(0, labels.size - 1))
+        spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, selected: View?, position: Int, id: Long) {
+                val current = frameworkPrefs()?.let { Prefs.readIntCompat(it, key, default) }
+                    ?: Prefs.readIntCompat(xmlPrefs, key, default)
+                if (position != current) writePrefInt(key, position)
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) {
+            }
+        }
     }
 
     /** 图标排序：全量真实槽横滑浏览，长按拖动换位、松手吸附写回；空串 = 系统顺序。 */

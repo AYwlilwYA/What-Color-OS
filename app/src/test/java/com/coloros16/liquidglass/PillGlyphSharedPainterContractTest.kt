@@ -41,7 +41,7 @@ class PillGlyphSharedPainterContractTest {
     /** 取某函数体（大括号配平），找不到返回空串。 */
     private fun body(src: String, fn: String): String {
         val lines = src.split("\n")
-        val start = lines.indexOfFirst { Regex("""^\s*(internal |private )?fun $fn\b""").containsMatchIn(it) }
+        val start = lines.indexOfFirst { Regex("""^\s*(override |internal |private )*fun $fn\b""").containsMatchIn(it) }
         if (start < 0) return ""
         var depth = 0
         var opened = false
@@ -240,5 +240,77 @@ class PillGlyphSharedPainterContractTest {
         val s = LockLayoutSettings()
         assertFalse(s.setPillContent(PillType.CAMERA.id, "pill.teleport"))
         assertEquals(PillType.CAMERA.id, s.pillContent(PillType.CAMERA.id))
+    }
+
+    @Test
+    fun everyPillTypeCarriesAnExistingStringResource() {
+        val strings = File(root(), "app/src/main/res/values/strings.xml").readText()
+        assertTrue("字符串资源读空，判据失效", strings.length > 1000)
+        for (t in PillType.values()) {
+            assertTrue("内容 ${t.id} 没有名称键", t.nameKey.isNotEmpty())
+            assertTrue("名称键 ${t.nameKey} 不在 strings.xml", strings.contains("name=\"${t.nameKey}\""))
+        }
+    }
+
+    @Test
+    fun pillChoicesCoverEveryTypeExactlyOnce() {
+        val choices = PillType.choices()
+        assertEquals(PillType.values().size, choices.size)
+        assertEquals(PillType.values().size, choices.map { it.id }.toSet().size)
+        assertEquals(PillType.NONE, choices.first())
+    }
+
+    @Test
+    fun bothPillPanelsBuildOptionsFromTheEnum() {
+        val controller = source("ui/aod/AodEditController.kt")
+        val inline = source("ui/aod/AodInlineEditPanel.kt")
+        for ((name, src) in listOf("AodEditController" to controller, "AodInlineEditPanel" to inline)) {
+            val b = body(src, "showPillPanel")
+            assertTrue("$name 取不到 showPillPanel，判据失效", b.length > 200)
+            assertTrue("$name 的选项没走枚举", b.contains("PillType.choices()"))
+            assertFalse("$name 还在硬编码内容 id", b.contains("\"pill.dial\""))
+        }
+    }
+
+    @Test
+    fun neitherPillPanelGuessesNameFromSlotId() {
+        for (rel in listOf("ui/aod/AodEditController.kt", "ui/aod/AodInlineEditPanel.kt")) {
+            val b = body(source(rel), "showPillPanel")
+            assertFalse("$rel 还在按槽位猜名字", b.contains("contains(\"flash\")"))
+        }
+    }
+
+    @Test
+    fun editCanvasDispatchesTapForPillAndWidget() {
+        val b = body(editView(), "onTouchEvent")
+        assertTrue("取不到 onTouchEvent，判据失效", b.length > 500)
+        assertTrue("大丸点按没分派", b.contains("tapped && target == Kind.PILL -> targetId?.let { listener?.onPillTapped(it) }"))
+        assertTrue("小组件点按没分派", b.contains("tapped && target == Kind.WIDGET -> targetId?.let { listener?.onWidgetTapped(it) }"))
+    }
+
+    @Test
+    fun editCanvasListenerDeclaresBothTapCallbacks() {
+        val src = editView()
+        assertTrue("接口缺大丸点按回调", src.contains("fun onPillTapped(typeId: String)"))
+        assertTrue("接口缺小组件点按回调", src.contains("fun onWidgetTapped(typeId: String)"))
+    }
+
+    @Test
+    fun editControllerImplementsBothTapCallbacks() {
+        val src = source("ui/aod/AodEditController.kt")
+        assertTrue("大丸点按未实现", src.contains("override fun onPillTapped(typeId: String) = showPillPanel(typeId)"))
+        assertTrue("小组件点按未实现", src.contains("override fun onWidgetTapped(typeId: String)"))
+    }
+
+    @Test
+    fun positiveControlDetectorCatchesHardcodedOptionList() {
+        val buggy = """
+            fun showPillPanel(typeId: String, layout: LockLayoutSettings) {
+                val options = listOf("pill.none" to 1, "pill.dial" to 2)
+            }
+        """.trimIndent()
+        val b = body(buggy, "showPillPanel")
+        assertTrue("检测器对硬编码选项失灵", b.contains("\"pill.dial\""))
+        assertFalse("检测器对硬编码选项失灵", b.contains("PillType.choices()"))
     }
 }

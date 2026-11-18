@@ -4,6 +4,7 @@ import com.coloros16.liquidglass.engine.edit.ClockFonts
 import com.coloros16.liquidglass.engine.edit.ClockLayout
 import com.coloros16.liquidglass.engine.edit.ClockStyle
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ClockLayoutTest {
@@ -15,12 +16,37 @@ class ClockLayoutTest {
         assertEquals(0f, ClockLayout.fontPx(0f, 1080f, 1f), 0f)
     }
 
+    /** 动画真值不受用户可拖范围钳位：pose.scale 0.46 与入场 0.85 相乘后仍按比例出字号。 */
     @Test
-    fun fontScaleClamped() {
-        val max = ClockLayout.fontPx(1000f, 1000f, 99f)
-        assertEquals(1000f * ClockLayout.BASE_FRACTION * 1.6f, max, 1e-3f)
-        val min = ClockLayout.fontPx(1000f, 1000f, 0.01f)
-        assertEquals(1000f * ClockLayout.BASE_FRACTION * 0.6f, min, 1e-3f)
+    fun fontScaleIsNotClampedByUserRange() {
+        assertEquals(
+            1000f * ClockLayout.BASE_FRACTION * 0.46f,
+            ClockLayout.fontPx(1000f, 1000f, 0.46f),
+            1e-3f,
+        )
+        assertEquals(
+            1000f * ClockLayout.BASE_FRACTION * 0.527f,
+            ClockLayout.fontPx(1000f, 1000f, 0.527f),
+            1e-3f,
+        )
+        assertEquals(0f, ClockLayout.fontPx(1000f, 1000f, 0f), 0f)
+        assertEquals(0f, ClockLayout.fontPx(1000f, 1000f, -1f), 0f)
+    }
+
+    /** 用户可拖范围只在写回配置时钳。 */
+    @Test
+    fun userScaleClampedSeparately() {
+        assertEquals(1.6f, ClockLayout.clampUserScale(99f), 1e-4f)
+        assertEquals(0.6f, ClockLayout.clampUserScale(0.01f), 1e-4f)
+        assertEquals(1.1f, ClockLayout.clampUserScale(1.1f), 1e-4f)
+    }
+
+    /** 阳性对照：旧口径会把 0.46 顶到 0.6，与新口径必须不同。 */
+    @Test
+    fun oldClampWouldDifferFromNewOnHomePose() {
+        val oldWay = 1000f * ClockLayout.BASE_FRACTION * 0.6f
+        val newWay = ClockLayout.fontPx(1000f, 1000f, 0.46f)
+        assertTrue("新旧口径必须真的不同", kotlin.math.abs(oldWay - newWay) > 1f)
     }
 
     @Test

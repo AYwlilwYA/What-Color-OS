@@ -299,6 +299,119 @@
                     android:text="@string/settings_remove_panel_mix_color_desc"
                     android:textAppearance="?attr/textAppearanceBodySmall"
                     android:textColor="?android:attr/textColorSecondary" />
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="16dp"
+                    android:layout_marginBottom="12dp"
+                    android:background="?attr/colorOutlineVariant" />
+
+                <com.coloros16.liquidglass.ui.LgSwitch
+                    android:id="@+id/switchCcTileGlass"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_cc_tile_glass"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                    android:textSize="15sp"
+                    android:textColor="@color/lg_ink_100"
+                    android:minHeight="0dp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="@string/settings_cc_tile_glass_desc"
+                    android:textAppearance="?attr/textAppearanceBodySmall"
+                    android:textColor="?android:attr/textColorSecondary" />
+
+                <com.coloros16.liquidglass.ui.LgSwitch
+                    android:id="@+id/switchCcTileOnBlue"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:text="@string/settings_cc_tile_on_blue"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                    android:textSize="15sp"
+                    android:textColor="@color/lg_ink_100"
+                    android:minHeight="0dp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="@string/settings_cc_tile_on_blue_desc"
+                    android:textAppearance="?attr/textAppearanceBodySmall"
+                    android:textColor="?android:attr/textColorSecondary" />
+
+                <com.coloros16.liquidglass.ui.LgSwitch
+                    android:id="@+id/switchCcTileHideSecondary"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:text="@string/settings_cc_tile_hide_secondary"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                    android:textSize="15sp"
+                    android:textColor="@color/lg_ink_100"
+                    android:minHeight="0dp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="@string/settings_cc_tile_hide_secondary_desc"
+                    android:textAppearance="?attr/textAppearanceBodySmall"
+                    android:textColor="?android:attr/textColorSecondary" />
+
+                <com.coloros16.liquidglass.ui.LgSwitch
+                    android:id="@+id/switchCcProgressFill"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:text="@string/settings_cc_progress_fill"
+                    android:thumb="@drawable/lg_sw_thumb"
+                    android:track="@drawable/lg_sw_track"
+                    android:textSize="15sp"
+                    android:textColor="@color/lg_ink_100"
+                    android:minHeight="0dp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="@string/settings_cc_progress_fill_desc"
+                    android:textAppearance="?attr/textAppearanceBodySmall"
+                    android:textColor="?android:attr/textColorSecondary" />
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="16dp"
+                    android:layout_marginBottom="12dp"
+                    android:background="?attr/colorOutlineVariant" />
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal">
+                    <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/settings_cc_margin_left" android:textAppearance="?attr/textAppearanceTitleSmall" />
+                    <TextView android:id="@+id/ccMarginLeftValue" android:layout_width="wrap_content" android:layout_height="wrap_content" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp" />
+                </LinearLayout>
+                <SeekBar android:id="@+id/seekCcMarginLeft" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:progressDrawable="@drawable/lg_seek_track" android:splitTrack="false" android:thumb="@drawable/lg_seek_thumb" />
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:gravity="center_vertical" android:orientation="horizontal">
+                    <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/settings_cc_margin_right" android:textAppearance="?attr/textAppearanceTitleSmall" />
+                    <TextView android:id="@+id/ccMarginRightValue" android:layout_width="wrap_content" android:layout_height="wrap_content" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp" />
+                </LinearLayout>
+                <SeekBar android:id="@+id/seekCcMarginRight" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:progressDrawable="@drawable/lg_seek_track" android:splitTrack="false" android:thumb="@drawable/lg_seek_thumb" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="@string/settings_cc_margin_desc"
+                    android:textAppearance="?attr/textAppearanceBodySmall"
+                    android:textColor="?android:attr/textColorSecondary" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 

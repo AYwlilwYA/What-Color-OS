@@ -35,6 +35,9 @@ object Prefs {
     /** 循环崩守卫账本：窗口内到达安装点的 SystemUI pid 时间戳表（`ts,pid;ts,pid`），触发后清空。 */
     const val KEY_CRASH_GUARD_PIDS = "crash_guard_pids"
 
+    /** 守卫宽限基准：上次见到的模块 APK lastUpdateTime（毫秒）。变了即刚装过新包，账本重新开始。 */
+    const val KEY_CRASH_GUARD_APK_STAMP = "crash_guard_apk_stamp"
+
     /** [2026-10-13] 玻璃渲染总开关：false = 自研液态玻璃 shader 完全不套（回退系统模糊），
      *  其余功能（倾斜/飞入/热重载等）不受影响。默认开（保持现行为）。500ms TTL 直读生效。 */
     const val KEY_GLASS_ENABLE = "glass_enable"
@@ -74,6 +77,7 @@ object Prefs {
 
     /** [KEY_UI_GLASS_PRESET] 的默认取值 = 编辑全局参数。 */
     const val GLASS_PRESET_DEFAULT_ID = "default"
+
 
     // [2026-09-17 死键清理] 背景档位已删除：KEY_BACKGROUND_MODE + BACKGROUND_TRANSPARENT/LIGHT/SYSTEM
     // 三个取值 + Prefs.backgroundMode()，全部零调用方（档位语义早已被材质参数逐项取代）。
@@ -367,8 +371,8 @@ object Prefs {
     /** 文字反转取色总开关：true=开启（默认）；false=不 hook QsColorUtil/TextView，走系统原逻辑。
      *  改动需重启 SystemUI 生效（hook 端 install 时读取并缓存）。 */
     const val KEY_TEXT_CONTRAST_ENABLE = "text_contrast_enable"
-    /** 文字反转取色开关默认值（true = 默认开启） */
-    const val DEFAULT_TEXT_CONTRAST_ENABLE = true
+    /** 文字反转取色开关默认值（false = 默认关闭，改由文字强制白承担可读性） */
+    const val DEFAULT_TEXT_CONTRAST_ENABLE = false
 
     // ---------- 黑遮罩 + 白字（doc/spec/35 + spec/40 + spec/41，2026-08-13；替代 spec/21 逐文字采样反色） ----------
     /** 黑遮罩总开关：true=开启（默认，保证玻璃上文字可读性）；false=不叠加黑遮罩压暗背景。
@@ -379,13 +383,13 @@ object Prefs {
      *  文件夹不受影响）。改动需重启 SystemUI 生效（hook 端 install 时读取并缓存）。 */
     const val KEY_MASK_ENABLE = "mask_enable"
     /** 黑遮罩总开关默认值（true = 默认开启：压暗背景保证可读性） */
-    const val DEFAULT_MASK_ENABLE = false
+    const val DEFAULT_MASK_ENABLE = true
 
     /** 黑遮罩不透明度（0~1，clamp；默认 0.45 较明显）。仅 KEY_MASK_ENABLE=true 时生效。
      *  改动需重启 SystemUI 生效（hook 端 install 时读取并缓存）。 */
     const val KEY_MASK_ALPHA = "mask_alpha"
-    /** 黑遮罩不透明度默认值（0.45f；[2026-08-14 用户要求"叠黑增强"：0.35 → 0.45]） */
-    const val DEFAULT_MASK_ALPHA = 0.45f
+    /** 黑遮罩不透明度默认值（0.5f） */
+    const val DEFAULT_MASK_ALPHA = 0.5f
 
     /** 玻璃内压暗（0~1，clamp；默认 0 = 不压暗）：喂 shader uMaskAlpha（步骤 2.5 混黑），
      *  与 [KEY_MASK_ENABLE] 开关、[KEY_MASK_ALPHA] 面板黑遮罩**相互独立**（后者只管面板底层
@@ -426,15 +430,15 @@ object Prefs {
      *  hook 端按 `panelBlurRadius × strength/100` 替换面板背景 BlurConfig.blurRadius
      *  （PlatformBlurDrawable.applyBlurConfig hook）。 */
     const val KEY_CC_BLUR_STRENGTH = "cc_blur_strength"
-    /** 系统控制中心模糊力度默认值（100 = 系统原值，不干预） */
-    const val DEFAULT_CC_BLUR_STRENGTH = 8
+    /** 系统控制中心模糊力度默认值（30%） */
+    const val DEFAULT_CC_BLUR_STRENGTH = 30
 
     /** 保留系统控制中心背景模糊：true = 恢复系统模糊（力度可调、阻止缩小）；
      *  false = 短路背景模糊链（背景透明露壁纸）。
-     *  默认 **false**（2026-10-10 用户拍板「把关闭系统模糊默认开」，原默认 true）。改动需重启 SystemUI 生效。 */
+     *  默认 **true**（保留系统模糊，力度由 [KEY_CC_BLUR_STRENGTH] 调）。改动需重启 SystemUI 生效。 */
     const val KEY_KEEP_SYSTEM_CC_BLUR = "keep_system_cc_blur"
-    /** 保留系统控制中心模糊默认值（false = 默认关闭系统模糊，背景透明露壁纸） */
-    const val DEFAULT_KEEP_SYSTEM_CC_BLUR = false
+    /** 保留系统控制中心模糊默认值（true = 默认保留系统模糊） */
+    const val DEFAULT_KEEP_SYSTEM_CC_BLUR = true
 
     /** [2026-09-16 面板材质底色] 移除系统面板背景的 MixColor 材质底色（用户反馈的"一层灰遮罩"）。
      *
@@ -774,6 +778,18 @@ object Prefs {
     const val KEY_SEEDLING_CARD_FORCE_TRANSPARENT_BG = "seedling_card_force_transparent_bg"
     /** 强制透明背景默认值（true = 默认透明，用户硬需求） */
     const val DEFAULT_SEEDLING_CARD_FORCE_TRANSPARENT_BG = true
+
+    /** 流体云接管：开启后由模块自绘小岛与大卡片，取代系统渲染路径。
+     *  当前仅登记配置项，渲染侧尚未接线，开关不产生行为变化。 */
+    const val KEY_SEEDLING_TAKEOVER_ENABLE = "seedling_takeover_enable"
+    /** 流体云接管默认值（false = 不接管） */
+    const val DEFAULT_SEEDLING_TAKEOVER_ENABLE = false
+
+    /** 流体云自绘接管下的液态玻璃材质开关，供接管实现接线时读取。
+     *  与 [KEY_SEEDLING_CARD_GLASS_ENABLE]（系统渲染路径上的玻璃）互不覆盖。 */
+    const val KEY_SEEDLING_TAKEOVER_GLASS = "seedling_takeover_glass"
+    /** 接管态玻璃默认值（false = 关闭） */
+    const val DEFAULT_SEEDLING_TAKEOVER_GLASS = false
 
     // ---------- 锁屏大时钟液态玻璃化（doc/spec/43，2026-08-13） ----------
     /** 锁屏大时钟液态玻璃化开关：true=把锁屏大时钟数字文字用液态玻璃 shader 填充（采样时钟壁纸衬底位图，
@@ -1554,6 +1570,66 @@ object Prefs {
     const val DEFAULT_STATUSBAR_DUO = false
     /** 只读回传：hook 侧实测的 statusIcons 当前 slot 顺序（逗号小写，与 KEY_STATUSBAR_ICON_ORDER 同格式）。 */
     const val KEY_STATUSBAR_ICON_ORDER_CURRENT = "statusbar_icon_order_current"
+
+    /** 下拉顶栏时钟缩放（百分比，100 = 系统原样）。 */
+    const val KEY_STATUSBAR_QS_CLOCK_SCALE = "statusbar_qs_clock_scale"
+    const val DEFAULT_STATUSBAR_QS_CLOCK_SCALE = 100
+    const val STATUSBAR_QS_CLOCK_SCALE_MIN = 50
+    const val STATUSBAR_QS_CLOCK_SCALE_MAX = 220
+    /** 下拉顶栏时钟水平偏移（dp，0 = 系统原样，正右负左）。 */
+    const val KEY_STATUSBAR_QS_CLOCK_DX = "statusbar_qs_clock_dx"
+    const val DEFAULT_STATUSBAR_QS_CLOCK_DX = 0
+    /** 下拉顶栏时钟垂直偏移（dp，0 = 系统原样，正下负上）。 */
+    const val KEY_STATUSBAR_QS_CLOCK_DY = "statusbar_qs_clock_dy"
+    const val DEFAULT_STATUSBAR_QS_CLOCK_DY = 0
+    const val STATUSBAR_QS_CLOCK_OFFSET_MIN = -60
+    const val STATUSBAR_QS_CLOCK_OFFSET_MAX = 60
+
+    // ---------- 运营商文字自定义 ----------
+    /** 运营商文字替换总开关：true = 用自定义文本替换下拉面板运营商名。 */
+    const val KEY_CARRIER_TEXT_ENABLE = "carrier_text_enable"
+    const val DEFAULT_CARRIER_TEXT_ENABLE = false
+    /** 自定义运营商文本（空 = 不替换，即使开关开着）。 */
+    const val KEY_CARRIER_TEXT_CUSTOM = "carrier_text_custom"
+    const val DEFAULT_CARRIER_TEXT_CUSTOM = ""
+
+    // ---------- 通知中心时钟（下拉面板日期时间面板） ----------
+    /** 通知中心时钟自定义总开关：true = 按下列参数改布局；false 完全不动系统。 */
+    const val KEY_NOTIF_CLOCK_ENABLE = "notif_clock_enable"
+    const val DEFAULT_NOTIF_CLOCK_ENABLE = false
+    /** 时钟水平位置：0=系统默认 1=靠左 2=居中 3=靠右。 */
+    const val KEY_NOTIF_CLOCK_GRAVITY = "notif_clock_gravity"
+    const val DEFAULT_NOTIF_CLOCK_GRAVITY = 0
+    /** 日期位置：0=系统默认（时钟右侧）1=时钟上方 2=时钟下方 3=隐藏日期。 */
+    const val KEY_NOTIF_DATE_POSITION = "notif_date_position"
+    const val DEFAULT_NOTIF_DATE_POSITION = 0
+    /** 时钟与日期间距（dp）。 */
+    const val KEY_NOTIF_CLOCK_DATE_GAP = "notif_clock_date_gap"
+    const val DEFAULT_NOTIF_CLOCK_DATE_GAP = 10
+    const val NOTIF_CLOCK_DATE_GAP_MIN = 0
+    const val NOTIF_CLOCK_DATE_GAP_MAX = 48
+    /** 时钟大小（百分比，100 = 系统原样）。 */
+    const val KEY_NOTIF_CLOCK_SCALE = "notif_clock_scale"
+    const val DEFAULT_NOTIF_CLOCK_SCALE = 100
+    const val NOTIF_CLOCK_SCALE_MIN = 50
+    const val NOTIF_CLOCK_SCALE_MAX = 400
+    /** 日期字号（sp，0 = 跟随系统）。 */
+    const val KEY_NOTIF_DATE_SIZE = "notif_date_size"
+    const val DEFAULT_NOTIF_DATE_SIZE = 0
+    const val NOTIF_DATE_SIZE_MIN = 0
+    const val NOTIF_DATE_SIZE_MAX = 32
+    /** 隐藏通知设置按钮（下拉面板右上角齿轮/设置入口）。 */
+    const val KEY_NOTIF_HIDE_SETTINGS_BTN = "notif_hide_settings_btn"
+    const val DEFAULT_NOTIF_HIDE_SETTINGS_BTN = false
+
+    // ---------- 控制中心顶栏边距 ----------
+    /** 控制中心顶栏左右内缩（dp，-1 = 系统默认）。作用于下拉面板 header，与收起态状态栏边距互不影响。 */
+    const val KEY_CC_MARGIN_LEFT = "cc_margin_left"
+    const val DEFAULT_CC_MARGIN_LEFT = -1
+    const val KEY_CC_MARGIN_RIGHT = "cc_margin_right"
+    const val DEFAULT_CC_MARGIN_RIGHT = -1
+    const val CC_MARGIN_MIN = -1
+    const val CC_MARGIN_MAX = 48
 
     // ---------- 壁纸服务（3D 相机 / 2D） ----------
     /** 3D 壁纸相机曲线 id：orbit/dolly/rise/drift/still/custom。 */

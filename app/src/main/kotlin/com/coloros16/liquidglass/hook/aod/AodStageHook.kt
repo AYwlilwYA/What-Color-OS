@@ -16,6 +16,7 @@ import com.coloros16.liquidglass.engine.AodSurfaceGate
 import com.coloros16.liquidglass.engine.ClockAnchor
 import com.coloros16.liquidglass.engine.ClockStateMachine
 import com.coloros16.liquidglass.engine.ContentLayerMapper
+import com.coloros16.liquidglass.engine.EffectOverlayPolicy
 import com.coloros16.liquidglass.engine.KeyedTtlCache
 import com.coloros16.liquidglass.engine.LockOnlyLayerPolicy
 import com.coloros16.liquidglass.engine.SailLensMotion
@@ -36,8 +37,11 @@ import com.coloros16.liquidglass.engine.from
 import com.coloros16.liquidglass.engine.to
 import com.coloros16.liquidglass.hook.AodHandoffHook
 import com.coloros16.liquidglass.hook.DesktopClockAnchorBridge
+import com.coloros16.liquidglass.hook.DeviceClockFont
+import com.coloros16.liquidglass.hook.HookAssetSource
 import com.coloros16.liquidglass.ui.aod.AodSceneCatalog
 import com.coloros16.liquidglass.ui.aod.AodSceneSpec
+import com.coloros16.liquidglass.ui.aod.AodStyleCatalog
 import com.coloros16.liquidglass.log.Lg
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedInterface.ExceptionMode
@@ -140,12 +144,14 @@ object AodStageHook {
         }
         this.api = api
         AodEffectOverlay.bind(api)
+        AodWorldLayer.bind(api)
         refreshGate()
         var hook = 0
         hook += mountLifecycle(api, classLoader, CLASS_SHADE_ROOT, "窗口根")
         hook += mountAodInvalidate(api, classLoader)
         installed = hook > 0
-        Lg.i(TAG, "stage-install hook=$hook/3 installed=$installed gate=${refreshGate()}")
+        val stale = sweepStaleOnInstall()
+        Lg.i(TAG, "stage-install hook=$hook/3 installed=$installed gate=${refreshGate()} stale=$stale")
     }
 
     /** 窗口根负责挂层/摘层：它的 attach/detach 是稳定锚点（反编译实证声明）。 */
@@ -238,6 +244,7 @@ object AodStageHook {
 
     private fun onAttach(host: View) {
         attachHits++
+        noteRoot(host)
         if (!refreshGate()) {
             logThrottled("stage-gate", "门控关闭，不挂层 attach=$attachHits")
             return
@@ -270,6 +277,8 @@ object AodStageHook {
             armFrameLoop(existing)
             return
         }
+        val orphan = sweepTagged(stage.rootView ?: stage, LAYER_TAG)
+        if (orphan > 0) Lg.i(TAG, "stage-orphan-swept kind=stage n=$orphan host=${host.javaClass.simpleName}")
         val ctx = stage.context ?: run {
             logThrottled("stage-noctx", "舞台 context 为空")
             return
@@ -315,6 +324,7 @@ object AodStageHook {
      * 使新一代 install 从干净状态开始（避免旧实例带着旧求值逻辑继续跑）。
      */
     fun shutdownForHotReload() {
+        val roots = (sweepRoots() + windowRoots()).distinctBy { System.identityHashCode(it) }
         val hosts = ArrayList(mounted.keys)
         var removed = 0
         for (host in hosts) {
@@ -335,8 +345,15 @@ object AodStageHook {
             }
         }
         runCatching { releaseWidgets() }
+        var swept = 0
+        for (root in roots) {
+            swept += runCatching { sweepTagged(root, LAYER_TAG) }.getOrDefault(0)
+            swept += runCatching { sweepTagged(root, WIDGET_LAYER_TAG) }.getOrDefault(0)
+        }
         runCatching { AodEffectOverlay.clear() }
         runCatching { AodWorldLayer.release() }
+        runCatching { HookAssetSource.reset() }
+        runCatching { DeviceClockFont.reset() }
         worldCache = null
         ids.clear()
         layoutCache.clear()
@@ -350,7 +367,7 @@ object AodStageHook {
         clockSource = ""
         clockSourceClass = ""
         installed = false
-        Lg.i(TAG, "stage-hotreload-shutdown removed=$removed hosts=${hosts.size}")
+        Lg.i(TAG, "stage-hotreload-shutdown removed=$removed hosts=${hosts.size} swept=$swept roots=${roots.size}")
     }
 
     /** 舞台优先取 AOD 根布局；取不到退到宿主自身（窗口根）。 */
@@ -370,6 +387,98 @@ object AodStageHook {
             if (child is AodTransitionLayer && child.tag == LAYER_TAG) return child
         }
         return null
+    }
+
+    /**
+     * 按 tag 扫本模块自绘层（含旧代次实例）：热重载换类后 `is` 判型对旧实例恒假。
+     *
+     * 旧实例的帧泵与延迟任务仍挂在宿主上，只清账本摘不掉它，必须按 tag 找到并从树上移除。
+     */
+    private fun sweepTagged(root: View?, tag: String, depth: Int = 0): Int {
+        if (root !is ViewGroup || depth > SCAN_MAX_DEPTH) return 0
+        var removed = 0
+        for (i in root.childCount - 1 downTo 0) {
+            val child = root.getChildAt(i) ?: continue
+            if (child.tag == tag) {
+                runCatching {
+                    child.visibility = View.GONE
+                    root.removeView(child)
+                    removed++
+                }
+                continue
+            }
+            removed += sweepTagged(child, tag, depth + 1)
+        }
+        return removed
+    }
+
+    /**
+     * 扫孤儿层的起点：记住每次 attach 过的窗口根。
+     *
+     * 不能只从 mounted 取 —— 热重载后新类 mounted 为空而旧层仍挂树上，
+     * 那正是最需要清扫的时刻，按 mounted 取根会恒空。
+     */
+    private fun sweepRoots(): List<View> {
+        val roots = ArrayList<View>()
+        for (ref in seenRoots) {
+            val r = ref.get() ?: continue
+            if (roots.none { it === r }) roots.add(r)
+        }
+        for (host in mounted.keys) {
+            val r = runCatching { host.rootView }.getOrNull() ?: continue
+            if (roots.none { it === r }) roots.add(r)
+        }
+        return roots
+    }
+
+    /**
+     * 装载即清扫：从进程窗口根找旧代次留下的自绘层。
+     *
+     * 旧层的帧泵与延迟任务仍挂宿主，且新类账本为空找不到它们；
+     * 唯一跨代次不变的锚点是宿主视图树，故按 WindowManagerGlobal 的 mViews 取全部窗口根。
+     */
+    private fun sweepStaleOnInstall(): Int {
+        val roots = windowRoots()
+        var n = 0
+        for (root in roots) {
+            n += runCatching { sweepTagged(root, LAYER_TAG) }.getOrDefault(0)
+            n += runCatching { sweepTagged(root, WIDGET_LAYER_TAG) }.getOrDefault(0)
+        }
+        if (n > 0 || roots.isNotEmpty()) {
+            Lg.i(TAG, "stage-stale-sweep n=$n roots=${roots.size}")
+        }
+        return n
+    }
+
+    /** 进程内全部窗口根：WindowManagerGlobal.mViews 每项是 ViewRootImpl，取其 mView。 */
+    private fun windowRoots(): List<View> {
+        val out = ArrayList<View>()
+        runCatching {
+            val global = Class.forName("android.view.WindowManagerGlobal")
+            val inst = global.getDeclaredMethod("getInstance").invoke(null) ?: return@runCatching
+            val viewsField = global.getDeclaredField("mViews").apply { isAccessible = true }
+            val views = viewsField.get(inst) as? java.util.ArrayList<*> ?: return@runCatching
+            val rootClass = Class.forName("android.view.ViewRootImpl")
+            val viewField = rootClass.getDeclaredField("mView").apply { isAccessible = true }
+            for (item in views) {
+                if (item == null) continue
+                val v = runCatching { viewField.get(item) as? View }.getOrNull() ?: continue
+                if (out.none { it === v }) out.add(v)
+            }
+        }.onFailure {
+            logThrottled("stage-windowroots", "窗口根枚举失败 ${it.javaClass.simpleName}")
+        }
+        return out
+    }
+
+    private val seenRoots = ArrayList<java.lang.ref.WeakReference<View>>()
+
+    /** 记下窗口根供后续清扫；已记过或已回收的不重复登记。 */
+    private fun noteRoot(view: View?) {
+        val r = runCatching { view?.rootView }.getOrNull() ?: return
+        seenRoots.removeAll { it.get() == null || it.get() === r }
+        seenRoots.add(java.lang.ref.WeakReference(r))
+        if (seenRoots.size > 8) seenRoots.removeAt(0)
     }
 
     private val frameLoops = WeakHashMap<AodTransitionLayer, ViewTreeObserver.OnPreDrawListener>()
@@ -503,7 +612,7 @@ object AodStageHook {
         layer.bind(params, sceneLayers, playing = true)
         applyWorld(layer, staticState(layer), edge, params.t, sceneLayers.aodAlpha)
         applyClockAnchor(layer, edge, params.t, sceneLayers.aodClockScale)
-        applyEffect(layer, sceneLayers.lockAlpha)
+        applyEffect(layer, EffectOverlayPolicy.visibilityAt(staticState(layer), edge, params.t))
         applyContentLayers(layer, params)
         applyPills(layer)
         applyWidgets(layer)
@@ -523,8 +632,8 @@ object AodStageHook {
         SystemSceneMotion.sampleStatic(state, sceneLayers)
         layer.bind(null, sceneLayers, playing = false)
         applyWorld(layer, state, null, 0f, sceneLayers.aodAlpha)
-        applyEffect(layer, sceneLayers.lockAlpha)
-        releaseContentLayers(layer)
+        applyEffect(layer, EffectOverlayPolicy.visibilityOf(state))
+        releaseContentLayers(layer, keepClocks = true)
         applyStaticClock(layer, state)
         if (state == SceneState.AOD) {
             armDrift(layer)
@@ -668,11 +777,11 @@ object AodStageHook {
     }
 
     /** 转场收尾：把两个容器、两侧时钟与大丸都还原成系统原样。 */
-    private fun releaseContentLayers(layer: AodTransitionLayer) {
+    private fun releaseContentLayers(layer: AodTransitionLayer, keepClocks: Boolean = false) {
         val stage = layer.parent as? View
         ContentLayerApply.restore(stage, SceneState.AOD)
         ContentLayerApply.restore(findLockRoot(layer), SceneState.LOCK)
-        restoreClocks(layer)
+        if (!keepClocks) restoreClocks(layer)
         PillPlacementApply.restoreAll(layer.rootView)
         widgetLayer?.bind(null) { it }
     }
@@ -703,18 +812,17 @@ object AodStageHook {
         AodStageAnchors.surfaceOfStage(stage.javaClass.name)
 
     /**
-     * 壁纸效果叠加：按效果解析结果取有效 id，透明度跟锁屏层。
+     * 壁纸效果叠加：构建门只看有没有选效果，显示门按跨三态可见度给强度。
      *
-     * 构建按需单飞，就绪后只重绘本层（不触发宿主重绘）。
+     * 构建与当前态无关（息屏态选中也预处理），构建按需单飞，就绪后只重绘本层。
      */
-    private fun applyEffect(layer: AodTransitionLayer, lockAlpha: Float) {
+    private fun applyEffect(layer: AodTransitionLayer, visibility: Float) {
         val id = effectiveWallpaperEffect()
-        if (id == null) {
+        if (!EffectOverlayPolicy.needsBuild(id, null)) {
             layer.bindEffect(null, 0f)
-            layer.bindWorld(null, SceneState.AOD, null, 0f, 0f, 0f, false, 0f)
             return
         }
-        layer.bindEffect(id, lockAlpha)
+        layer.bindEffect(id, visibility)
         if (layer.width <= 0 || layer.height <= 0) return
         AodEffectOverlay.request(id, layer.width, layer.height) { layer.postInvalidate() }
     }
@@ -759,8 +867,15 @@ object AodStageHook {
         val still = edge == null && state == SceneState.AOD
         val spin = motion.rotationDeg
         val mix = motion.colorMix
-        val alpha = if (spec.lens) lensAlpha(edge, t, aodAlpha) else aodAlpha
-        layer.bindWorld(spec, state, edge, t, alpha, spin, dynamic, mix)
+        val tilt = if (still) motion.photoTiltDeg else 0f
+        val alpha = if (spec.lens) lensAlpha(edge, t, aodAlpha) else 1f
+        layer.bindWorld(
+            spec, state, edge, t, alpha, spin, dynamic, mix,
+            tiltDeg = tilt,
+            wallpaperScale = sceneLayers.wallpaperScale,
+            accent = AodStyleCatalog.find(styleId()).accent,
+            api = api,
+        )
     }
 
     /** 镜片息屏层透明度：播放期走镜片自身交叠曲线，静止态用系统分层值。 */
@@ -1180,6 +1295,8 @@ object AodStageHook {
         }
         val existing = findWidgetLayer(host)
         val target = existing ?: run {
+            val orphan = sweepTagged(host.rootView ?: host, WIDGET_LAYER_TAG)
+            if (orphan > 0) Lg.i(TAG, "stage-orphan-swept kind=widgets n=$orphan")
             val created = LockWidgetLayer(host.context)
             created.tag = WIDGET_LAYER_TAG
             host.addView(

@@ -63,6 +63,10 @@ __pycache__/
 # 会话临时产物
 /.impeccable/
 /.tmp/
+/.tmp-gradle-home/
+/.tmp-gradle-sfline/
+/.tmp-handle/
+/app-build-sfline/
 /.kotlin/
 /_tmp_cap.sh
 /_tmp_drip_fw/

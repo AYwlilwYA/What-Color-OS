@@ -20,6 +20,7 @@ import com.coloros16.liquidglass.engine.edit.ClockInfo
 import com.coloros16.liquidglass.engine.edit.ClockStyle
 import com.coloros16.liquidglass.engine.edit.LockLayoutSettings
 import com.coloros16.liquidglass.engine.edit.PillPlacement
+import com.coloros16.liquidglass.engine.edit.PillType
 import com.coloros16.liquidglass.engine.edit.WidgetCatalog
 import com.coloros16.liquidglass.engine.edit.WidgetSize
 import com.coloros16.liquidglass.log.Lg
@@ -283,23 +284,14 @@ class AodInlineEditPanel(
     fun showPillPanel(typeId: String, layout: LockLayoutSettings) {
         settings = layout
         val pill = layout.pill(typeId) ?: return
-        val nameRes = if (typeId.contains("flash")) {
-            R.string.settings_aod_edit_pill_flashlight
-        } else {
-            R.string.settings_aod_edit_pill_camera
-        }
+        val nameRes = PillType.from(typeId)?.nameKey?.let { key ->
+            context.resources.getIdentifier(key, "string", context.packageName)
+        }?.takeIf { it != 0 } ?: R.string.settings_aod_edit_pill_flashlight
         val (sheet, content) = buildSheet(context.getString(nameRes))
         content.addView(groupLabel(R.string.settings_aod_edit_pill_content))
-        val options = listOf(
-            "pill.none" to R.string.settings_aod_edit_pill_none,
-            "pill.flashlight" to R.string.settings_aod_edit_pill_flashlight,
-            "pill.camera" to R.string.settings_aod_edit_pill_camera,
-            "pill.dial" to R.string.settings_aod_edit_pill_dial,
-            "pill.recorder" to R.string.settings_aod_edit_pill_recorder,
-            "pill.calculator" to R.string.settings_aod_edit_pill_calculator,
-            "pill.scan" to R.string.settings_aod_edit_pill_scan,
-            "pill.pay" to R.string.settings_aod_edit_pill_pay,
-        )
+        val options = PillType.choices().map { type ->
+            type.id to context.resources.getIdentifier(type.nameKey, "string", context.packageName)
+        }
         var row: LinearLayout? = null
         for ((i, opt) in options.withIndex()) {
             if (i % 4 == 0) {

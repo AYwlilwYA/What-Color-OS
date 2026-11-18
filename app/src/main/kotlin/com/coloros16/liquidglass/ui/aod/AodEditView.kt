@@ -46,7 +46,9 @@ class AodEditView @JvmOverloads constructor(
     interface Listener {
         fun onClockTapped()
         fun onWidgetHold(typeId: String)
+        fun onWidgetTapped(typeId: String)
         fun onPillHold(typeId: String)
+        fun onPillTapped(typeId: String)
         fun onEmptyTapped()
         fun onLayoutEdited()
     }
@@ -87,6 +89,8 @@ class AodEditView @JvmOverloads constructor(
     private var startVX = 0f
     private var startVY = 0f
     private var startScale = 1f
+    private var resizeAnchorLeft = 0f
+    private var resizeAnchorTop = 0f
     private var guideX = -1f
     private var guideY = -1f
 
@@ -141,6 +145,7 @@ class AodEditView @JvmOverloads constructor(
 
     private val clockBounds = RectF()
     private var clockTextSize = 0f
+    private val dateColor = 0xFFE7EDF4.toInt()
 
     private val holdClock = Runnable {
         if (target == Kind.CLOCK) {
@@ -200,54 +205,44 @@ class AodEditView @JvmOverloads constructor(
     }
 
     private fun drawClock(canvas: Canvas, s: LockLayoutSettings, w: Float, h: Float) {
-        val cx = s.clockX * w
-        val cy = s.clockY * h
-        clockTextSize = ClockLayout.fontPx(w, h, s.clockScale)
-        clockPaint.textSize = clockTextSize
-        clockPaint.typeface = typefaceOf(s)
-        clockPaint.letterSpacing = s.clock.letterSpacing
-        clockPaint.color = s.clock.colorArgb
+        clockTextSize = ClockGlyphPainter.draw(
+            canvas, s.clockX * w, s.clockY * h, ClockLayout.fontPx(w, h, s.clockScale),
+            timeText(), dateText(), s.clock.colorArgb, dateColor,
+            typefaceOf(s), dateTypeface(), s.clock.letterSpacing, s.clock.info,
+            clockPaint, subPaint, clockBounds, 14f * density,
+        )
+    }
 
-        val time = "10:08"
-        val metrics = clockPaint.fontMetrics
-        val baseline = cy - (metrics.ascent + metrics.descent) / 2f
-        canvas.drawText(time, cx, baseline, clockPaint)
-
-        subPaint.textSize = clockTextSize * 0.15f
-        val dateBaseline = cy + clockTextSize * 0.62f
-        canvas.drawText("11月17日 星期二", cx, dateBaseline, subPaint)
-        val info = when (s.clock.info) {
-            ClockInfo.LUNAR -> "农历 十月初五"
-            ClockInfo.WEATHER -> "22° 晴"
-            ClockInfo.NONE -> null
+    /** 编辑页时钟走真实时间，与预览同源。 */
+    private fun timeText(): String {
+        val now = java.time.LocalDateTime.now()
+        return if (android.text.format.DateFormat.is24HourFormat(context)) {
+            String.format("%02d:%02d", now.hour, now.minute)
+        } else {
+            val hour = now.hour % 12
+            String.format("%d:%02d", if (hour == 0) 12 else hour, now.minute)
         }
-        if (info != null) {
-            canvas.drawText(info, cx, dateBaseline + subPaint.textSize * 1.6f, subPaint)
-        }
+    }
 
-        val halfW = clockPaint.measureText(time) / 2f + 14f * density
-        val halfH = clockTextSize * 0.45f
-        clockBounds.set(cx - halfW, cy - halfH, cx + halfW, cy + halfH)
+    private fun dateText(): String {
+        val now = java.time.LocalDateTime.now()
+        val weekday = when (now.dayOfWeek.value) {
+            1 -> "周一"
+            2 -> "周二"
+            3 -> "周三"
+            4 -> "周四"
+            5 -> "周五"
+            6 -> "周六"
+            else -> "周日"
+        }
+        return "${now.monthValue}月${now.dayOfMonth}日 $weekday"
     }
 
     private fun drawWidgets(canvas: Canvas, s: LockLayoutSettings, w: Float, h: Float) {
         for (widget in s.widgets()) {
             if (!widget.enabled) continue
             val rect = widgetRect(widget, w, h)
-            val radius = 14f * density
-            canvas.drawRoundRect(rect, radius, radius, platePaint)
-            canvas.drawRoundRect(rect, radius, radius, strokePaint)
-            val name = widgetName(widget.typeId)
-            canvas.drawText(name, rect.left + 12f * density, rect.top + 22f * density, widgetTextPaint)
-            val inner = RectF(
-                rect.left + 12f * density,
-                rect.top + 30f * density,
-                rect.right - 12f * density,
-                rect.bottom - 12f * density,
-            )
-            if (inner.height() > 0f) {
-                canvas.drawRoundRect(inner, 8f * density, 8f * density, platePaint)
-            }
+            WidgetPlatePainter.draw(canvas, rect, widgetName(widget.typeId), density, platePaint, strokePaint, widgetTextPaint)
         }
     }
 
@@ -316,23 +311,9 @@ class AodEditView @JvmOverloads constructor(
         return if (res != 0) context.getString(res) else typeId
     }
 
-    private fun typefaceOf(s: LockLayoutSettings): Typeface {
-        val base = when (ClockFonts.normalize(s.clock.fontFamily)) {
-            ClockFonts.SERIF -> Typeface.SERIF
-            ClockFonts.MONO -> Typeface.MONOSPACE
-            ClockFonts.CASUAL -> Typeface.create("casual", Typeface.NORMAL)
-            else -> Typeface.SANS_SERIF
-        }
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            try {
-                Typeface.create(base, s.clock.weight, false)
-            } catch (t: Throwable) {
-                base
-            }
-        } else {
-            base
-        }
-    }
+    private fun typefaceOf(s: LockLayoutSettings): Typeface = ClockTypefaces.timeOf(context, s.clock)
+
+    private fun dateTypeface(): Typeface = ClockTypefaces.date()
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         val s = settings ?: return false
@@ -354,6 +335,8 @@ class AodEditView @JvmOverloads constructor(
                     resizing = true
                     target = Kind.CLOCK
                     startScale = s.clockScale
+                    resizeAnchorLeft = clockBounds.left
+                    resizeAnchorTop = clockBounds.top
                     return true
                 }
                 if (!pick(x, y, s)) {
@@ -404,9 +387,7 @@ class AodEditView @JvmOverloads constructor(
                     handler.removeCallbacks(holdPill)
                 }
                 if (resizing) {
-                    val base = min(width, height).toFloat()
-                    val delta = (dy + dx) / (base * 0.35f)
-                    s.clockScale = (startScale + delta).coerceAtMost(fitMaxScale())
+                    resizeClock(s, dx, dy)
                     invalidate()
                     return true
                 }
@@ -424,8 +405,7 @@ class AodEditView @JvmOverloads constructor(
                 val h = height.toFloat()
                 val edited = resizing || (armed && moved)
                 if (resizing) {
-                    val delta = ((event.y - downY) + (event.x - downX)) / (min(w, h) * 0.35f)
-                    s.clockScale = (startScale + delta).coerceAtMost(fitMaxScale())
+                    resizeClock(s, event.x - downX, event.y - downY)
                     clampClock(s)
                 }
                 resizing = false
@@ -436,6 +416,8 @@ class AodEditView @JvmOverloads constructor(
                 when {
                     edited -> listener?.onLayoutEdited()
                     tapped && target == Kind.CLOCK -> listener?.onClockTapped()
+                    tapped && target == Kind.WIDGET -> targetId?.let { listener?.onWidgetTapped(it) }
+                    tapped && target == Kind.PILL -> targetId?.let { listener?.onPillTapped(it) }
                     tapped && target == null -> listener?.onEmptyTapped()
                 }
                 target = null
@@ -523,6 +505,37 @@ class AodEditView @JvmOverloads constructor(
             }
             null -> Unit
         }
+    }
+
+    /** 右下角手柄缩放：字号按位移求值，中心同量右移下移使左上角钉死。 */
+    private fun resizeClock(s: LockLayoutSettings, dx: Float, dy: Float) {
+        val w = width.toFloat()
+        val h = height.toFloat()
+        if (w <= 0f || h <= 0f) return
+        val next = min(
+            ClockLayout.resizeScale(startScale, dx, dy, min(w, h)),
+            fitMaxScale(),
+        )
+        if (next <= 0f) return
+        s.clockScale = next
+        drawClockOffscreen(s, w, h)
+        s.clockX = (resizeAnchorLeft + clockBounds.width() / 2f) / w
+        s.clockY = (resizeAnchorTop + clockBounds.height() / 2f) / h
+    }
+
+    /** 只量框不绘制：缩放中按新字号重算命中框，供左上角反算中心。 */
+    private fun drawClockOffscreen(s: LockLayoutSettings, w: Float, h: Float) {
+        val size = ClockLayout.fontPx(w, h, s.clockScale)
+        val probe = Paint(clockPaint).apply {
+            textSize = size
+            typeface = typefaceOf(s)
+            letterSpacing = s.clock.letterSpacing
+        }
+        val halfW = probe.measureText(timeText()) / 2f + 14f * density
+        val halfH = size * ClockGlyphPainter.BOUNDS_HALF_HEIGHT_RATIO
+        val cx = s.clockX * w
+        val cy = s.clockY * h
+        clockBounds.set(cx - halfW, cy - halfH, cx + halfW, cy + halfH)
     }
 
     /** 时钟放大上限：按整串时间宽度换算（与真机同一套 [ClockLayout]）。 */

@@ -31,16 +31,53 @@ object TextScopeMatcher {
     }
 
     /** 命中的玻璃区域宿主类名（文字链按元素预设覆盖用）；未命中 → null。判定同 [isOverGlassRegion]。 */
-    fun glassRegionHostAt(screenX: Int, screenY: Int): String? {
+    fun glassRegionHostAt(screenX: Int, screenY: Int): String? =
+        glassRegionHostAt(screenX, screenY, null)
+
+    /**
+     * 带归属校验的宿主判定：坐标命中 region 后，若该 region 有宿主 View 引用，
+     * 还须 textView 在该宿主的子树内才算命中——否则只是「坐标碰巧落在矩形里」的无关文字
+     * （锁屏密码提示 / 紧急呼叫 / 对话框 / 输入框等叠在通知卡矩形上时会被误判）。
+     * textView=null 时退化为纯坐标判定（供无 View 上下文的调用方）。
+     */
+    fun glassRegionHostAt(screenX: Int, screenY: Int, textView: View?): String? {
         val sb = statusBarBottom()
         if (sb > 0 && screenY < sb) return null
         for (entry in BlurDrawHook.screenRegionMap.values) {
             val r = entry.region
-            if (screenX >= r.left && screenX <= r.right && screenY >= r.top && screenY <= r.bottom) {
-                return entry.hostViewName
+            if (screenX < r.left || screenX > r.right || screenY < r.top || screenY > r.bottom) continue
+            val host = entry.hostViewRef?.get()
+            if (textView != null && host != null && !isDescendantOf(textView, host)) {
+                logMissOnce(entry.hostViewName, textView)
+                continue
             }
+            return entry.hostViewName
         }
         return null
+    }
+
+    /** textView 是否在 host 子树内（含自身）；父链上溯，深度上限防病态树。 */
+    private fun isDescendantOf(textView: View, host: View): Boolean {
+        var v: View? = textView
+        var depth = 0
+        while (v != null && depth < 40) {
+            if (v === host) return true
+            v = v.parent as? View
+            depth++
+        }
+        return false
+    }
+
+    private val missLogged = ConcurrentHashMap<String, Long>()
+
+    /** 归属不符导致跳过的诊断（按 宿主类+文字类 节流 10s，避免逐帧刷屏）。 */
+    private fun logMissOnce(hostName: String, textView: View) {
+        val key = hostName + "|" + textView.javaClass.simpleName
+        val now = android.os.SystemClock.uptimeMillis()
+        val last = missLogged[key]
+        if (last != null && now - last < 10_000L) return
+        missLogged[key] = now
+        Lg.i(TAG, "text-scope skip 非宿主子树 host=$hostName tv=${textView.javaClass.simpleName}")
     }
 
     /** 状态栏区域底边（物理 px）：framework `status_bar_height` dimen（Resources.getSystem()，

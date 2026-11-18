@@ -12,13 +12,17 @@ object PressGlow {
     /** 松手淡灭时长。 */
     const val RELEASE_MS = 320L
 
-    /** 单元素发光状态（坐标 = 元素局部 px；时刻 = uptimeMillis）。 */
+    /** 单触点发光状态（坐标 = 元素局部 px；时刻 = uptimeMillis；pid = MotionEvent pointerId）。 */
     data class State(
         val downAtMs: Long,
         val upAtMs: Long?,
         val x: Float,
         val y: Float,
+        val pid: Int = 0,
     )
+
+    /** 每宿主并发光斑上限（多指同按各自独立包络）。 */
+    const val MAX_SPOTS = 3
 
     /** 当前发光强度 0~1：按住段 ease-out 点亮到 1；松手段从松手瞬间值三次缓出到 0；到期恒 0。 */
     fun intensity(state: State?, nowMs: Long): Float {

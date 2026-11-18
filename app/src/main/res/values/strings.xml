@@ -55,14 +55,14 @@
     <string name="settings_func_glass_desc">绘制总控 · 预设 · 配置管理 · 组件分配 · 玻璃化对象</string>
     <string name="settings_func_corner">圆角</string>
     <string name="settings_func_corner_desc">按类名设置组件圆角</string>
-    <string name="settings_func_panel">面板效果</string>
-    <string name="settings_func_panel_desc">通知 · 控制中心 · 音量面板</string>
+    <string name="settings_func_panel">下拉中心</string>
+    <string name="settings_func_panel_desc">通知中心时钟 · 控制中心 · 音量面板</string>
     <string name="settings_func_launcher">桌面 Launcher</string>
-    <string name="settings_func_launcher_desc">打开 / 关闭 / 打断动画 · 弹性参数 · 动态倾斜</string>
+    <string name="settings_func_launcher_desc">打开 / 关闭 / 打断动画 · 弹性参数 · 桌面倾斜动画</string>
     <string name="settings_func_seedling">流体云</string>
     <string name="settings_func_seedling_desc">场景显示规则</string>
-    <string name="settings_func_aod">息屏与锁屏</string>
-    <string name="settings_func_aod_desc">alive 息屏</string>
+    <string name="settings_func_aod">息屏与壁纸</string>
+    <string name="settings_func_aod_desc">息屏 · 锁屏 · 桌面三态与壁纸效果</string>
     <string name="settings_func_search_results">搜索结果</string>
     <string name="settings_in_development">开发中</string>
 
@@ -91,7 +91,7 @@
     <string name="settings_preset_apply">一键</string>
     <string name="settings_preset_appearance_applied">已套用高画质预设</string>
     <string name="settings_preset_ios">iOS 预设</string>
-    <string name="settings_preset_ios_desc">点进选择性能 / 平衡 / 外观三档画质方案</string>
+    <string name="settings_preset_ios_desc">画质三档与玻璃风格五档，点选立即生效</string>
     <string name="settings_preset_tier_performance">性能</string>
     <string name="settings_preset_tier_performance_desc">低画质低占用，最流畅</string>
     <string name="settings_preset_tier_balance">平衡</string>
@@ -293,7 +293,7 @@
     <string name="settings_cc_blur_strength">系统模糊力度（%）</string>
     <string name="settings_cc_blur_strength_value">%1$d%%</string>
     <string name="settings_cc_blur_strength_desc">调整控制中心背景模糊程度。100 为系统默认，0 为不模糊。</string>
-    <string name="settings_keep_system_cc_blur">保留系统控制中心模糊（默认关）</string>
+    <string name="settings_keep_system_cc_blur">保留系统控制中心模糊</string>
     <string name="settings_keep_system_cc_blur_desc">开启后保留系统模糊；关闭后背景透明，直接显示壁纸。</string>
     <string name="settings_remove_panel_mix_color">移除面板灰底</string>
     <string name="settings_remove_panel_mix_color_desc">去掉系统面板背景的灰色底，模糊效果仍然保留。</string>
@@ -301,7 +301,13 @@
     <!-- 文字与可读性 -->
     <string name="settings_text_contrast">文字自动反色</string>
     <string name="settings_text_contrast_desc">根据背景明暗自动切换文字黑白；关闭后使用系统默认逻辑。</string>
-    <string name="settings_heads_up_text_follow">横幅文字跟随背景</string>
+    <string name="cat_notif">通知</string>
+    <string name="cat_notif_desc">通知横幅的飞入倾斜与文字颜色</string>
+    <string name="notif_group_motion">通知动效</string>
+    <string name="notif_group_text">通知文字</string>
+    <string name="settings_func_notif">通知</string>
+    <string name="settings_func_notif_desc">通知倾斜 · 横幅文字跟随背景</string>
+    <string name="settings_heads_up_text_follow">通知横幅文字跟随背景</string>
     <string name="settings_heads_up_text_follow_desc">弹出通知的文字颜色：开启遮罩时强制白色，关闭时按背景明暗自动调整。</string>
     <string name="settings_text_force_refresh_interval">文字颜色刷新间隔</string>
     <string name="settings_text_force_refresh_interval_value">%1$d ms</string>
@@ -327,7 +333,11 @@
     <string name="settings_text_force_white_desc">玻璃区域和横幅中的中性色文字始终为白色。可单独开启，不必同时压暗背景。</string>
 
     <!-- 流体云 -->
-    <string name="settings_seedling_card_glass">流体云液态玻璃（默认关）</string>
+    <string name="settings_seedling_takeover">接管流体云</string>
+    <string name="settings_seedling_takeover_desc">由本模块自行绘制小岛与展开卡片，取代系统原有渲染。当前为预留项，开关暂不改变显示效果。</string>
+    <string name="settings_seedling_takeover_glass">接管后使用液态玻璃</string>
+    <string name="settings_seedling_takeover_glass_desc">接管生效后，自绘的小岛与卡片使用液态玻璃材质。当前为预留项。</string>
+    <string name="settings_seedling_card_glass">流体云液态玻璃</string>
     <string name="settings_seedling_card_glass_desc">灵动岛/流体云的液态玻璃总开关，横幅玻璃也受此控制。</string>
     <string name="settings_seedling_capsule_glass">小胶囊（小岛）也玻璃化（默认开）</string>
     <string name="settings_seedling_capsule_glass_desc">小胶囊也显示玻璃效果；关闭后只处理展开的大卡片。</string>
@@ -582,7 +592,7 @@
     <!-- iOS 动态倾斜 / 透视（doc/spec/65，2026-09-16，实验性） -->
     <string name="cat_tilt">倾斜与透视</string>
     <string name="cat_tilt_desc">应用打开/退出时的 3D 倾斜（实验性）</string>
-    <string name="settings_anim_tilt_enabled">开启动态倾斜</string>
+    <string name="settings_anim_tilt_enabled">开启桌面倾斜动画</string>
     <string name="settings_anim_tilt_enabled_desc">实验性功能：应用打开、退出或打断动画时，窗口和图标会有 iOS 风格 3D 倾斜。默认关闭。</string>
     <string name="settings_anim_tilt_strength">倾斜强度</string>
     <string name="settings_anim_tilt_strength_desc" formatted="false">调节前后倾斜角度；0% 为不倾斜，200% 为两倍角度。</string>
@@ -593,7 +603,7 @@
     <string name="settings_anim_tilt_restart_note">实验性功能，修改后需重启桌面生效。</string>
 
     <!-- [doc/spec/112+113] 通知卡动效（弹出/收回动画驱动，手指不参与；默认关，改动立即生效） -->
-    <string name="settings_notif_tilt_enabled">通知卡动效</string>
+    <string name="settings_notif_tilt_enabled">通知倾斜</string>
     <string name="settings_notif_tilt_enabled_desc" formatted="false">通知横幅从摄像头位置飞入，并带倾斜效果；收回时向摄像头方向飞出。只影响玻璃，不影响文字。默认关闭。</string>
     <string name="settings_notif_tilt_strength">通知卡倾斜角度</string>
     <string name="settings_notif_tilt_strength_desc" formatted="false">调整倾斜角度，默认 3°；0° 表示关闭。角度越大透视越明显。</string>
@@ -653,9 +663,20 @@
     <!-- 面板 / 桌面 / 流体云 / 息屏 页 -->
     <string name="settings_panel_group_notification">通知</string>
     <string name="settings_panel_group_cc">控制中心</string>
+    <string name="settings_cc_tile_glass">磁贴液态玻璃</string>
+    <string name="settings_cc_tile_glass_desc">磁贴内层自绘玻璃并与外层叠加；关闭后磁贴回退系统原样。</string>
+    <string name="settings_cc_tile_on_blue">开启态保留系统蓝色</string>
+    <string name="settings_cc_tile_on_blue_desc">磁贴打开时保留系统的蓝色状态底；关闭则只显玻璃。</string>
+    <string name="settings_cc_tile_hide_secondary">隐藏横向大磁贴的小圆底</string>
+    <string name="settings_cc_tile_hide_secondary_desc">2×1 横向磁贴里包图标的小圆底不再绘制，大磁贴玻璃与状态色保留。</string>
+    <string name="settings_cc_progress_fill">滑杆进度亮白填充</string>
+    <string name="settings_cc_progress_fill_desc">亮度与音量滑杆的已走过部分改成亮白磨砂填充。</string>
+    <string name="settings_cc_margin_left">控制中心左边距</string>
+    <string name="settings_cc_margin_right">控制中心右边距</string>
+    <string name="settings_cc_margin_desc">下拉后顶栏两侧的内缩距离，与收起状态栏的边距分开设置；拖到「默认」用系统原值。</string>
     <string name="settings_panel_group_volume">音量面板</string>
     <string name="settings_launcher_group_anim">桌面动画</string>
-    <string name="settings_launcher_group_tilt">动态倾斜</string>
+    <string name="settings_launcher_group_tilt">桌面倾斜动画</string>
     <string name="settings_seedling_group">流体云</string>
     <string name="settings_seedling_glass_row_title">玻璃化开关</string>
     <string name="settings_seedling_glass_row_desc">展开卡片、折叠小胶囊、去原色 —— 在「玻璃」页设置</string>
@@ -782,15 +803,37 @@
     <string name="platform_fuse_restored">已恢复原厂效果</string>
     <!-- 状态栏定制 -->
     <string name="cat_statusbar">状态栏</string>
-    <string name="cat_statusbar_desc">时钟 · 图标显隐 · 双卡 · 排序</string>
+    <string name="cat_statusbar_desc">时钟 · 运营商文字 · 图标显隐 · 双卡 · 排序</string>
     <string name="settings_func_statusbar">状态栏</string>
-    <string name="settings_func_statusbar_desc">时钟 · 图标显隐 · 双卡堆叠 · 图标排序</string>
+    <string name="settings_func_statusbar_desc">时钟 · 运营商文字 · 图标显隐 · 双卡堆叠 · 图标排序</string>
     <string name="settings_func_wallpaper">壁纸服务</string>
     <string name="settings_func_wallpaper_desc">3D 相机壁纸 · 2D 静态 / 视频 / 特效</string>
     <string name="sb_group_control">总控</string>
     <string name="sb_group_icons">图标显隐</string>
     <string name="sb_group_dual">双卡与边距</string>
     <string name="sb_group_clock">时钟与排序</string>
+    <string name="sb_group_carrier">运营商文字</string>
+    <string name="sb_carrier_enable">自定义运营商文字</string>
+    <string name="sb_carrier_enable_desc">把下拉面板里的运营商名换成自己填的文字；留空则保持系统显示。</string>
+    <string name="sb_carrier_hint">输入要显示的文字</string>
+    <string name="sb_group_notif_clock">通知中心时钟</string>
+    <string name="sb_notif_clock_enable">自定义大时钟</string>
+    <string name="sb_notif_clock_enable_desc">调整下拉通知中心里那个大时钟与日期的大小、位置和间距。</string>
+    <string name="sb_notif_clock_gravity">水平位置</string>
+    <string name="sb_notif_date_position">日期位置</string>
+    <string name="sb_notif_clock_gap">时钟与日期间距</string>
+    <string name="sb_notif_clock_scale">时钟大小</string>
+    <string name="sb_notif_date_size">日期大小</string>
+    <string name="sb_notif_hide_settings">隐藏通知设置按钮</string>
+    <string name="sb_notif_gravity_system">跟随系统</string>
+    <string name="sb_notif_gravity_left">靠左</string>
+    <string name="sb_notif_gravity_center">居中</string>
+    <string name="sb_notif_gravity_right">靠右</string>
+    <string name="sb_notif_date_system">跟随系统</string>
+    <string name="sb_notif_date_above">时钟上方</string>
+    <string name="sb_notif_date_below">时钟下方</string>
+    <string name="sb_notif_date_hidden">隐藏日期</string>
+    <string name="sb_notif_date_size_system">跟随系统</string>
     <string name="info_sb_control">状态栏定制的总闸：总开关打开才会生效（需与应用页的总开关同时开）；「一键简化」是懒人包，点一下把通知图标、网络类型、漫游、数据与 Wi-Fi 活动箭头这些零碎图标一次藏掉。</string>
     <string name="info_sb_icons">逐项决定状态栏上每个图标露不露脸：通知图标、网络类型、漫游、移动数据箭头、Wi-Fi 箭头与技术标识、双卡 5G 显示等；还能把网络类型挪到信号右侧，或用「三合一图标」把电量、Wi-Fi、信号合成一个圆环图标。</string>
     <string name="info_sb_dual">双卡信号的排布：打开「双卡信号堆叠」把两张卡的信号上下叠成两行，滑条分别调两行间距、副卡缩放，以及状态栏内容整体的左右边距。</string>
@@ -848,6 +891,16 @@
     <string name="sb_slot_nosim_all">无卡</string>
     <string name="sb_slot_secure_pay">支付</string>
     <string name="settings_preset_hint">三档调整抓屏帧率、采样比例、定时抓屏间隔与画质参数（高光精修、色散）</string>
+    <string name="settings_preset_style_group">玻璃风格</string>
+    <string name="settings_preset_style_hint">点选风格立即生效：整套玻璃材质、遮罩与文字观感一次写入，玻璃化对象默认全开；随后可在材质页微调</string>
+    <string name="settings_home_style_group">一键风格</string>
+    <string name="settings_home_style_hint">点选即整套切换：玻璃材质、画质与抓屏、倾斜透视、玻璃化对象一次到位，长期保存；各项仍可单独微调</string>
+    <string name="settings_preset_style_applied">已套用「%1$s」风格</string>
+    <string name="settings_preset_style_ios_clear_desc">近清晰透镜，边缘细亮线，色彩饱满</string>
+    <string name="settings_preset_style_ios_frost_desc">强磨砂提亮，保留背景色，柔和亮边</string>
+    <string name="settings_preset_style_harmony_soft_desc">轻磨砂柔白亮边，全向光感，通透不糊</string>
+    <string name="settings_preset_style_crystal_desc">强透镜彩虹色散边，高饱和风格化</string>
+    <string name="settings_preset_style_classic_frost_desc">传统毛玻璃，无透镜折射，稳重耐看</string>
     <string name="cat_wallpaper">壁纸服务</string>
     <string name="cat_wallpaper_desc">3D 相机壁纸与 2D 静态 / 视频 / 特效壁纸</string>
 
@@ -1042,7 +1095,7 @@
     <!-- 高级设置 -->
     <string name="settings_aod_advanced_group_tip">说明</string>
     <string name="settings_aod_advanced_group_motion">息屏动效</string>
-    <string name="settings_aod_advanced_group_lock_wp">锁屏壁纸效果</string>
+    <string name="settings_aod_advanced_group_lock_wp">壁纸效果</string>
     <string name="settings_aod_advanced_group_lock_sp">锁屏特殊效果</string>
     <string name="settings_aod_advanced_group_home_transition">桌面过渡</string>
     <string name="settings_aod_advanced_group_home_icon">桌面图标</string>
@@ -1080,9 +1133,9 @@
     <string name="settings_aod_edit_title_aod">息屏编辑</string>
     <string name="settings_aod_edit_row">编辑</string>
     <string name="settings_aod_edit_row_desc_lock">时钟大小与位置、右侧小组件、底部大丸。</string>
-    <string name="settings_aod_edit_row_desc_aod">调整时钟与小组件（只能左右平移）。</string>
+    <string name="settings_aod_edit_row_desc_aod">调整时钟与小组件的位置与大小。</string>
     <string name="settings_aod_edit_hint_lock">长按时钟拖动改位置，拖右下角圆点改大小；点时钟出字体面板；点空白进全屏预览。</string>
-    <string name="settings_aod_edit_hint_aod">长按时钟左右拖动改位置；点时钟出字体面板；点空白进全屏预览。纵向留给防烧屏，不可调。</string>
+    <string name="settings_aod_edit_hint_aod">长按时钟拖动改位置；拖右下角圆点调大小；点时钟出字体面板；点空白进全屏预览。息屏另有轻微防烧屏漂移。</string>
     <string name="settings_aod_edit_stage_hint">长按时钟拖动 · 点空白预览</string>
     <string name="settings_aod_edit_inline_hint">拖动调整位置 · 拖右下圆点缩放 · 点小组件改尺寸</string>
     <string name="settings_aod_edit_widget_picker">添加小组件</string>

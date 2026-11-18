@@ -22,6 +22,7 @@ import com.coloros16.liquidglass.engine.edit.ClockStyle
 import com.coloros16.liquidglass.engine.edit.EditSurface
 import com.coloros16.liquidglass.engine.edit.LockLayoutSettings
 import com.coloros16.liquidglass.engine.edit.PillPlacement
+import com.coloros16.liquidglass.engine.edit.PillType
 import com.coloros16.liquidglass.engine.edit.WidgetCatalog
 import com.coloros16.liquidglass.engine.edit.WidgetDef
 import com.coloros16.liquidglass.engine.edit.WidgetSize
@@ -54,6 +55,7 @@ class AodEditController(
     private var colorChips: List<Pair<Int, TextView>> = emptyList()
     private var infoChips: List<Pair<ClockInfo, TextView>> = emptyList()
     private var styleChips: List<Pair<String, TextView>> = emptyList()
+    private var pillChips: List<Pair<String, TextView>> = emptyList()
     private var weightSeek: SeekBar? = null
     private var weightValue: TextView? = null
     private var glassSwitch: Switch? = null
@@ -74,7 +76,14 @@ class AodEditController(
                 sizeMenu(def)
             }
 
+            override fun onWidgetTapped(typeId: String) {
+                val def = WidgetCatalog.find(typeId) ?: return
+                sizeMenu(def)
+            }
+
             override fun onPillHold(typeId: String) = showPillPanel(typeId)
+
+            override fun onPillTapped(typeId: String) = showPillPanel(typeId)
 
             override fun onEmptyTapped() = openPreview()
 
@@ -200,15 +209,27 @@ class AodEditController(
 
     private fun showPillPanel(typeId: String) {
         val pill = settings.pill(typeId) ?: return
-        val nameRes = if (typeId.contains("flash")) {
-            R.string.settings_aod_edit_pill_flashlight
-        } else {
-            R.string.settings_aod_edit_pill_camera
-        }
+        val nameRes = pillNameRes(typeId)
         val box = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(14), dp(20), dp(6))
         }
+        box.addView(groupLabel(R.string.settings_aod_edit_pill_content))
+        pillChips = chipRow(
+            box,
+            PillType.choices().map { it.id to context.getString(pillNameRes(it.id)) },
+        ) { contentId ->
+            settings.setPillContent(typeId, contentId)
+            canvas?.invalidate()
+            persist()
+            for ((id, chip) in pillChips) {
+                chip.background = chipBackground(id == settings.pillContent(typeId))
+            }
+        }
+        for ((id, chip) in pillChips) {
+            chip.background = chipBackground(id == settings.pillContent(typeId))
+        }
+        box.addView(groupLabel(R.string.settings_aod_edit_pill_size))
         val label = TextView(context).apply {
             text = context.getString(R.string.settings_aod_edit_pill_scale, (pill.scale * 100).toInt())
             setTextColor(context.getColor(R.color.lg_ink_100))
@@ -423,6 +444,12 @@ class AodEditController(
             },
         )
         return chips
+    }
+
+    private fun pillNameRes(typeId: String): Int {
+        val key = PillType.from(typeId)?.nameKey ?: return R.string.settings_aod_edit_pill_flashlight
+        val res = context.resources.getIdentifier(key, "string", context.packageName)
+        return if (res != 0) res else R.string.settings_aod_edit_pill_flashlight
     }
 
     private fun chipBackground(selected: Boolean): GradientDrawable = GradientDrawable().apply {

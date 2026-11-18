@@ -8,13 +8,19 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.os.SystemClock
 import com.coloros16.liquidglass.engine.AodDrift
+import com.coloros16.liquidglass.engine.PhotoStyle
+import com.coloros16.liquidglass.engine.PhotoStyleMotion
 import com.coloros16.liquidglass.engine.SailLensMotion
 import com.coloros16.liquidglass.engine.SceneState
 import com.coloros16.liquidglass.engine.TransitionEdge
+import com.coloros16.liquidglass.hook.HookAssetSource
 import com.coloros16.liquidglass.hook.RuntimeWorkPolicy
 import com.coloros16.liquidglass.log.Lg
 import com.coloros16.liquidglass.ui.aod.AodLensRenderer
 import com.coloros16.liquidglass.ui.aod.AodSceneSpec
+import com.coloros16.liquidglass.ui.aod.PhotoFrameSequence
+import com.coloros16.liquidglass.ui.aod.PhotoSceneRenderer
+import io.github.libxposed.api.XposedInterface
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -46,6 +52,13 @@ object AodWorldLayer {
     private val backdropPaint = Paint(Paint.FILTER_BITMAP_FLAG)
     private val dimPaint = Paint()
 
+    @Volatile private var api: XposedInterface? = null
+    @Volatile private var photoRenderer: PhotoSceneRenderer? = null
+    @Volatile private var sequence: PhotoFrameSequence? = null
+    @Volatile private var sequenceStyleId = -1
+    @Volatile private var photoFrame: Bitmap? = null
+    private val photoValues = PhotoStyleMotion.Values()
+
     private fun logThrottled(key: String, msg: String) {
         val now = SystemClock.uptimeMillis()
         val last = throttleAt[key]
@@ -53,6 +66,11 @@ object AodWorldLayer {
         throttleAt[key] = now
         if (throttleAt.size > 32) throttleAt.clear()
         Lg.i(TAG, "$key: $msg")
+    }
+
+    /** 绑定框架接口：渲染器取模块 assets 与照片帧序列都要它。 */
+    fun bind(api: XposedInterface) {
+        this.api = api
     }
 
     /**
@@ -108,7 +126,8 @@ object AodWorldLayer {
     }
 
     private fun decode(wm: WallpaperManager): Bitmap? {
-        val pfd = runCatching { wm.getWallpaperFile(WallpaperManager.FLAG_SYSTEM) }.getOrNull() ?: return null
+        val pfd = runCatching { wm.getWallpaperFile(WallpaperManager.FLAG_SYSTEM) }.getOrNull()
+        if (pfd == null) return decodeDrawable(wm)
         return try {
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             pfd.dup().use { BitmapFactory.decodeFileDescriptor(it.fileDescriptor, null, bounds) }
@@ -122,9 +141,34 @@ object AodWorldLayer {
                 inPreferredConfig = Bitmap.Config.ARGB_8888
             }
             pfd.dup().use { BitmapFactory.decodeFileDescriptor(it.fileDescriptor, null, opts) }
+                ?: decodeDrawable(wm)
         } finally {
             runCatching { pfd.close() }
         }
+    }
+
+    /**
+     * 无壁纸文件时的兜底：把壁纸 Drawable 画进位图。
+     *
+     * ColorOS 默认壁纸走 ImageWallpaper 且 `wallpaperFile=` 为空，
+     * `getWallpaperFile` 返回 null，只有 Drawable 通道拿得到像素（与预览侧同一取法）。
+     */
+    private fun decodeDrawable(wm: WallpaperManager): Bitmap? {
+        val drawable = runCatching { wm.drawable }.getOrNull() ?: run {
+            logThrottled("world-wallpaper-nodrawable", "壁纸文件与 Drawable 都取不到")
+            return null
+        }
+        val sw = drawable.intrinsicWidth.takeIf { it > 0 } ?: return null
+        val sh = drawable.intrinsicHeight.takeIf { it > 0 } ?: return null
+        val scale = MAX_DECODE_DIM.toFloat() / maxOf(sw, sh)
+        val tw = if (scale < 1f) (sw * scale).toInt().coerceAtLeast(1) else sw
+        val th = if (scale < 1f) (sh * scale).toInt().coerceAtLeast(1) else sh
+        return runCatching {
+            Bitmap.createBitmap(tw, th, Bitmap.Config.ARGB_8888).also { bmp ->
+                drawable.setBounds(0, 0, tw, th)
+                drawable.draw(Canvas(bmp))
+            }
+        }.getOrNull()
     }
 
     /**
@@ -145,6 +189,7 @@ object AodWorldLayer {
         spinDeg: Float,
         allowDynamic: Boolean,
         colorMix: Float,
+        wallpaperScale: Float = 1f,
     ): Boolean {
         if (!spec.lens) return false
         if (width <= 0f || height <= 0f) return false
@@ -152,7 +197,8 @@ object AodWorldLayer {
             logThrottled("world-noctx", "进程 context 为空，世界层不画")
             return false
         }
-        val r = renderer ?: runCatching { AodLensRenderer(ctx) }.getOrNull()?.also { renderer = it }
+        val r = renderer ?: runCatching { AodLensRenderer(assetContext(ctx)) }
+            .getOrNull()?.also { renderer = it }
         if (r == null) {
             logThrottled("world-norenderer", "镜片渲染器创建失败")
             return false
@@ -180,7 +226,7 @@ object AodWorldLayer {
             if (state == SceneState.AOD && allowDynamic) pose.angleDeg = spinDeg
         }
 
-        drawBackdrop(canvas, width, height, bmp)
+        drawBackdrop(canvas, width, height, bmp, wallpaperScale)
         dimPaint.style = Paint.Style.FILL
         dimPaint.shader = null
         dimPaint.color = Color.argb((dim.coerceIn(0f, 1f) * 255f).toInt(), 2, 4, 10)
@@ -210,12 +256,24 @@ object AodWorldLayer {
         return true
     }
 
+    /** 渲染器构造期读 `context.assets` 取装饰层，宿主 context 无本模块素材故换模块 assets。 */
+    private fun assetContext(ctx: android.content.Context): android.content.Context {
+        val a = api ?: return ctx
+        return runCatching { HookAssetSource.wrap(ctx, a) }.getOrDefault(ctx)
+    }
+
     /** 壁纸按 cover 同框铺满，与预览侧同一口径。 */
-    private fun drawBackdrop(canvas: Canvas, width: Float, height: Float, bmp: Bitmap) {
+    private fun drawBackdrop(
+        canvas: Canvas,
+        width: Float,
+        height: Float,
+        bmp: Bitmap,
+        zoom: Float = 1f,
+    ) {
         val bw = bmp.width.toFloat()
         val bh = bmp.height.toFloat()
         if (bw <= 0f || bh <= 0f) return
-        val scale = maxOf(width / bw, height / bh)
+        val scale = maxOf(width / bw, height / bh) * zoom.coerceAtLeast(1e-3f)
         val dw = bw * scale
         val dh = bh * scale
         val left = (width - dw) / 2f
@@ -224,6 +282,126 @@ object AodWorldLayer {
         backdropPaint.color = Color.WHITE
         backdropPaint.alpha = 255
         canvas.drawBitmap(bmp, null, android.graphics.RectF(left, top, left + dw, top + dh), backdropPaint)
+    }
+
+    /**
+     * 画照片类世界：绿幕帧当内容窗口，方形网格从时钟位置展开铺满整屏。
+     *
+     * 帧序列按样式建一次（换样式才重建），解码在序列自己的后台线程；
+     * 取不到帧就沿用上一帧，不阻塞绘制。
+     */
+    fun drawPhoto(
+        canvas: Canvas,
+        width: Float,
+        height: Float,
+        spec: AodSceneSpec,
+        state: SceneState,
+        edge: TransitionEdge?,
+        t: Float,
+        dim: Float,
+        wallpaperScale: Float,
+        accent: Int,
+        tiltDeg: Float,
+        api: XposedInterface?,
+        onFrameReady: () -> Unit,
+    ): Boolean {
+        val photo = spec.photo ?: return false
+        if (width <= 0f || height <= 0f) return false
+        val ctx = Lg.processContext() ?: run {
+            logThrottled("world-noctx", "进程 context 为空，世界层不画")
+            return false
+        }
+        val bmp = wallpaper
+        if (bmp == null) {
+            logThrottled("world-nosource", "壁纸源未就绪，世界层不画 live=$liveWallpaper id=$wallpaperId")
+            return false
+        }
+        val seq = ensureSequence(photo, api, onFrameReady) ?: return false
+        val r = photoRenderer ?: runCatching { PhotoSceneRenderer(assetContext(ctx)) }
+            .getOrNull()?.also { photoRenderer = it }
+        if (r == null) {
+            logThrottled("world-norenderer", "照片渲染器创建失败")
+            return false
+        }
+
+        val aspect = height / width
+        val anchor = spec.clockAnchors[SceneState.AOD]
+        val drift = if (edge == null && state == SceneState.AOD) {
+            AodDrift.offsetY(SystemClock.uptimeMillis())
+        } else {
+            0f
+        }
+        val anchorX = (anchor?.centerX ?: 0.5f) - 0.5f
+        val anchorY = 0.5f - ((anchor?.centerY ?: 0.435f) + drift)
+        if (edge == null) {
+            PhotoStyleMotion.sampleStatic(photo, state, aspect, anchorX, anchorY, photoValues)
+        } else {
+            PhotoStyleMotion.sample(photo, edge, t, aspect, anchorX, anchorY, photoValues)
+        }
+
+        val index = photo.frameIndex(photoValues.v[PhotoStyle.SLOT_VIDEO])
+        seq.frame(index)?.let { photoFrame = it }
+        seq.prefetch(intArrayOf(index + 1, index + 2, index - 1, index - 2))
+        val frame = photoFrame ?: run {
+            logThrottled("world-noframe", "帧未解码 style=${photo.folder} index=$index")
+            return false
+        }
+
+        val blurPx = photoValues.v[PhotoStyle.SLOT_BLUR]
+        runCatching { r.setSource(bmp, aspect, blurPx) }
+        drawBackdrop(canvas, width, height, bmp, wallpaperScale)
+
+        val values = photoValues.v
+        val savedRotation = values[PhotoStyle.SLOT_ROTATION]
+        values[PhotoStyle.SLOT_ROTATION] = savedRotation + tiltDeg
+        runCatching {
+            r.draw(
+                canvas, width, height, values, frame, accent,
+                dim * (1f - photoValues.ratios[SceneState.AOD.ordinal]),
+                blurPx, wallpaperScale,
+            )
+        }.onFailure {
+            logThrottled("world-draw-fail", "照片绘制失败 ${it.javaClass.simpleName}")
+        }
+        values[PhotoStyle.SLOT_ROTATION] = savedRotation
+        logThrottled(
+            "world-photo",
+            "style=${photo.folder} state=$state edge=$edge t=${"%.3f".format(t)} " +
+                "frame=$index scale=${"%.3f".format(values[PhotoStyle.SLOT_SCALE])} " +
+                "alpha=${"%.2f".format(values[PhotoStyle.SLOT_PHOTO_ALPHA])}",
+        )
+        return true
+    }
+
+    /** 帧序列按样式 id 建一次；assets 走模块 APK（宿主 assets 无本模块素材）。 */
+    private fun ensureSequence(
+        photo: PhotoStyle,
+        api: XposedInterface?,
+        onReady: () -> Unit,
+    ): PhotoFrameSequence? {
+        val existing = sequence
+        if (existing != null && sequenceStyleId == photo.id) return existing
+        val a = api ?: run {
+            logThrottled("world-noapi", "框架接口未绑定，帧序列不可建")
+            return null
+        }
+        val assets = HookAssetSource.open(a) ?: run {
+            logThrottled("world-noassets", "模块 assets 不可用，照片类不画")
+            return null
+        }
+        runCatching { existing?.close() }
+        val created = runCatching {
+            PhotoFrameSequence(assets, photo, onReady = onReady)
+        }.getOrNull() ?: run {
+            logThrottled("world-nosequence", "帧序列创建失败 style=${photo.folder}")
+            return null
+        }
+        created.prefetch(intArrayOf(photo.frames, 0, 1, 2, 3))
+        sequence = created
+        sequenceStyleId = photo.id
+        photoFrame = null
+        Lg.i(TAG, "world-sequence style=${photo.folder} frames=${photo.frames}")
+        return created
     }
 
     /** 壁纸变更事件：清 id 让下次按需重解码（不主动解码，避免无消费时做功）。 */
@@ -241,6 +419,12 @@ object AodWorldLayer {
         aspect = 0f
         liveWallpaper = false
         decodeMissLogged = false
+        runCatching { sequence?.close() }
+        sequence = null
+        sequenceStyleId = -1
+        photoFrame = null
+        photoRenderer = null
+        photoValues.reset()
         throttleAt.clear()
         pose.reset()
     }

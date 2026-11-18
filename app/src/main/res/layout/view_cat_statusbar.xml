@@ -117,6 +117,67 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
+        <!-- ===== 运营商文字 ===== -->
+        <LinearLayout style="@style/ShellGroupHead">
+            <TextView style="@style/ShellGroupTitle" android:text="@string/sb_group_carrier" />
+            <View style="@style/ShellGroupRule" />
+        </LinearLayout>
+        <com.google.android.material.card.MaterialCardView style="@style/ShellPlate" android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="14dp">
+            <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:divider="@drawable/bg_seam_line_inset" android:dividerHeight="1dp" android:showDividers="middle">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
+                    <com.coloros16.liquidglass.ui.LgSwitch android:id="@+id/switchSbCarrierText" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/sb_carrier_enable" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100" android:minHeight="0dp" />
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/sb_carrier_enable_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
+                    <EditText android:id="@+id/editSbCarrierText" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:background="@drawable/bg_search" android:hint="@string/sb_carrier_hint" android:imeOptions="actionDone" android:inputType="text" android:maxLines="1" android:paddingHorizontal="14dp" android:paddingVertical="10dp" android:textColor="@color/lg_ink_100" android:textColorHint="@color/lg_ink_400" android:textSize="14sp" />
+                </LinearLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- ===== 通知中心时钟 ===== -->
+        <LinearLayout style="@style/ShellGroupHead">
+            <TextView style="@style/ShellGroupTitle" android:text="@string/sb_group_notif_clock" />
+            <View style="@style/ShellGroupRule" />
+        </LinearLayout>
+        <com.google.android.material.card.MaterialCardView style="@style/ShellPlate" android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="14dp">
+            <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:divider="@drawable/bg_seam_line_inset" android:dividerHeight="1dp" android:showDividers="middle">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
+                    <com.coloros16.liquidglass.ui.LgSwitch android:id="@+id/switchSbNotifClock" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/sb_notif_clock_enable" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100" android:minHeight="0dp" />
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/sb_notif_clock_enable_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:fontFamily="sans-serif-medium" android:text="@string/sb_notif_clock_gravity" android:textColor="@color/lg_ink_100" android:textSize="14sp" />
+                    <Spinner android:id="@+id/spSbNotifClockGravity" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" />
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:fontFamily="sans-serif-medium" android:text="@string/sb_notif_date_position" android:textColor="@color/lg_ink_100" android:textSize="14sp" />
+                    <Spinner android:id="@+id/spSbNotifDatePosition" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" />
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal">
+                        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:fontFamily="sans-serif-medium" android:text="@string/sb_notif_clock_gap" android:textColor="@color/lg_ink_100" android:textSize="14sp" />
+                        <TextView android:id="@+id/valSbNotifClockGap" android:layout_width="wrap_content" android:layout_height="wrap_content" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp" />
+                    </LinearLayout>
+                    <SeekBar android:id="@+id/seekSbNotifClockGap" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:progressDrawable="@drawable/lg_seek_track" android:splitTrack="false" android:thumb="@drawable/lg_seek_thumb" />
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal">
+                        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:fontFamily="sans-serif-medium" android:text="@string/sb_notif_clock_scale" android:textColor="@color/lg_ink_100" android:textSize="14sp" />
+                        <TextView android:id="@+id/valSbNotifClockScale" android:layout_width="wrap_content" android:layout_height="wrap_content" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp" />
+                    </LinearLayout>
+                    <SeekBar android:id="@+id/seekSbNotifClockScale" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:progressDrawable="@drawable/lg_seek_track" android:splitTrack="false" android:thumb="@drawable/lg_seek_thumb" />
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal">
+                        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:fontFamily="sans-serif-medium" android:text="@string/sb_notif_date_size" android:textColor="@color/lg_ink_100" android:textSize="14sp" />
+                        <TextView android:id="@+id/valSbNotifDateSize" android:layout_width="wrap_content" android:layout_height="wrap_content" android:fontFamily="monospace" android:letterSpacing="0.04" android:textColor="@color/lg_blued_ink" android:textSize="13sp" />
+                    </LinearLayout>
+                    <SeekBar android:id="@+id/seekSbNotifDateSize" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:progressDrawable="@drawable/lg_seek_track" android:splitTrack="false" android:thumb="@drawable/lg_seek_thumb" />
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="11dp">
+                    <com.coloros16.liquidglass.ui.LgSwitch android:id="@+id/switchSbNotifHideSettings" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/sb_notif_hide_settings" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100" android:minHeight="0dp" />
+                </LinearLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
         <!-- ===== 时钟与排序 ===== -->
         <LinearLayout style="@style/ShellGroupHead">
             <TextView style="@style/ShellGroupTitle" android:text="@string/sb_group_clock" />

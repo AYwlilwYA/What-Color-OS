@@ -42,6 +42,7 @@ object KeyguardGlassHook {
     private val deoptimizedGlyphs=HashSet<Class<*>>()
     private val pendingLayout=WeakHashMap<View,Boolean>()
     private val panelRetry=WeakHashMap<View,Boolean>()
+    private val liftedCardBases=WeakHashMap<View,ArrayList<Pair<View,Drawable?>>>()
     private val pluginRoots=WeakHashMap<View,Int>()
     private val nativeMounts=WeakHashMap<View,Boolean>()
     private val watchedRoots=WeakHashMap<View,Boolean>()
@@ -262,6 +263,7 @@ object KeyguardGlassHook {
                         var p:View?=child.parent as? View;var inside=false
                         while(p!=null) { if(p===target) { inside=true;break };p=p.parent as? View };inside
                     }.forEach { child -> entries.remove(child)?.let { old ->
+                        RuntimeDiagnostics.mark("keyguard_entry_superseded","插件根替换子挂载：${child.javaClass.simpleName}#${resourceId(child)} by ${target.javaClass.simpleName}")
                         old.restore();child.viewTreeObserver.removeOnPreDrawListener(old);child.removeOnAttachStateChangeListener(old)
                     } }
                     scanTree(target)
@@ -445,13 +447,22 @@ object KeyguardGlassHook {
         if(!view.isShown || view.width<=0 || view.height<=0)return false
         var parent:View?=view;var count=0
         while(parent!=null && count++<32) {
-            if(parent.alpha<=.01f || parent.visibility!=View.VISIBLE)return false
+            if(parent.alpha<=.01f || parent.visibility!=View.VISIBLE) {
+                RuntimeDiagnostics.mark("keyguard_visible_fail",
+                    "${view.javaClass.simpleName}#${resourceId(view)} blocked=${parent.javaClass.simpleName}#${resourceId(parent)} alpha=${parent.alpha} vis=${parent.visibility}")
+                return false
+            }
             parent=parent.parent as? View
         }
-        return view.getGlobalVisibleRect(visibleRect)
+        val ok=view.getGlobalVisibleRect(visibleRect)
+        if(!ok)RuntimeDiagnostics.mark("keyguard_visible_fail",
+            "${view.javaClass.simpleName}#${resourceId(view)} globalVisibleRect=false ${view.width}x${view.height}")
+        return ok
     }
     private fun removeEntry(view:View) {
         entries.remove(view)?.let { entry ->
+            RuntimeDiagnostics.mark("keyguard_entry_removed",
+                "${view.javaClass.simpleName}#${resourceId(view)} attached=${view.isAttachedToWindow} shown=${view.isShown} ${view.width}x${view.height}")
             entry.restore();view.viewTreeObserver.removeOnPreDrawListener(entry);view.removeOnAttachStateChangeListener(entry)
         }
     }
@@ -506,9 +517,14 @@ object KeyguardGlassHook {
             } }
         }
     }
+    /** 稳定可见性：只看挂载与尺寸；visibility/alpha/可见矩形都是转场瞬时态（AOD↔锁屏会整树压零），不作撤挂依据。 */
+    private fun stableVisible(view:View):Boolean {
+        if(!view.isAttachedToWindow || view.width<=0 || view.height<=0)return false
+        return true
+    }
     private fun scanTree(root:View) {
         preferences();if(!enabled)return
-        entries.keys.toList().filter { !it.isAttachedToWindow || !visibleSurface(it) }.forEach(::removeEntry)
+        entries.keys.toList().filter { !stableVisible(it) }.forEach(::removeEntry)
         var count=0
         fun scan(v:View,depth:Int) {
             if(count++>=1600 || depth>24)return
@@ -542,6 +558,31 @@ object KeyguardGlassHook {
         }
         consider(view)
     } }
+    /** 小组件玻璃挂面板背景层，但卡片引擎视图自带不透明/磨砂底盖在玻璃上 → 掀掉子树不透明底让玻璃透出，内容图标保留。可还原。 */
+    private fun liftWidgetCardBase(panel:View) {
+        if(panel !is ViewGroup || panel.childCount==0)return
+        val saved=ArrayList<Pair<View,Drawable?>>()
+        var surface=false
+        fun walk(node:View,depth:Int) {
+            if(depth>6)return
+            if(node is android.view.SurfaceView || node is android.view.TextureView) { surface=true;return }
+            if(node!==panel) {
+                node.background?.let { bg ->
+                    if(bg.opacity!=PixelFormat.TRANSPARENT) { saved.add(node to bg);node.background=null }
+                }
+            }
+            if(node is ViewGroup)for(i in 0 until node.childCount)walk(node.getChildAt(i),depth+1)
+        }
+        walk(panel,0)
+        if(surface) { RuntimeDiagnostics.mark("keyguard_card_surface","小组件含 Surface/Texture 子视图，背景玻璃被独立 surface 遮挡：${panel.javaClass.simpleName}");return }
+        if(saved.isNotEmpty()) {
+            liftedCardBases[panel]=saved
+            RuntimeDiagnostics.mark("keyguard_card_base_lifted","掀掉卡片引擎不透明底 ${saved.size} 层让玻璃透出：${panel.javaClass.simpleName}#${resourceId(panel)}")
+        }
+    }
+    private fun restoreWidgetCardBase(panel:View) {
+        liftedCardBases.remove(panel)?.forEach { (node,bg) -> if(node.background==null)node.background=bg }
+    }
     /** 显式内面板：按类名/资源 id 识别即时卡与空卡视图（不依赖背景是否已设置）。 */
     private fun explicitWidgetPanel(root:android.view.ViewGroup):View? {
         var found:View?=null
@@ -638,7 +679,7 @@ object KeyguardGlassHook {
                 scan(view,0)
             } finally { scanning=false }
         }
-        if(!visibleSurface(view))return
+        if(!stableVisible(view))return
         if(view is SurfaceView)return
         // COS17 buttons are groups containing separate background-circle and icon ImageViews.
         // Putting a Drawable behind the group leaves the opaque native circle on top of it.
@@ -691,6 +732,7 @@ object KeyguardGlassHook {
                 var p:View?=child.parent as? View;var inside=false
                 while(p!=null) { if(p===view) { inside=true;break };p=p.parent as? View };inside
             }.forEach { child -> entries.remove(child)?.let { old ->
+                RuntimeDiagnostics.mark("keyguard_entry_superseded","祖先挂载替换子挂载：${child.javaClass.simpleName}#${resourceId(child)} by ${view.javaClass.simpleName}")
                 old.restore();child.viewTreeObserver.removeOnPreDrawListener(old);child.removeOnAttachStateChangeListener(old)
             } }
         }
@@ -769,11 +811,17 @@ object KeyguardGlassHook {
     }
     /** One owned decode + hardware blur per wallpaper/config generation, never on the main Looper. */
     private fun request(view:View) {
-        val context=application ?: return
+        val context=application ?: run {
+            RuntimeDiagnostics.mark("keyguard_request_gate","skip: application=null");return
+        }
         val dm=view.resources.displayMetrics
         val key="${dm.widthPixels}x${dm.heightPixels}/$blur"
         val refresh=forceRefresh
-        if(!refresh && (source!=null && loadedKey==key || SystemClock.uptimeMillis()<retryAt))return
+        if(!refresh && (source!=null && loadedKey==key || SystemClock.uptimeMillis()<retryAt)) {
+            if(source==null)RuntimeDiagnostics.mark("keyguard_request_gate",
+                "skip: retryAt in ${(retryAt-SystemClock.uptimeMillis()).coerceAtLeast(0)}ms source=null")
+            return
+        }
         if(!loading.compareAndSet(false,true))return
         if(refresh)forceRefresh=false
         val version=epoch;sourceKey=key;val radius=blur
@@ -815,6 +863,9 @@ object KeyguardGlassHook {
                         if(published!=null)wallpaperScaleAtCapture=baseScale
                         if(published==null)retryAt=SystemClock.uptimeMillis()+30_000L
                         RuntimeDiagnostics.update("keyguard_source",if(published!=null)"锁屏壁纸 GPU 材质已就绪" else "尚未取得锁屏壁纸；等待原生壁纸回调，保留原生外观")
+                    } else {
+                        RuntimeDiagnostics.mark("keyguard_publish_stale",
+                            "丢弃过期结果 epoch=$version/$epoch key=${sourceKey==key} published=${published!=null}")
                     }
                     entries.values.toList().forEach { it.onPreDraw();it.view.get()?.invalidate() }
                     if(published!=null && live) { liveRetryCount=0;armLiveFrame() }
@@ -938,11 +989,19 @@ object KeyguardGlassHook {
         }
         fun refresh() {
             val v=view.get() ?: return
-            if(!active(v,role)) { restore();return }
+            if(!active(v,role)) {
+                if(applied)RuntimeDiagnostics.mark("keyguard_entry_inactive",
+                    "${v.javaClass.simpleName}#${resourceId(v)} role=$role shown=${v.isShown} ${v.width}x${v.height}")
+                restore();return
+            }
             if(!v.isHardwareAccelerated || v.width<=0 || v.height<=0) { restore();return }
             request(v)
             armLiveFrame()
-            val image=source ?: run { restore();return }
+            val image=source ?: run {
+                if(applied)RuntimeDiagnostics.mark("keyguard_entry_nosource",
+                    "${v.javaClass.simpleName}#${resourceId(v)} role=$role loading=${loading.get()} retryIn=${(retryAt-SystemClock.uptimeMillis()).coerceAtLeast(0)}ms")
+                restore();return
+            }
             val hash=geometry(v,image)
             if(hash!=previous || !applied) {
                 if(pendingHash!=hash) { pendingHash=hash;KeyguardGlassHook.requestCommit(this) }
@@ -966,6 +1025,7 @@ object KeyguardGlassHook {
                 val dm=v.resources.displayMetrics
                 attachment.apply(image,values,dm.widthPixels,dm.heightPixels,strength,radius,effectiveWallpaperZoom())
                 previous=hash;v.invalidate()
+                if(role==KeyguardGlassPolicy.CARD && KeyguardGlassPolicy.isWidgetPanel(v.javaClass.name,resourceId(v)))liftWidgetCardBase(v)
                 if(role==KeyguardGlassPolicy.TEXT && KeyguardGlyphDraw.owns(v))clearAncestorEffects(v)
                 if(first) {
                     RuntimeDiagnostics.mark("keyguard_material","锁屏角色=${role}已挂载GPU材质；真机外观待确认")
@@ -1013,6 +1073,7 @@ object KeyguardGlassHook {
             pendingHash=0
             if(!applied)return
             previous=0;attachment.restore()
+            if(role==KeyguardGlassPolicy.CARD)restoreWidgetCardBase(v)
             if(clearedAncestors.isNotEmpty()) {
                 for((node,effect) in clearedAncestors) {
                     if(node.parent==null)continue
@@ -1024,6 +1085,7 @@ object KeyguardGlassHook {
         }
         override fun onViewAttachedToWindow(v:View) { }
         override fun onViewDetachedFromWindow(v:View) { guarded {
+            RuntimeDiagnostics.mark("keyguard_entry_detached","${v.javaClass.simpleName}#${resourceId(v)} role=$role")
             restore();v.viewTreeObserver.removeOnPreDrawListener(this);v.removeOnAttachStateChangeListener(this)
             entries.remove(v);nativeEffects.remove(v);asyncEffects.remove(v);nativeMounts.remove(v)
         } }

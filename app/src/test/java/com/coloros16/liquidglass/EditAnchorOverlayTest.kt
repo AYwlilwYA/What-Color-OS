@@ -55,13 +55,22 @@ class EditAnchorOverlayTest {
     }
 
     @Test
-    fun aodKeepsTransitionVertical() {
+    fun aodTakesUserVerticalPosition() {
         val s = LockLayoutSettings.defaults(EditSurface.AOD)
         s.clockX = 0.8f
         s.clockY = 0.9f
         val out = EditAnchorOverlay.apply(base, s)
         assertEquals(0.8f, out.centerX, 0.0001f)
-        assertEquals(base.centerY, out.centerY, 0.0001f)
+        assertEquals(0.9f, out.centerY, 0.0001f)
+    }
+
+    /** 阳性对照：旧口径会把息屏纵向按回 base，与新口径必须不同。 */
+    @Test
+    fun aodVerticalDiffersFromTransitionAnchor() {
+        val s = LockLayoutSettings.defaults(EditSurface.AOD)
+        s.clockY = 0.9f
+        val out = EditAnchorOverlay.apply(base, s)
+        assertTrue("息屏纵向必须真的跟随用户值", kotlin.math.abs(out.centerY - base.centerY) > 0.01f)
     }
 
     @Test

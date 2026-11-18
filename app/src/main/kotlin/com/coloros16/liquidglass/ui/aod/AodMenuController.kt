@@ -10,7 +10,7 @@ import com.coloros16.liquidglass.R
 import com.coloros16.liquidglass.config.Prefs
 import com.coloros16.liquidglass.log.Lg
 
-/** 息屏与锁屏二级菜单：接管开关 + 显示与配置 + 息屏/锁屏/桌面分组入口。 */
+/** 息屏与壁纸二级菜单：接管开关 + 显示/配置/壁纸服务 + 息屏/锁屏/桌面分组入口。 */
 class AodMenuController(
     private val context: Context,
     private val root: View,
@@ -19,6 +19,7 @@ class AodMenuController(
     private val openDisplay: () -> Unit,
     private val openConfigs: () -> Unit,
     private val openPage: (String) -> Unit,
+    private val openWallpaper: () -> Unit = {},
 ) {
 
     private companion object {
@@ -65,6 +66,12 @@ class AodMenuController(
             R.string.settings_aod_configs_row_desc,
             R.drawable.ic_row_palette,
         ) { openConfigs() }
+        bindRow(
+            R.id.aodRowWallpaper,
+            R.string.settings_func_wallpaper,
+            R.string.settings_func_wallpaper_desc,
+            R.drawable.ic_row_image,
+        ) { openWallpaper() }
 
         bindPageRow(
             R.id.aodRowOtherAll,

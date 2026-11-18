@@ -115,10 +115,14 @@ object LiquidGlassShader {
         uniform float uClipBypassMask;  // 1=跳过 glass *= smoothstep(0,-2,sdMask)（遮罩裁切）
         uniform float uClipBypassShape; // 1=跳过 glass *= shapeAlpha（形状裁切）
 
-        // ---------- 点按位置发光（engine/PressGlow 包络驱动） ----------
-        uniform float uPressGlow;       // 发光强度 0~1（0=关=逐像素恒等）
-        uniform float2 uPressCenter;    // 触点中心（元素局部 px，与 coord 同空间）
-        uniform float uPressRadius;     // 光斑半径 px
+        // ---------- 点按位置发光（engine/PressGlow 包络驱动；≤3 并发触点） ----------
+        uniform float uPressGlow;       // 触点 1 强度 0~1（0=关=逐像素恒等）
+        uniform float2 uPressCenter;    // 触点 1 中心（元素局部 px，与 coord 同空间）
+        uniform float uPressRadius;     // 光斑半径 px（三触点共用）
+        uniform float uPressGlow2;      // 触点 2 强度
+        uniform float2 uPressCenter2;   // 触点 2 中心
+        uniform float uPressGlow3;      // 触点 3 强度
+        uniform float2 uPressCenter3;   // 触点 3 中心
 
         // ---------- SDF 圆角矩形 ----------
         // 元素局部 coord → bitmap 像素坐标（uViewport=元素尺寸；不依赖 BitmapShader localMatrix，
@@ -865,9 +869,15 @@ object LiquidGlassShader {
 
             // 点按位置发光：触点高斯光斑，在剩余预乘 alpha 空间加性提亮（不出形状、不过曝）；
             // uPressGlow=0 整段跳过 = 逐像素恒等
-            if (uPressGlow > 0.001) {
-                float pd = distance(coord, uPressCenter) / max(uPressRadius, 1.0);
-                float spot = exp(-pd * pd * 2.4) * uPressGlow;
+            if (uPressGlow > 0.001 || uPressGlow2 > 0.001 || uPressGlow3 > 0.001) {
+                float pr = max(uPressRadius, 1.0);
+                float pd1 = distance(coord, uPressCenter) / pr;
+                float pd2 = distance(coord, uPressCenter2) / pr;
+                float pd3 = distance(coord, uPressCenter3) / pr;
+                float spot = exp(-pd1 * pd1 * 2.4) * uPressGlow +
+                    exp(-pd2 * pd2 * 2.4) * uPressGlow2 +
+                    exp(-pd3 * pd3 * 2.4) * uPressGlow3;
+                spot = min(spot, 1.0);
                 float3 room = max(float3(glass.a) - glass.rgb, float3(0.0));
                 glass.rgb += room * spot * 0.85;
             }
@@ -1282,6 +1292,27 @@ object LiquidGlassShader {
         shader.setFloatUniform("uPressGlow", intensity.coerceIn(0f, 1f))
         shader.setFloatUniform("uPressCenter", centerX, centerY)
         shader.setFloatUniform("uPressRadius", max(radiusPx, 1f))
+        shader.setFloatUniform("uPressGlow2", 0f)
+        shader.setFloatUniform("uPressCenter2", 0f, 0f)
+        shader.setFloatUniform("uPressGlow3", 0f)
+        shader.setFloatUniform("uPressCenter3", 0f, 0f)
+    }
+
+    /** 多触点下发（≤3；缺位补 0 防残留）。 */
+    fun setPressGlowSpots(
+        shader: RuntimeShader,
+        k1: Float, x1: Float, y1: Float,
+        k2: Float, x2: Float, y2: Float,
+        k3: Float, x3: Float, y3: Float,
+        radiusPx: Float,
+    ) {
+        shader.setFloatUniform("uPressGlow", k1.coerceIn(0f, 1f))
+        shader.setFloatUniform("uPressCenter", x1, y1)
+        shader.setFloatUniform("uPressRadius", max(radiusPx, 1f))
+        shader.setFloatUniform("uPressGlow2", k2.coerceIn(0f, 1f))
+        shader.setFloatUniform("uPressCenter2", x2, y2)
+        shader.setFloatUniform("uPressGlow3", k3.coerceIn(0f, 1f))
+        shader.setFloatUniform("uPressCenter3", x3, y3)
     }
 
     /** ARGB int → AGSL straight rgba float4（与 ColorOS BlurParam.toFloatArray 的 /255.0 一致）。 */

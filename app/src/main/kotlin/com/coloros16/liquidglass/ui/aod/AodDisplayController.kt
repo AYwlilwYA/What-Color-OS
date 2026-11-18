@@ -360,6 +360,13 @@ class AodDisplayController(
         preview.aodColorMix = effects.param(com.coloros16.liquidglass.engine.effect.EffectParams.AOD_COLOR_MIX)
         preview.aodRotateSpeed = effects.param(com.coloros16.liquidglass.engine.effect.EffectParams.AOD_ROTATE_SPEED)
         preview.aodPhotoTilt = effects.param(com.coloros16.liquidglass.engine.effect.EffectParams.AOD_PHOTO_TILT)
+        preview.homeIconEffect = effects.homeIconEffect
+        preview.homeIconDurationMs =
+            effects.param(com.coloros16.liquidglass.engine.effect.EffectParams.HOME_ICON_DURATION)
+        preview.homeIconStaggerMs =
+            effects.param(com.coloros16.liquidglass.engine.effect.EffectParams.HOME_ICON_STAGGER)
+        preview.homeIconTravelPercent =
+            effects.param(com.coloros16.liquidglass.engine.effect.EffectParams.HOME_ICON_TRAVEL)
         loadFramePhoto(effects.aodFramePhoto)
         loadStylePhoto(effects.aodPhoto)
         header.text = context.getString(style.nameRes)

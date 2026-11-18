@@ -1,6 +1,7 @@
 package com.coloros16.liquidglass.hook
 
 import android.content.res.AssetManager
+import com.coloros16.liquidglass.engine.AssetRetryPolicy
 import com.coloros16.liquidglass.log.Lg
 import io.github.libxposed.api.XposedInterface
 import java.util.concurrent.ConcurrentHashMap
@@ -20,6 +21,8 @@ object HookAssetSource {
 
     @Volatile private var failed = false
 
+    @Volatile private var lastApi: XposedInterface? = null
+
     private val logged = ConcurrentHashMap<String, Boolean>()
 
     private fun logOnce(key: String, msg: String) {
@@ -27,18 +30,20 @@ object HookAssetSource {
         Lg.i(TAG, "$key: $msg")
     }
 
-    /** 取模块 assets；任一步失败返回 null 并记账，后续调用直接短路。 */
+    /**
+     * 取模块 assets；失败记账后短路，但换了框架接口即重试。
+     *
+     * 热重载会换 XposedInterface 与模块 APK 路径，旧失败账不能连坐新一代。
+     */
     fun open(api: XposedInterface): AssetManager? {
         cached?.let { return it }
-        if (failed) return null
         synchronized(this) {
             cached?.let { return it }
-            if (failed) return null
+            if (!AssetRetryPolicy.shouldAttempt(failed, lastApi === api)) return null
             val manager = build(api)
-            if (manager == null) {
-                failed = true
-                return null
-            }
+            lastApi = api
+            failed = AssetRetryPolicy.failureAfter(manager != null)
+            if (manager == null) return null
             cached = manager
             return manager
         }
@@ -73,11 +78,26 @@ object HookAssetSource {
         }
     }
 
+    /**
+     * 包一层 Context 让 `context.assets` 指向模块 assets。
+     *
+     * 预览侧渲染器（镜片装饰层等）在构造时直接读 `context.assets`，
+     * 宿主 context 只含宿主资源 ⇒ 必须换成模块 assets 才拿得到素材。
+     * 其余方法全部转发宿主 context，行为不变。
+     */
+    fun wrap(host: android.content.Context, api: XposedInterface): android.content.Context {
+        val assets = open(api) ?: return host
+        return object : android.content.ContextWrapper(host) {
+            override fun getAssets(): AssetManager = assets
+        }
+    }
+
     /** 热重载后模块 APK 可能换路径，清缓存重建。 */
     fun reset() {
         synchronized(this) {
             cached = null
             failed = false
+            lastApi = null
             logged.clear()
         }
     }

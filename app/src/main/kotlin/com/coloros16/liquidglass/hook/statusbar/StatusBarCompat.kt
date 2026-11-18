@@ -20,6 +20,15 @@ object StatusBarCompat {
     const val FQCN_MOBILE_VIEW = "com.android.systemui.statusbar.pipeline.mobile.ui.view.ModernStatusBarMobileView"
     const val FQCN_BATTERY_VIEW = "com.oplus.systemui.statusbar.pipeline.battery.ui.view.StatBatteryMeterView"
 
+    /** 下拉面板运营商文本控件：新世代继承 AnimateChangeTextView，旧世代直接继承 AppCompatTextView。 */
+    const val FQCN_CARRIER_ANIM = "com.oplus.systemui.qs.widget.AnimateChangeTextView"
+    const val FQCN_CARRIER_SECOND = "com.oplus.systemui.qs.widget.OplusSecondCarrierText"
+    const val FQCN_CARRIER_LEGACY = "com.oplus.systemui.qs.widget.OplusQSCarrierText"
+    const val FQCN_CARRIER_CONTROLLER = "com.oplus.systemui.qs.OplusQSCarrierTextController"
+
+    /** 下拉大时钟与日期（分离式通知中心面板）。 */
+    const val FQCN_QS_SIMPLE_HEADER = "com.oplus.systemui.separate.OplusQSSimpleHeader"
+
     /** 门禁用到的资源 id 名（缺一个只降级对应功能）。 */
     val ID_NAMES = listOf(
         "status_bar_contents",
@@ -31,6 +40,12 @@ object StatusBarCompat {
         "quick_qs_status_icons",
         "icons",
         "batteryRemainingIcon",
+        "qs_clock_container",
+        "qs_footer_clock",
+        "oplus_date",
+        "settings_button_container",
+        "qs_carrier_text",
+        "header",
         "statusIcons",
         "notification_icon_area",
         "clock",
@@ -136,7 +151,7 @@ object StatusBarCompat {
      * 该路径只用已缓存 id 与纯查表定档，版本留未知由后续主线程补。
      */
     fun gate(classLoader: ClassLoader, allowProbe: Boolean): Gates {
-        val resolved = hostLoader(classLoader)
+        val resolved = if (allowProbe) hostLoader(classLoader) else (cachedHostLoader ?: classLoader)
         Lg.i(
             TAG,
             "sb-gate paramLoader=${classLoader.javaClass.name} resolvedLoader=${resolved.javaClass.name} " +
@@ -168,11 +183,14 @@ object StatusBarCompat {
             version = version,
             structure = structure,
         )
-        VersionPool.notePatch(
-            PKG_SYSTEMUI,
-            PATCH_STATUS_BAR_LAYOUT,
-            if (idsOk == 0) "unknown" else "rev${structure.profile.layoutRev}",
-        )
+        // 零探测路径 idsOk 恒可能为 0（缓存未热），不写补丁层以免把 unknown 当真值污染
+        if (allowProbe) {
+            VersionPool.notePatch(
+                PKG_SYSTEMUI,
+                PATCH_STATUS_BAR_LAYOUT,
+                if (idsOk == 0) "unknown" else "rev${structure.profile.layoutRev}",
+            )
+        }
         Lg.i(TAG, "sb-gate ${gates.summary()}")
         return gates
     }
@@ -198,6 +216,9 @@ object StatusBarCompat {
     /** 宿主 loader 缓存：避免每次探测都走三级反射取 context（热重载线程内会撞类初始化锁）。 */
     @Volatile
     private var cachedHostLoader: ClassLoader? = null
+
+    /** 零反射取 loader：有缓存用缓存，否则用框架入参（安装关键路径专用）。 */
+    fun cachedLoaderOr(fallback: ClassLoader): ClassLoader = cachedHostLoader ?: fallback
 
     private val classPresent = ConcurrentHashMap<String, Boolean>()
 

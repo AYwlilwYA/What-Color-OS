@@ -13,9 +13,12 @@ import com.coloros16.liquidglass.engine.EffectOverlayPolicy
 import com.coloros16.liquidglass.engine.FeatherPainter
 import com.coloros16.liquidglass.engine.MaskGeometry
 import com.coloros16.liquidglass.engine.MaskShape
+import com.coloros16.liquidglass.engine.SceneState
 import com.coloros16.liquidglass.engine.SystemSceneMotion
+import com.coloros16.liquidglass.engine.TransitionEdge
 import com.coloros16.liquidglass.engine.TransitionParams
 import com.coloros16.liquidglass.log.Lg
+import com.coloros16.liquidglass.ui.aod.AodSceneSpec
 
 /**
  * 三态转场自绘层：只读引擎输出画遮罩与明暗，不重绘系统内容。
@@ -35,6 +38,16 @@ class AodTransitionLayer(context: Context) : View(context) {
     private var effectAlpha = 0f
     private val effectPaint = Paint(Paint.FILTER_BITMAP_FLAG)
     private var frameRevealLoggedAt = 0L
+
+    private var worldSpec: AodSceneSpec? = null
+    private var worldState = SceneState.AOD
+    private var worldEdge: TransitionEdge? = null
+    private var worldT = 0f
+    private var worldAodAlpha = 0f
+    private var worldSpinDeg = 0f
+    private var worldAllowDynamic = false
+    private var worldColorMix = 0f
+    private var worldDrawn = false
 
     init {
         isClickable = false
@@ -62,12 +75,42 @@ class AodTransitionLayer(context: Context) : View(context) {
         invalidate()
     }
 
+    /**
+     * 世界层输入：样式契约 + 当前态/边/进度 + 息屏层透明度与自转角。
+     *
+     * spec 为 null 表示该样式无世界层（非 SCENE 类），本层只画遮罩与压暗。
+     */
+    fun bindWorld(
+        spec: AodSceneSpec?,
+        state: SceneState,
+        edge: TransitionEdge?,
+        t: Float,
+        aodAlpha: Float,
+        spinDeg: Float,
+        allowDynamic: Boolean,
+        colorMix: Float,
+    ) {
+        worldSpec = spec
+        worldState = state
+        worldEdge = edge
+        worldT = t
+        worldAodAlpha = aodAlpha
+        worldSpinDeg = spinDeg
+        worldAllowDynamic = allowDynamic
+        worldColorMix = colorMix
+        invalidate()
+    }
+
     fun release() {
         params = null
         active = false
         dim = 0f
         effectId = null
         effectAlpha = 0f
+        worldSpec = null
+        worldEdge = null
+        worldAodAlpha = 0f
+        worldDrawn = false
         invalidate()
     }
 
@@ -75,10 +118,11 @@ class AodTransitionLayer(context: Context) : View(context) {
         val w = width.toFloat()
         val h = height.toFloat()
         if (w <= 0f || h <= 0f) return
+        val world = drawWorld(canvas, w, h)
         drawEffect(canvas, w, h)
         val p = params
         if (!active || p == null) {
-            drawDim(canvas, w, h)
+            if (!world) drawDim(canvas, w, h)
             return
         }
 
@@ -87,7 +131,25 @@ class AodTransitionLayer(context: Context) : View(context) {
         } else if (p.maskEnabled && MaskGeometry.drawable(p.maskRadius)) {
             drawMaskVeil(canvas, w, h, p)
         }
-        drawDim(canvas, w, h)
+        if (!world) drawDim(canvas, w, h)
+    }
+
+    /**
+     * 世界层优先：画成功时它自带压暗，本层不再叠一层（否则双倍压暗）。
+     *
+     * 只有镜片类有实现，其余样式返回 false 走原有遮罩+压暗路径。
+     */
+    private fun drawWorld(canvas: Canvas, w: Float, h: Float): Boolean {
+        val spec = worldSpec ?: return false
+        val drawn = AodWorldLayer.drawLens(
+            canvas, w, h, spec, worldState, worldEdge, worldT, dim,
+            worldAodAlpha, worldSpinDeg, worldAllowDynamic, worldColorMix,
+        )
+        if (drawn != worldDrawn) {
+            worldDrawn = drawn
+            Lg.i(TAG, "world branch drawn=$drawn lens=${spec.lens} state=$worldState")
+        }
+        return drawn
     }
 
     /** 色键帧承担揭开：本层不画几何遮罩，节流一条诊断说明形状来自素材。 */

@@ -50,6 +50,21 @@ object StatusBarHook {
     @Volatile
     private var lastEnabled = false
 
+    /** 完整门禁探测排到主线程（避开注入/热重载回调线程的类初始化锁）。 */
+    private fun scheduleFullGate(cl: ClassLoader) {
+        try {
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                try {
+                    StatusBarCompat.gate(cl, allowProbe = true)
+                } catch (t: Throwable) {
+                    Lg.i(TAG, "sb-gate-deferred 失败 ${t.javaClass.simpleName}")
+                }
+            }
+        } catch (t: Throwable) {
+            Lg.i(TAG, "sb-gate-deferred 排程失败 ${t.javaClass.simpleName}")
+        }
+    }
+
     /** 装载：各 hook 独立 try，一个失败其它照装。 */
     fun install(api: XposedInterface, classLoader: ClassLoader) {
         if (installed) {
@@ -58,7 +73,10 @@ object StatusBarHook {
         }
         this.api = api
         val cl = StatusBarCompat.hostLoader(classLoader)
-        val gates = StatusBarCompat.gate(cl)
+        // 热重载回调线程内取 PM / 触发类初始化会 futex 卡死整条安装链：
+        // 此处只做零探测定档，完整 gate（读版本+解析 id）挪到主线程首帧后补。
+        val gates = StatusBarCompat.gate(cl, allowProbe = false)
+        scheduleFullGate(cl)
         val profile = gates.structure.profile
         var hook = 0
         if (profile.hasFragmentEntry) {

@@ -13,18 +13,32 @@ import java.util.concurrent.atomic.AtomicReference
 
 /**
  * SF 玻璃通道客户端：渲染模式读取、几何直调下发（[SfBlurCall] 进程内直调模糊通道）。
- * 互斥语义：模式 sf = SF 独占——绘制点认领后本帧交 SF、四腿全关；认领/下发失败 =
- * 无模块玻璃（系统原厂绘制）+ 节流日志，绝不回退四腿。模式 app = 现役四腿，本通道零参与。
+ * 互斥语义：模式 sf **且通道可用** = SF 独占——绘制点认领后本帧交 SF、四腿全关；
+ * 下发失败 = 无模块玻璃（系统原厂绘制）+ 节流日志。通道不可用（系统模块未装 / 未生效）
+ * = 降级回现役四腿，不让用户只剩透明背板。模式 app = 现役四腿，本通道零参与。
  */
 object SfGlassChannel {
 
     private const val TAG = "SfGlassChannel"
+
+    /** 日志落主标签：模块标签过滤的抓取（只收 LiquidGlass）也能拿到通道诊断。 */
+    private const val LOG_TAG = "LiquidGlass"
     private const val MODE_TTL_MS = 500L
     private const val OFFER_MIN_INTERVAL_MS = 250L
     private const val SESSION_IDLE_OFF_MS = 5000L
     private const val WATCHDOG_TICK_MS = 2000L
     private const val SU_TIMEOUT_MS = 8000L
     private const val CONF_PATH = "/system_ext/lib64/oplusex/lg_glass.conf"
+
+    /** 系统模块目录与开机背书文件（判通道是否真的装了并生效）。 */
+    private const val MOD_DIR = "/data/adb/modules/lg_sf_channel"
+    private const val STATE_FILE = "$MOD_DIR/state"
+    private const val MODULE_PROP = "$MOD_DIR/module.prop"
+    private const val LOADER_IN_TREE = "$MOD_DIR/system/system_ext/lib64/oplusex/libdisplayppex.so"
+
+    /** 通道可用性复检间隔（只由渲染调用触发，无绘制即无探测，不起定时器）。 */
+    private const val READY_OK_TTL_MS = 60_000L
+    private const val READY_FAIL_TTL_MS = 15_000L
 
     /** su 执行结果：ok=exit 0，out=合并输出，err=失败原因（ok 时 null）。 */
     internal data class SuResult(val ok: Boolean, val out: String, val err: String?) {
@@ -48,6 +62,17 @@ object SfGlassChannel {
 
     @Volatile
     private var modeCacheAtMs = 0L
+
+    @Volatile
+    private var readyCache = false
+
+    @Volatile
+    private var readyAtMs = 0L
+
+    @Volatile
+    private var readyReason = "unprobed"
+
+    private val readyProbing = AtomicBoolean(false)
 
     @Volatile
     private var lastOfferKey = ""
@@ -95,24 +120,109 @@ object SfGlassChannel {
         if (api == null) return Prefs.DEFAULT_RENDER_MODE
         apiRef = api
         val now = SystemClock.uptimeMillis()
-        if (now - modeCacheAtMs < MODE_TTL_MS) return modeCache
+        if (now - modeCacheAtMs < MODE_TTL_MS) return effectiveMode(modeCache)
         modeCacheAtMs = now
         val v = try {
             Prefs.read(api).getString(Prefs.KEY_RENDER_MODE, Prefs.DEFAULT_RENDER_MODE)
                 ?: Prefs.DEFAULT_RENDER_MODE
         } catch (t: Throwable) {
-            Lg.w(TAG, "render_mode read failed, default ${Prefs.DEFAULT_RENDER_MODE}", t)
+            Lg.w(LOG_TAG, "SfGlassChannel render_mode read failed, default ${Prefs.DEFAULT_RENDER_MODE}", t)
             Prefs.DEFAULT_RENDER_MODE
         }
         if (v != modeCache) {
             val prev = modeCache
             modeCache = v
-            Lg.i(TAG, "lg-sf-mode mode=$v prev=$prev")
+            Lg.i(LOG_TAG, "SfGlassChannel lg-sf-mode mode=$v prev=$prev")
             if (v == Prefs.RENDER_MODE_APP && prev == Prefs.RENDER_MODE_SF) {
                 sessionGlassOff("mode-switch-app")
             }
         }
-        return v
+        return effectiveMode(v)
+    }
+
+    /** sf 档但系统模块不在位/未生效 → 按 app 处理（四腿照常），不留透明背板。 */
+    private fun effectiveMode(raw: String): String {
+        if (raw != Prefs.RENDER_MODE_SF) return raw
+        if (channelReady()) return raw
+        throttled(
+            "lg-sf-fallback",
+            "sf 档不可用（$readyReason）→ 按应用级渲染；装好系统模块并重启后自动生效",
+        )
+        return Prefs.RENDER_MODE_APP
+    }
+
+    // ---------- 通道可用性（系统模块在位 + 开机背书） ----------
+
+    /**
+     * SF 通道是否真的可用：热路径只读缓存，过期时投一次异步探测（不阻塞绘制、不轮询）。
+     * 首次未探完一律 false —— 宁可先走四腿，也不让画面空着。
+     */
+    fun channelReady(): Boolean {
+        val now = SystemClock.uptimeMillis()
+        if (readyAtMs != 0L) {
+            val ttl = if (readyCache) READY_OK_TTL_MS else READY_FAIL_TTL_MS
+            if (now - readyAtMs < ttl) return readyCache
+        }
+        if (readyProbing.compareAndSet(false, true)) {
+            io.execute {
+                try {
+                    val r = probeChannelSync()
+                    val changed = r.first != readyCache || r.second != readyReason
+                    readyCache = r.first
+                    readyReason = r.second
+                    readyAtMs = SystemClock.uptimeMillis()
+                    if (changed) Lg.i(LOG_TAG, "SfGlassChannel lg-sf-ready ready=${r.first} reason=${r.second}")
+                    if (!r.first) sessionGlassOff("channel-unavailable")
+                } catch (t: Throwable) {
+                    readyCache = false
+                    readyReason = "probe error: ${t.javaClass.simpleName}"
+                    readyAtMs = SystemClock.uptimeMillis()
+                    Lg.w(LOG_TAG, "SfGlassChannel lg-sf-ready probe failed", t)
+                } finally {
+                    readyProbing.set(false)
+                }
+            }
+        }
+        return readyCache
+    }
+
+    /** 当前不可用原因（供设置页如实回显）。 */
+    fun channelReason(): String = readyReason
+
+    /**
+     * 同步探测（阻塞，只许后台线程调）：模块树在位 + 未被禁用 + 装载件在树内 + state 非 disabled。
+     * state 缺失/`booting` 视为可用（装机后未重启或稳定窗未走完，不该把玻璃关掉）。
+     */
+    internal fun probeChannelSync(): Pair<Boolean, String> {
+        val script = """
+            if [ ! -f "$MODULE_PROP" ]; then echo NO_MODULE; exit 0; fi
+            if [ -f "$MOD_DIR/disable" ]; then echo DISABLED; exit 0; fi
+            if [ -f "$MOD_DIR/remove" ]; then echo REMOVED; exit 0; fi
+            if [ ! -f "$LOADER_IN_TREE" ]; then echo NO_LOADER; exit 0; fi
+            if [ -f "$STATE_FILE" ]; then
+              read -r s rest < "$STATE_FILE" 2>/dev/null
+              echo "STATE=${'$'}{s:-empty}"
+            else
+              echo STATE=absent
+            fi
+        """.trimIndent()
+        val r = runSu(script)
+        if (!r.ok) return false to "root 不可用：${r.err ?: r.summary}"
+        return classifyProbe(r.out)
+    }
+
+    /** 探测输出判定（与 shell 脚本一一对应，单测覆盖）。 */
+    internal fun classifyProbe(out: String): Pair<Boolean, String> {
+        val t = out.trim().lineSequence().map { it.trim() }.lastOrNull { it.isNotEmpty() }.orEmpty()
+        return when {
+            t == "NO_MODULE" -> false to "系统模块未安装（$MOD_DIR 不存在）"
+            t == "DISABLED" -> false to "系统模块已被禁用"
+            t == "REMOVED" -> false to "系统模块待移除"
+            t == "NO_LOADER" -> false to "模块树内缺装载件"
+            t == "STATE=disabled" -> false to "系统模块已熔断（连续两轮 SF 崩溃）"
+            t.startsWith("STATE=") -> true to t.substringAfter('=')
+            else -> false to "探测输出异常：${t.ifBlank { "(无输出)" }}"
+        }
     }
 
     // ---------- 会话撤层（关玻璃/省电/热重载/模式翻转共用） ----------
@@ -132,7 +242,7 @@ object SfGlassChannel {
             val err = retract()
             if (err == null) {
                 writeConf(0)
-                Lg.i(TAG, "lg-sf-session-off reason=$reason")
+                Lg.i(LOG_TAG, "SfGlassChannel lg-sf-session-off reason=$reason")
             } else {
                 throttled("lg-sf-session-off-fail", "撤层失败 reason=$reason: $err")
             }
@@ -155,13 +265,13 @@ object SfGlassChannel {
                 val err = retract()
                 if (err == null) writeConf(0)
                 Lg.i(
-                    TAG,
-                    "lg-sf-idle-off 无认领满 ${SESSION_IDLE_OFF_MS}ms 自动撤层" +
+                    LOG_TAG,
+                    "SfGlassChannel lg-sf-idle-off 无认领满 ${SESSION_IDLE_OFF_MS}ms 自动撤层" +
                         (if (err == null) "" else "（失败:$err）"),
                 )
             }
         } catch (t: Throwable) {
-            Lg.w(TAG, "idle off tick failed", t)
+            Lg.w(LOG_TAG, "SfGlassChannel idle off tick failed", t)
         }
     }
 
@@ -418,7 +528,7 @@ object SfGlassChannel {
         if (last != null && now - last < intervalMs) return
         throttleAt[key] = now
         if (throttleAt.size > 32) throttleAt.clear()
-        // key 回显进文本，按 key grep 可命中
-        Lg.i(TAG, "[$key] $msg")
+        // key 回显进文本，按 key grep 可命中；tag 并入主标签，模块标签过滤抓取也能收到
+        Lg.i(LOG_TAG, "$TAG [$key] $msg")
     }
 }

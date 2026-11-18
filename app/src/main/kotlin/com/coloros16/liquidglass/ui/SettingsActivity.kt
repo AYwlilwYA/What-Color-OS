@@ -5448,7 +5448,7 @@ class SettingsActivity : AppCompatActivity() {
         private const val QQ_GROUP_NUMBER = "1102985644"
         private const val QQ_PACKAGE = "com.tencent.mobileqq"
         private const val SPONSORS_URL =
-            "https://gitlab.com/AYwlilwYA/what-color-os-assets/-/raw/main/sponsors.txt"
+            "https://raw.githubusercontent.com/AYwlilwYA/what-color-os-assets/main/sponsors.txt"
         private const val AUTHOR_NAME = "AYwlilwYA"
     }
 }

@@ -7,7 +7,7 @@ import org.junit.Test
 
 class SponsorCloudTest {
 
-    private val listUrl = "https://gitlab.com/g/p/-/raw/main/sponsors.txt"
+    private val listUrl = "https://raw.githubusercontent.com/o/r/main/sponsors.txt"
 
     @Test
     fun parsesTwoAndThreeFieldRows() {
@@ -17,13 +17,13 @@ class SponsorCloudTest {
             K|K***
             口|口口|sponsor_kokoro.png
 
-            A|A***|https://gitlab.com/g/p/-/raw/main/a.png
+            A|A***|https://raw.githubusercontent.com/o/r/main/a.png
             """.trimIndent(),
         )
         assertEquals(3, rows.size)
         assertEquals(SponsorCloud.Row("K", "K***", ""), rows[0])
         assertEquals(SponsorCloud.Row("口", "口口", "sponsor_kokoro.png"), rows[1])
-        assertEquals("https://gitlab.com/g/p/-/raw/main/a.png", rows[2].avatar)
+        assertEquals("https://raw.githubusercontent.com/o/r/main/a.png", rows[2].avatar)
     }
 
     @Test
@@ -55,8 +55,8 @@ class SponsorCloudTest {
         assertEquals("sponsor_kokoro.png", SponsorCloud.safeAvatar("sponsor_kokoro.png"))
         assertEquals("a-b_2.webp", SponsorCloud.safeAvatar("a-b_2.webp"))
         assertEquals(
-            "https://gitlab.com/g/p/-/raw/main/a.png",
-            SponsorCloud.safeAvatar("https://gitlab.com/g/p/-/raw/main/a.png"),
+            "https://raw.githubusercontent.com/o/r/main/a.png",
+            SponsorCloud.safeAvatar("https://raw.githubusercontent.com/o/r/main/a.png"),
         )
     }
 
@@ -70,7 +70,7 @@ class SponsorCloudTest {
     @Test
     fun relativeAvatarResolvesAgainstListDirectory() {
         assertEquals(
-            "https://gitlab.com/g/p/-/raw/main/sponsor_kokoro.png",
+            "https://raw.githubusercontent.com/o/r/main/sponsor_kokoro.png",
             SponsorCloud.resolveAvatarUrl(listUrl, "sponsor_kokoro.png"),
         )
     }
@@ -84,7 +84,7 @@ class SponsorCloudTest {
     @Test
     fun resourceNameResolvesToSiblingTooAndCallerSkipsNetwork() {
         assertEquals(
-            "https://gitlab.com/g/p/-/raw/main/sponsor_kokoro",
+            "https://raw.githubusercontent.com/o/r/main/sponsor_kokoro",
             SponsorCloud.resolveAvatarUrl(listUrl, "sponsor_kokoro"),
         )
         assertTrue(!SponsorCloud.safeAvatar("sponsor_kokoro").contains('.'))

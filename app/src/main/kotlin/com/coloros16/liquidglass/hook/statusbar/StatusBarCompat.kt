@@ -87,10 +87,22 @@ object StatusBarCompat {
     fun structure(): StatusBarDecision {
         decision?.let { return it }
         val ver = VersionPool.readVersion(PKG_SYSTEMUI)
+        cachedVersion = ver
         val d = VersionPool.statusBar(PKG_SYSTEMUI, ver)
         decision = d
         return d
     }
+
+    /** 零探测定档：只用已缓存决策，否则按未知版本纯查表（不取 context / 不读 PM）。 */
+    fun structureCached(): StatusBarDecision {
+        decision?.let { return it }
+        val d = VersionPool.statusBar(PKG_SYSTEMUI, cachedVersion)
+        decision = d
+        return d
+    }
+
+    @Volatile
+    private var cachedVersion: Long = -1L
 
     /** 门禁结果。 */
     data class Gates(
@@ -116,26 +128,34 @@ object StatusBarCompat {
      * 只读探测：逐项打 `sb-gate`（永不改宿主行为）。
      * 侧写运行时真值到版本池补丁层（差异/缺失时功能自行降级）。
      */
-    fun gate(classLoader: ClassLoader): Gates {
+    fun gate(classLoader: ClassLoader): Gates = gate(classLoader, allowProbe = true)
+
+    /**
+     * allowProbe=false：跳过 versionCode 读取（PM binder + 三级反射取 context）。
+     * 热重载回调线程内做类加载/取 PM 会撞类初始化锁（实测 futex_wait 卡死整条安装链），
+     * 该路径只用已缓存 id 与纯查表定档，版本留未知由后续主线程补。
+     */
+    fun gate(classLoader: ClassLoader, allowProbe: Boolean): Gates {
         val resolved = hostLoader(classLoader)
         Lg.i(
             TAG,
             "sb-gate paramLoader=${classLoader.javaClass.name} resolvedLoader=${resolved.javaClass.name} " +
-                "ctxLoader=${Lg.processContext()?.classLoader?.javaClass?.name} same=${resolved === classLoader}",
+                "probe=$allowProbe same=${resolved === classLoader}",
         )
-        val fragment = present(classLoader, FQCN_FRAGMENT, "class.fragment")
-        val container = present(classLoader, FQCN_ICON_CONTAINER, "class.container")
-        val controller = present(classLoader, FQCN_ICON_CONTROLLER, "class.controller")
-        val dark = present(classLoader, FQCN_DARK_DISPATCHER, "class.darkDispatcher")
-        val mobileView = present(classLoader, FQCN_MOBILE_VIEW, "class.mobileView")
-        val batteryView = present(classLoader, FQCN_BATTERY_VIEW, "class.batteryView")
+        val fragment = present(classLoader, FQCN_FRAGMENT, "class.fragment", allowProbe)
+        val container = present(classLoader, FQCN_ICON_CONTAINER, "class.container", allowProbe)
+        val controller = present(classLoader, FQCN_ICON_CONTROLLER, "class.controller", allowProbe)
+        val dark = present(classLoader, FQCN_DARK_DISPATCHER, "class.darkDispatcher", allowProbe)
+        val mobileView = present(classLoader, FQCN_MOBILE_VIEW, "class.mobileView", allowProbe)
+        val batteryView = present(classLoader, FQCN_BATTERY_VIEW, "class.batteryView", allowProbe)
         var idsOk = 0
         ID_NAMES.forEach { name ->
-            if (id(name) != 0) idsOk++
+            val v = if (allowProbe) id(name) else (ids[name] ?: 0)
+            if (v != 0) idsOk++
         }
         val idsMiss = ID_NAMES.size - idsOk
-        val structure = structure()
-        val version = VersionPool.readVersion(PKG_SYSTEMUI)
+        val structure = if (allowProbe) structure() else structureCached()
+        val version = if (allowProbe) VersionPool.readVersion(PKG_SYSTEMUI) else cachedVersion
         val gates = Gates(
             fragment = fragment,
             container = container,
@@ -164,14 +184,30 @@ object StatusBarCompat {
      * 宿主可用的类加载器：优先进程 Application 的 classLoader，取不到才回退框架入参。
      * 框架入参在部分注入模式下无法加载 SystemUI 主 dex（实测同类同 dex 时玻璃线走 context 成功、纯入参全 CNFE）。
      */
-    fun hostLoader(fallback: ClassLoader): ClassLoader =
-        try {
+    fun hostLoader(fallback: ClassLoader): ClassLoader {
+        cachedHostLoader?.let { return it }
+        val l = try {
             Lg.processContext()?.classLoader ?: fallback
         } catch (_: Throwable) {
             fallback
         }
+        cachedHostLoader = l
+        return l
+    }
 
-    private fun present(classLoader: ClassLoader, fqcn: String, label: String): Boolean {
+    /** 宿主 loader 缓存：避免每次探测都走三级反射取 context（热重载线程内会撞类初始化锁）。 */
+    @Volatile
+    private var cachedHostLoader: ClassLoader? = null
+
+    private val classPresent = ConcurrentHashMap<String, Boolean>()
+
+    /** allowProbe=false 时只读缓存（未探测过按 true 乐观放行，hook 自身有 try 兜底）。 */
+    private fun present(classLoader: ClassLoader, fqcn: String, label: String, allowProbe: Boolean): Boolean {
+        if (!allowProbe) return classPresent[fqcn] ?: true
+        classPresent[fqcn]?.let {
+            Lg.i(TAG, "sb-gate $label ${if (it) "ok" else "miss"} $fqcn (cached)")
+            return it
+        }
         val loader = hostLoader(classLoader)
         val ok = try {
             Class.forName(fqcn, false, loader)
@@ -179,6 +215,7 @@ object StatusBarCompat {
         } catch (_: Throwable) {
             false
         }
+        classPresent[fqcn] = ok
         Lg.i(TAG, "sb-gate $label ${if (ok) "ok" else "miss"} $fqcn")
         return ok
     }

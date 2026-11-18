@@ -18,6 +18,7 @@ import com.coloros16.liquidglass.engine.ClockStateMachine
 import com.coloros16.liquidglass.engine.ContentLayerMapper
 import com.coloros16.liquidglass.engine.KeyedTtlCache
 import com.coloros16.liquidglass.engine.LockOnlyLayerPolicy
+import com.coloros16.liquidglass.engine.SailLensMotion
 import com.coloros16.liquidglass.engine.SceneState
 import com.coloros16.liquidglass.engine.SystemSceneMotion
 import com.coloros16.liquidglass.engine.TransitionEdge
@@ -27,6 +28,8 @@ import com.coloros16.liquidglass.engine.edit.LockLayoutSettings
 import com.coloros16.liquidglass.engine.edit.WidgetCatalog
 import com.coloros16.liquidglass.engine.effect.AodDisplayGate
 import com.coloros16.liquidglass.engine.effect.AodDisplayMode
+import com.coloros16.liquidglass.engine.effect.AodMotion
+import com.coloros16.liquidglass.engine.effect.AodMotionState
 import com.coloros16.liquidglass.engine.effect.EffectParams
 import com.coloros16.liquidglass.engine.effect.EffectResolver
 import com.coloros16.liquidglass.engine.from
@@ -34,6 +37,7 @@ import com.coloros16.liquidglass.engine.to
 import com.coloros16.liquidglass.hook.AodHandoffHook
 import com.coloros16.liquidglass.hook.DesktopClockAnchorBridge
 import com.coloros16.liquidglass.ui.aod.AodSceneCatalog
+import com.coloros16.liquidglass.ui.aod.AodSceneSpec
 import com.coloros16.liquidglass.log.Lg
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedInterface.ExceptionMode
@@ -332,6 +336,8 @@ object AodStageHook {
         }
         runCatching { releaseWidgets() }
         runCatching { AodEffectOverlay.clear() }
+        runCatching { AodWorldLayer.release() }
+        worldCache = null
         ids.clear()
         layoutCache.clear()
         anchorKeys.clear()
@@ -434,6 +440,7 @@ object AodStageHook {
         if (!refreshGate()) {
             layer.bind(null, null, playing = false)
             layer.bindEffect(null, 0f)
+            layer.bindWorld(null, SceneState.AOD, null, 0f, 0f, 0f, false, 0f)
             releaseContentLayers(layer)
             clockTails.remove(layer)
             return false
@@ -443,6 +450,7 @@ object AodStageHook {
             logThrottled("stage-surface-off", "该面开关关闭，撤效果 surface=$pumpSurface")
             layer.bind(null, null, playing = false)
             layer.bindEffect(null, 0f)
+            layer.bindWorld(null, SceneState.AOD, null, 0f, 0f, 0f, false, 0f)
             releaseContentLayers(layer)
             clockTails.remove(layer)
             disarmDrift(layer)
@@ -457,6 +465,7 @@ object AodStageHook {
             logThrottled("stage-secure", "安全输入界面可见，撤效果")
             layer.bind(null, null, playing = false)
             layer.bindEffect(null, 0f)
+            layer.bindWorld(null, SceneState.AOD, null, 0f, 0f, 0f, false, 0f)
             releaseContentLayers(layer)
             clockTails.remove(layer)
             return false
@@ -466,6 +475,7 @@ object AodStageHook {
             logThrottled("stage-nobridge", "求值桥未就绪")
             layer.bind(null, null, playing = false)
             layer.bindEffect(null, 0f)
+            layer.bindWorld(null, SceneState.AOD, null, 0f, 0f, 0f, false, 0f)
             releaseContentLayers(layer)
             clockTails.remove(layer)
             return false
@@ -491,6 +501,7 @@ object AodStageHook {
         if (running != null && running.edge != edge) clockTails.remove(layer)
         SystemSceneMotion.sample(edge, params.t, sceneLayers)
         layer.bind(params, sceneLayers, playing = true)
+        applyWorld(layer, staticState(layer), edge, params.t, sceneLayers.aodAlpha)
         applyClockAnchor(layer, edge, params.t, sceneLayers.aodClockScale)
         applyEffect(layer, sceneLayers.lockAlpha)
         applyContentLayers(layer, params)
@@ -511,6 +522,7 @@ object AodStageHook {
         val state = staticState(layer)
         SystemSceneMotion.sampleStatic(state, sceneLayers)
         layer.bind(null, sceneLayers, playing = false)
+        applyWorld(layer, state, null, 0f, sceneLayers.aodAlpha)
         applyEffect(layer, sceneLayers.lockAlpha)
         releaseContentLayers(layer)
         applyStaticClock(layer, state)
@@ -561,7 +573,8 @@ object AodStageHook {
             if (!displayAllowsAod()) return@Runnable
             if (staticState(layer) != SceneState.AOD) return@Runnable
             applyStaticClock(layer, SceneState.AOD)
-            if (AodDriftSchedule.gliding(SystemClock.uptimeMillis())) {
+            refreshStillWorld(layer)
+            if (AodDriftSchedule.gliding(SystemClock.uptimeMillis()) || stillWorldAnimating(layer)) {
                 startDriftFrames(layer)
             } else {
                 armDrift(layer)
@@ -602,7 +615,8 @@ object AodStageHook {
                     return
                 }
                 applyStaticClock(layer, SceneState.AOD)
-                if (AodDriftSchedule.gliding(SystemClock.uptimeMillis())) {
+                refreshStillWorld(layer)
+                if (AodDriftSchedule.gliding(SystemClock.uptimeMillis()) || stillWorldAnimating(layer)) {
                     Choreographer.getInstance().postFrameCallback(this)
                 } else {
                     driftFrames.remove(layer)
@@ -618,6 +632,20 @@ object AodStageHook {
     private fun stopDriftFrames(layer: AodTransitionLayer) {
         val callback = driftFrames.remove(layer) ?: return
         runCatching { Choreographer.getInstance().removeFrameCallback(callback) }
+    }
+
+    /** 息屏静止态是否需要逐帧：世界层在位且允许动态、且引擎真的在动才武装。 */
+    private fun stillWorldAnimating(layer: AodTransitionLayer): Boolean {
+        if (worldSpec() == null) return false
+        val e = displayEntry()
+        if (!e.allowDynamic) return false
+        return motionNow(true).active
+    }
+
+    /** 逐帧重推静止态世界层输入：自转与混色随时间走，不重算系统分层。 */
+    private fun refreshStillWorld(layer: AodTransitionLayer) {
+        if (worldSpec() == null) return
+        applyWorld(layer, SceneState.AOD, null, 0f, sceneLayers.aodAlpha)
     }
 
     /**
@@ -683,12 +711,83 @@ object AodStageHook {
         val id = effectiveWallpaperEffect()
         if (id == null) {
             layer.bindEffect(null, 0f)
+            layer.bindWorld(null, SceneState.AOD, null, 0f, 0f, 0f, false, 0f)
             return
         }
         layer.bindEffect(id, lockAlpha)
         if (layer.width <= 0 || layer.height <= 0) return
         AodEffectOverlay.request(id, layer.width, layer.height) { layer.postInvalidate() }
     }
+
+    private class WorldEntry(val spec: AodSceneSpec?, val styleId: String, val readAtMs: Long)
+
+    @Volatile private var worldCache: WorldEntry? = null
+
+    /** 样式世界契约 TTL 惰性取；非 SCENE 样式返回 null（本层只画遮罩与压暗）。 */
+    private fun worldSpec(): AodSceneSpec? {
+        val now = SystemClock.uptimeMillis()
+        val id = styleId()
+        val cached = worldCache
+        if (cached != null && cached.styleId == id &&
+            KeyedTtlCache.fresh(cached.readAtMs, now, EFFECT_TTL_MS)
+        ) return cached.spec
+        val spec = runCatching { AodSceneCatalog.forStyle(id) }.getOrNull()
+        worldCache = WorldEntry(spec, id, now)
+        if (spec != null) AodWorldLayer.ensureWallpaper { anyLayer()?.postInvalidate() }
+        return spec
+    }
+
+    /**
+     * 世界层输入：按样式取契约，自转角与混色只在息屏静止态且允许动态时给。
+     *
+     * 无契约时显式 bindWorld(null) 清掉上一次的世界，避免换样式后残留。
+     */
+    private fun applyWorld(
+        layer: AodTransitionLayer,
+        state: SceneState,
+        edge: TransitionEdge?,
+        t: Float,
+        aodAlpha: Float,
+    ) {
+        val spec = worldSpec()
+        if (spec == null) {
+            layer.bindWorld(null, state, edge, t, 0f, 0f, false, 0f)
+            return
+        }
+        val dynamic = displayEntry().allowDynamic
+        val motion = motionNow(dynamic)
+        val still = edge == null && state == SceneState.AOD
+        val spin = motion.rotationDeg
+        val mix = motion.colorMix
+        val alpha = if (spec.lens) lensAlpha(edge, t, aodAlpha) else aodAlpha
+        layer.bindWorld(spec, state, edge, t, alpha, spin, dynamic, mix)
+    }
+
+    /** 镜片息屏层透明度：播放期走镜片自身交叠曲线，静止态用系统分层值。 */
+    private fun lensAlpha(edge: TransitionEdge?, t: Float, staticAlpha: Float): Float {
+        if (edge == null) return staticAlpha
+        SailLensMotion.fade(edge, t, worldFade)
+        return worldFade.aodAlpha
+    }
+
+    private val worldFade = SailLensMotion.Fade()
+
+    /** 息屏自转角与混色一次求值：只走引擎 AodMotion，与预览侧同一份真值。 */
+    private fun motionNow(allowDynamic: Boolean): AodMotionState {
+        worldMotion.reset()
+        val a = api ?: return worldMotion
+        val s = runCatching { EffectConfigStore.read(a) }.getOrNull() ?: return worldMotion
+        AodMotion.evaluate(
+            SystemClock.uptimeMillis(), allowDynamic && s.allowAodDynamic,
+            s.param(EffectParams.AOD_COLOR_MIX),
+            s.param(EffectParams.AOD_ROTATE_SPEED),
+            s.param(EffectParams.AOD_PHOTO_TILT),
+            worldMotion,
+        )
+        return worldMotion
+    }
+
+    private val worldMotion = AodMotionState()
 
     /** 效果配置 TTL 惰性读取；解析失败或被门槛拦住一律回 null。 */
     private fun effectiveWallpaperEffect(): String? {
@@ -832,6 +931,7 @@ object AodStageHook {
         logThrottled("stage-display-off", "息屏显示门控判否，撤效果 reason=$displayReason")
         layer.bind(null, null, playing = false)
         layer.bindEffect(null, 0f)
+        layer.bindWorld(null, SceneState.AOD, null, 0f, 0f, 0f, false, 0f)
         releaseContentLayers(layer)
         clockTails.remove(layer)
         disarmDrift(layer)

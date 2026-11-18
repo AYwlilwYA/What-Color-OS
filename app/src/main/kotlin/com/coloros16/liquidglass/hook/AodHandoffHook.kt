@@ -372,6 +372,7 @@ object AodHandoffHook {
             val filter = IntentFilter().apply {
                 addAction(Intent.ACTION_SCREEN_ON)
                 addAction(Intent.ACTION_SCREEN_OFF)
+                addAction(Intent.ACTION_WALLPAPER_CHANGED)
             }
             val receiver = object : BroadcastReceiver() {
                 override fun onReceive(context: Context?, intent: Intent?) {
@@ -382,6 +383,15 @@ object AodHandoffHook {
                                 val gen = guard.onScreenOn(SystemClock.uptimeMillis())
                                 com.coloros16.liquidglass.hook.aod.AodStageHook.noteInteraction()
                                 Lg.i(TAG, "aod-screen on gen=$gen wake=${guard.wakeSerial()}")
+                            }
+                            Intent.ACTION_WALLPAPER_CHANGED -> {
+                                com.coloros16.liquidglass.hook.aod.AodWorldLayer.noteWallpaperChanged()
+                                com.coloros16.liquidglass.hook.aod.AodStageHook.anyLayer()?.let { l ->
+                                    com.coloros16.liquidglass.hook.aod.AodWorldLayer.ensureWallpaper {
+                                        l.postInvalidate()
+                                    }
+                                }
+                                Lg.i(TAG, "aod-wallpaper changed, world source refresh queued")
                             }
                             Intent.ACTION_SCREEN_OFF -> {
                                 stopped = true

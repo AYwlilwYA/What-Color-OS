@@ -98,6 +98,7 @@ class AodPreviewEditDelegate(private val host: View) {
     private val tmpRect = RectF()
     private val solverGrid = EditLayoutSolver.Grid()
     private val solverRect = EditLayoutSolver.Rect()
+    private val pillSolverRect = EditLayoutSolver.Rect()
 
     private val clockPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textAlign = Paint.Align.CENTER
@@ -538,104 +539,8 @@ class AodPreviewEditDelegate(private val host: View) {
             pillRects.add(pill.typeId to RectF(rect))
             canvas.drawCircle(rect.centerX(), rect.centerY(), rect.width() / 2f, platePaint)
             canvas.drawCircle(rect.centerX(), rect.centerY(), rect.width() / 2f, strokePaint)
-            when (contentOf(pill.typeId)) {
-                "pill.none" -> Unit
-                "pill.camera" -> drawCamera(canvas, rect)
-                "pill.dial" -> drawDial(canvas, rect)
-                "pill.recorder" -> drawRecorder(canvas, rect)
-                "pill.calculator" -> drawCalculator(canvas, rect)
-                "pill.scan" -> drawScan(canvas, rect)
-                "pill.pay" -> drawPay(canvas, rect)
-                else -> drawTorch(canvas, rect)
-            }
+            PillGlyphPainter.draw(canvas, rect, contentOf(pill.typeId), density, strokePaint, widgetTextPaint)
         }
-    }
-
-    private fun drawTorch(canvas: Canvas, rect: RectF) {
-        val c = rect.centerX()
-        val cy = rect.centerY()
-        val k = rect.width() / (58f * density)
-        val body = RectF(c - 4f * density * k, cy - 8f * density * k, c + 4f * density * k, cy + 6f * density * k)
-        canvas.drawRoundRect(body, 2f * density, 2f * density, widgetTextPaint)
-    }
-
-    private fun drawCamera(canvas: Canvas, rect: RectF) {
-        val c = rect.centerX()
-        val cy = rect.centerY()
-        val k = rect.width() / (58f * density)
-        val body = RectF(c - 10f * density * k, cy - 7f * density * k, c + 10f * density * k, cy + 7f * density * k)
-        canvas.drawRoundRect(body, 3f * density, 3f * density, strokePaint)
-        canvas.drawCircle(c, cy, 4f * density * k, strokePaint)
-    }
-
-    private fun drawDial(canvas: Canvas, rect: RectF) {
-        val c = rect.centerX()
-        val cy = rect.centerY()
-        val k = rect.width() / (58f * density)
-        val p = Paint(strokePaint)
-        p.strokeWidth = 2.4f * density * k
-        p.strokeCap = Paint.Cap.ROUND
-        val path = android.graphics.Path()
-        path.moveTo(c - 7f * density * k, cy - 7f * density * k)
-        path.cubicTo(c - 9f * density * k, cy + 2f * density * k, c - 2f * density * k, cy + 9f * density * k, c + 7f * density * k, cy + 7f * density * k)
-        canvas.drawPath(path, p)
-    }
-
-    private fun drawRecorder(canvas: Canvas, rect: RectF) {
-        val c = rect.centerX()
-        val cy = rect.centerY()
-        val k = rect.width() / (58f * density)
-        val bars = floatArrayOf(3f, 7f, 10f, 7f, 3f)
-        for (i in bars.indices) {
-            val x = c + (i - 2) * 4f * density * k
-            val h = bars[i] * density * k
-            canvas.drawRoundRect(RectF(x - 1.2f * density * k, cy - h, x + 1.2f * density * k, cy + h), 1.2f * density * k, 1.2f * density * k, widgetTextPaint)
-        }
-    }
-
-    private fun drawCalculator(canvas: Canvas, rect: RectF) {
-        val c = rect.centerX()
-        val cy = rect.centerY()
-        val k = rect.width() / (58f * density)
-        val p = Paint(strokePaint)
-        p.strokeWidth = 1.8f * density * k
-        p.strokeCap = Paint.Cap.ROUND
-        canvas.drawLine(c - 7f * density * k, cy - 4f * density * k, c - 1f * density * k, cy - 4f * density * k, p)
-        canvas.drawLine(c - 4f * density * k, cy - 7f * density * k, c - 4f * density * k, cy - 1f * density * k, p)
-        canvas.drawLine(c + 2f * density * k, cy - 4f * density * k, c + 8f * density * k, cy - 4f * density * k, p)
-        canvas.drawLine(c - 7f * density * k, cy + 4f * density * k, c - 1f * density * k, cy + 4f * density * k, p)
-        canvas.drawLine(c + 2f * density * k, cy + 2f * density * k, c + 8f * density * k, cy + 2f * density * k, p)
-        canvas.drawLine(c + 2f * density * k, cy + 6f * density * k, c + 8f * density * k, cy + 6f * density * k, p)
-    }
-
-    private fun drawScan(canvas: Canvas, rect: RectF) {
-        val c = rect.centerX()
-        val cy = rect.centerY()
-        val k = rect.width() / (58f * density)
-        val p = Paint(strokePaint)
-        p.strokeWidth = 1.8f * density * k
-        p.strokeCap = Paint.Cap.ROUND
-        val r = 8f * density * k
-        val l = 4f * density * k
-        for (sx in floatArrayOf(-1f, 1f)) for (sy in floatArrayOf(-1f, 1f)) {
-            canvas.drawLine(c + sx * r, cy + sy * r, c + sx * (r - l), cy + sy * r, p)
-            canvas.drawLine(c + sx * r, cy + sy * r, c + sx * r, cy + sy * (r - l), p)
-        }
-        canvas.drawLine(c - r, cy, c + r, cy, p)
-    }
-
-    private fun drawPay(canvas: Canvas, rect: RectF) {
-        val c = rect.centerX()
-        val cy = rect.centerY()
-        val k = rect.width() / (58f * density)
-        val p = Paint(strokePaint)
-        p.strokeWidth = 1.8f * density * k
-        p.strokeCap = Paint.Cap.ROUND
-        canvas.drawLine(c - 6f * density * k, cy - 6f * density * k, c, cy - 1f * density * k, p)
-        canvas.drawLine(c + 6f * density * k, cy - 6f * density * k, c, cy - 1f * density * k, p)
-        canvas.drawLine(c, cy - 1f * density * k, c, cy + 7f * density * k, p)
-        canvas.drawLine(c - 5f * density * k, cy + 1f * density * k, c + 5f * density * k, cy + 1f * density * k, p)
-        canvas.drawLine(c - 5f * density * k, cy + 4f * density * k, c + 5f * density * k, cy + 4f * density * k, p)
     }
 
     private fun drawRemoveBadge(canvas: Canvas, rect: RectF) {
@@ -814,10 +719,13 @@ class AodPreviewEditDelegate(private val host: View) {
     }
 
     private fun pillRect(pill: PillPlacement, w: Float, h: Float): RectF {
-        val size = EditLayoutSolver.pillDiameterPx(w, h, pill.scale)
-        val cx = pill.x * w
-        val cy = pill.y * h
-        return RectF(cx - size / 2f, cy - size / 2f, cx + size / 2f, cy + size / 2f)
+        if (!EditLayoutSolver.pillRect(pill, w, h, pillSolverRect)) return RectF()
+        return RectF(
+            pillSolverRect.left,
+            pillSolverRect.top,
+            pillSolverRect.right,
+            pillSolverRect.bottom,
+        )
     }
 
     private fun widgetName(typeId: String): String {

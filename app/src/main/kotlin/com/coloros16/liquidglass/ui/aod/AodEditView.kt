@@ -255,27 +255,10 @@ class AodEditView @JvmOverloads constructor(
         for (pill in s.pills()) {
             if (!pill.enabled) continue
             val rect = pillRect(pill, w, h)
-            canvas.drawRoundRect(rect, rect.height() / 2f, rect.height() / 2f, platePaint)
-            canvas.drawRoundRect(rect, rect.height() / 2f, rect.height() / 2f, strokePaint)
-            if (pill.typeId.contains("flash")) drawTorch(canvas, rect) else drawCamera(canvas, rect)
+            canvas.drawCircle(rect.centerX(), rect.centerY(), rect.width() / 2f, platePaint)
+            canvas.drawCircle(rect.centerX(), rect.centerY(), rect.width() / 2f, strokePaint)
+            PillGlyphPainter.draw(canvas, rect, s.pillContent(pill.typeId), density, strokePaint, widgetTextPaint)
         }
-    }
-
-    private fun drawTorch(canvas: Canvas, rect: RectF) {
-        val c = rect.centerX()
-        val cy = rect.centerY()
-        val body = RectF(c - 4f * density, cy - 8f * density, c + 4f * density, cy + 6f * density)
-        canvas.drawRoundRect(body, 2f * density, 2f * density, widgetTextPaint)
-        canvas.drawLine(c - 8f * density, cy - 10f * density, c - 14f * density, cy - 16f * density, widgetTextPaint)
-        canvas.drawLine(c + 8f * density, cy - 10f * density, c + 14f * density, cy - 16f * density, widgetTextPaint)
-    }
-
-    private fun drawCamera(canvas: Canvas, rect: RectF) {
-        val c = rect.centerX()
-        val cy = rect.centerY()
-        val body = RectF(c - 10f * density, cy - 7f * density, c + 10f * density, cy + 7f * density)
-        canvas.drawRoundRect(body, 3f * density, 3f * density, strokePaint)
-        canvas.drawCircle(c, cy, 4f * density, strokePaint)
     }
 
     private fun drawSelection(canvas: Canvas, s: LockLayoutSettings, w: Float, h: Float) {
@@ -307,6 +290,7 @@ class AodEditView @JvmOverloads constructor(
 
     private val solverGrid = EditLayoutSolver.Grid()
     private val solverRect = EditLayoutSolver.Rect()
+    private val pillSolverRect = EditLayoutSolver.Rect()
 
     private fun widgetRect(widget: LockWidget, w: Float, h: Float): RectF {
         if (!EditLayoutSolver.widgetRect(widget, w, h, EditLayoutSolver.WIDGET_GRID_TOP, solverGrid, solverRect)) {
@@ -317,10 +301,13 @@ class AodEditView @JvmOverloads constructor(
     }
 
     private fun pillRect(pill: PillPlacement, w: Float, h: Float): RectF {
-        val size = EditLayoutSolver.pillDiameterPx(w, h, pill.scale)
-        val cx = pill.x * w
-        val cy = pill.y * h
-        return RectF(cx - size / 2f, cy - size / 2f, cx + size / 2f, cy + size / 2f)
+        if (!EditLayoutSolver.pillRect(pill, w, h, pillSolverRect)) return RectF()
+        return RectF(
+            pillSolverRect.left,
+            pillSolverRect.top,
+            pillSolverRect.right,
+            pillSolverRect.bottom,
+        )
     }
 
     private fun widgetName(typeId: String): String {

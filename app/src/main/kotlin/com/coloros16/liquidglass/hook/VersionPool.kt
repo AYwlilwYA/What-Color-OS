@@ -26,6 +26,19 @@ enum class PosteffectArch { PRE_AGSL, LEGACY, MODERN, UNKNOWN }
 enum class CaptureRev { LEGACY, INTERNAL, UNSUPPORTED, UNKNOWN }
 
 /**
+ * 流体云插件数据入口档：SystemUIPlugin 内混淆名随版本整包漂移，与 posteffect 世代正交。
+ * C15 = i4.t#f(i4.o, SeedlingUIData)；C16 = z3.h0#e(z3.w, SeedlingUIData)。
+ * 静态点表只覆盖已知点，运行时探针探到真值后 notePatch 覆盖。
+ */
+enum class SeedlingDataPath { C15_I4_T_F, C16_Z3_H0_E, UNKNOWN }
+
+/**
+ * 桌面时钟平移归属档：宿主自带灵感时钟则系统自己做锁屏→桌面平移，模块让位；
+ * 无内置实现的档位由模块补。与 posteffect 世代正交。
+ */
+enum class DesktopClockPath { NATIVE_INSPIRATION, MODULE_SUPPLEMENT, UNKNOWN }
+
+/**
  * 宿主 profile：代码常量表条目。
  * launcherMainHook / launcherAnimHook / tiltPath 三个开关仅 com.android.launcher 消费点读取，
  * 其余宿主条目填中性值、不参与其安装决策。
@@ -39,6 +52,8 @@ data class Profile(
     val archFamily: ArchFamily,
     val posteffectArch: PosteffectArch = PosteffectArch.UNKNOWN,
     val captureRev: CaptureRev = CaptureRev.UNKNOWN,
+    val seedlingDataPath: SeedlingDataPath = SeedlingDataPath.UNKNOWN,
+    val desktopClockPath: DesktopClockPath = DesktopClockPath.UNKNOWN,
 )
 
 /** 小版本点：宿主 versionCode 精确点 → profile。 */
@@ -102,6 +117,7 @@ object Profiles {
         classNameResolver = ClassNameResolver.LEGACY_NAME_CHAIN,
         archFamily = ArchFamily.C16,
         captureRev = CaptureRev.LEGACY,
+        desktopClockPath = DesktopClockPath.MODULE_SUPPLEMENT,
     )
     val LAUNCHER_17PLUS = Profile(
         name = "launcher-17plus",
@@ -111,6 +127,7 @@ object Profiles {
         classNameResolver = ClassNameResolver.FINGERPRINT_PROBE,
         archFamily = ArchFamily.C17,
         captureRev = CaptureRev.INTERNAL,
+        desktopClockPath = DesktopClockPath.NATIVE_INSPIRATION,
     )
     val SYSTEMUI_15 = Profile(
         name = "systemui-15-pre-agsl",
@@ -151,6 +168,15 @@ object Profiles {
         archFamily = ArchFamily.C17,
         posteffectArch = PosteffectArch.MODERN,
         captureRev = CaptureRev.INTERNAL,
+    )
+    val APPGLASS_15 = Profile(
+        name = "appglass-15",
+        launcherMainHook = true,
+        launcherAnimHook = true,
+        tiltPath = TiltPath.LEGACY_16,
+        classNameResolver = ClassNameResolver.FIXED_CLASS_NAMES,
+        archFamily = ArchFamily.OTHER,
+        captureRev = CaptureRev.LEGACY,
     )
     val APPGLASS_16 = Profile(
         name = "appglass-16",
@@ -194,6 +220,35 @@ object Profiles {
         classNameResolver = ClassNameResolver.FIXED_CLASS_NAMES,
         archFamily = ArchFamily.OTHER,
     )
+    /** 流体云插件 C15 档：数据入口 i4.t#f(i4.o, SeedlingUIData)。 */
+    val SEEDLING_PLUGIN_15 = Profile(
+        name = "seedling-plugin-15",
+        launcherMainHook = true,
+        launcherAnimHook = true,
+        tiltPath = TiltPath.LEGACY_16,
+        classNameResolver = ClassNameResolver.FIXED_CLASS_NAMES,
+        archFamily = ArchFamily.OTHER,
+        seedlingDataPath = SeedlingDataPath.C15_I4_T_F,
+    )
+    /** 流体云插件 C16 档：数据入口 z3.h0#e(z3.w, SeedlingUIData)。 */
+    val SEEDLING_PLUGIN_16 = Profile(
+        name = "seedling-plugin-16",
+        launcherMainHook = true,
+        launcherAnimHook = true,
+        tiltPath = TiltPath.LEGACY_16,
+        classNameResolver = ClassNameResolver.FIXED_CLASS_NAMES,
+        archFamily = ArchFamily.C16,
+        seedlingDataPath = SeedlingDataPath.C16_Z3_H0_E,
+    )
+    /** 流体云插件未知档：只靠运行时探针，静态不指认。 */
+    val SEEDLING_PLUGIN_DEFAULT = Profile(
+        name = "seedling-plugin-default",
+        launcherMainHook = true,
+        launcherAnimHook = true,
+        tiltPath = TiltPath.LEGACY_16,
+        classNameResolver = ClassNameResolver.FIXED_CLASS_NAMES,
+        archFamily = ArchFamily.OTHER,
+    )
 }
 
 /**
@@ -208,14 +263,18 @@ object Profiles {
 object VersionPool {
 
     const val PKG_SYSTEMUI = "com.android.systemui"
+    const val PKG_LAUNCHER = "com.android.launcher"
+    const val PKG_SYSTEMUI_PLUGINS = "com.oplus.systemui.plugins"
     const val PATCH_LEGACY_POSTEFFECT_ARCH = "legacyPosteffectArch"
+    const val PATCH_SEEDLING_DATA_PATH = "seedlingDataPath"
+    const val PATCH_DESKTOP_CLOCK_PATH = "desktopClockPath"
 
     private const val TAG = "lg-hook"
     private const val THROTTLE_MS = 2000L
 
     private val SPECS: List<VersionSpec> = listOf(
         VersionSpec(
-            pkg = "com.android.launcher",
+            pkg = PKG_LAUNCHER,
             majorDivisor = 10_000_000L,
             segmentProfiles = mapOf(
                 16 to Profiles.LAUNCHER_PRE17,
@@ -249,37 +308,102 @@ object VersionPool {
         VersionSpec(
             pkg = "com.coloros.gallery3d",
             majorDivisor = 1_000_000L,
-            segmentProfiles = mapOf(16 to Profiles.APPGLASS_16),
+            segmentProfiles = mapOf(
+                15 to Profiles.APPGLASS_15,
+                16 to Profiles.APPGLASS_16,
+            ),
             defaultProfile = Profiles.APPGLASS_DEFAULT,
-            minorPoints = emptyList(),
+            minorPoints = listOf(
+                MinorPoint(16032038L, Profiles.APPGLASS_16),
+            ),
         ),
         VersionSpec(
             pkg = "com.coloros.calculator",
             majorDivisor = 1_000_000L,
-            segmentProfiles = mapOf(16 to Profiles.APPGLASS_16),
+            segmentProfiles = mapOf(
+                15 to Profiles.APPGLASS_15,
+                16 to Profiles.APPGLASS_16,
+            ),
             defaultProfile = Profiles.APPGLASS_DEFAULT,
-            minorPoints = emptyList(),
+            minorPoints = listOf(
+                MinorPoint(15006026L, Profiles.APPGLASS_15),
+                MinorPoint(16004002L, Profiles.APPGLASS_16),
+            ),
         ),
         VersionSpec(
             pkg = "com.coloros.smartsidebar",
             majorDivisor = 10_000_000L,
-            segmentProfiles = mapOf(16 to Profiles.APPGLASS_16),
+            segmentProfiles = mapOf(
+                15 to Profiles.APPGLASS_15,
+                16 to Profiles.APPGLASS_16,
+            ),
             defaultProfile = Profiles.APPGLASS_DEFAULT,
-            minorPoints = emptyList(),
+            minorPoints = listOf(
+                MinorPoint(15005007L, Profiles.APPGLASS_15),
+                MinorPoint(160016002L, Profiles.APPGLASS_16),
+            ),
         ),
         VersionSpec(
             pkg = "com.coloros.assistantscreen",
             majorDivisor = 10_000_000L,
-            segmentProfiles = mapOf(17 to Profiles.APPGLASS_17),
+            segmentProfiles = mapOf(
+                16 to Profiles.APPGLASS_16,
+                17 to Profiles.APPGLASS_17,
+            ),
             defaultProfile = Profiles.APPGLASS_DEFAULT,
-            minorPoints = emptyList(),
+            minorPoints = listOf(
+                MinorPoint(170140060L, Profiles.APPGLASS_17),
+            ),
         ),
         VersionSpec(
             pkg = "com.heytap.quicksearchbox",
             majorDivisor = 100_000L,
             segmentProfiles = mapOf(11 to Profiles.APPGLASS_11),
             defaultProfile = Profiles.APPGLASS_DEFAULT,
-            minorPoints = emptyList(),
+            minorPoints = listOf(
+                MinorPoint(1154027L, Profiles.APPGLASS_11),
+                MinorPoint(1165003L, Profiles.APPGLASS_11),
+            ),
+        ),
+        VersionSpec(
+            pkg = PKG_SYSTEMUI_PLUGINS,
+            majorDivisor = 1_000_000L,
+            segmentProfiles = mapOf(
+                15 to Profiles.SEEDLING_PLUGIN_15,
+                16 to Profiles.SEEDLING_PLUGIN_16,
+            ),
+            defaultProfile = Profiles.SEEDLING_PLUGIN_DEFAULT,
+            minorPoints = listOf(
+                MinorPoint(15001028L, Profiles.SEEDLING_PLUGIN_15),
+                MinorPoint(16001002L, Profiles.SEEDLING_PLUGIN_16),
+            ),
+        ),
+        VersionSpec(
+            pkg = "com.coloros.calendar",
+            majorDivisor = 1_000_000L,
+            segmentProfiles = mapOf(16 to Profiles.APPGLASS_16),
+            defaultProfile = Profiles.APPGLASS_DEFAULT,
+            minorPoints = listOf(
+                MinorPoint(16026020L, Profiles.APPGLASS_16),
+            ),
+        ),
+        VersionSpec(
+            pkg = "com.coloros.note",
+            majorDivisor = 10_000_000L,
+            segmentProfiles = mapOf(16 to Profiles.APPGLASS_16),
+            defaultProfile = Profiles.APPGLASS_DEFAULT,
+            minorPoints = listOf(
+                MinorPoint(160070002L, Profiles.APPGLASS_16),
+            ),
+        ),
+        VersionSpec(
+            pkg = "com.coloros.weather2",
+            majorDivisor = 1_000_000L,
+            segmentProfiles = mapOf(16 to Profiles.APPGLASS_16),
+            defaultProfile = Profiles.APPGLASS_DEFAULT,
+            minorPoints = listOf(
+                MinorPoint(16046002L, Profiles.APPGLASS_16),
+            ),
         ),
     )
 

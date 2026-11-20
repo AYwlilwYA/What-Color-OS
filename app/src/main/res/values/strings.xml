@@ -73,7 +73,7 @@
     <string name="settings_info_label">说明</string>
     <string name="info_quick_jump">常用功能的直达入口，点一下直接打开对应设置页。</string>
     <string name="info_glass_control">模块总开关和渲染方式。应用级只作用于已支持的应用；系统级接管系统界面的模糊渲染，覆盖更广、更耗电。</string>
-    <string name="info_glass_preset">预设是整套画质方案，管采样率、分辨率和性能档位。点「一键」立即套用，画面优先或省电优先一键切换。</string>
+    <string name="info_glass_preset">风格是整套观感方案：玻璃通透度、边缘亮线、色散、倾斜与哪些元素玻璃化，点一下立即生效并长期保存。抓屏帧率、采样比例这些性能参数保持默认，不会被风格改动。想逐项细调点「自定义预设」。</string>
     <string name="info_glass_config">配置是一套玻璃效果参数。可以建多套，再配合「组件分配」让不同界面元素用不同的玻璃效果。</string>
     <string name="info_glass_assign">把界面上的某个组件、某个按钮分配给某套配置。按名称搜索、勾选后批量指派；已经被占用的会置灰。</string>
     <string name="settings_glass_group_assign">组件分配</string>
@@ -82,27 +82,11 @@
     <string name="settings_glass_group_readability">可读性</string>
     <string name="settings_glass_group_sampling">背景与采样</string>
     <string name="settings_glass_test_entry">点击打开系统级别玻璃效果测试</string>
-    <string name="settings_glass_preset_hint">套用预设会自动调整画质与性能（画面优先 / 省电优先）。</string>
+    <string name="settings_glass_preset_hint">点风格即整套换观感，长期保存；抓屏帧率与采样等性能参数保持默认不动。想逐项细调就点「自定义预设」，进去逐项改参数并实时预览。</string>
     <string name="settings_add_config">＋ 新增配置</string>
-    <string name="settings_preset_appearance">iOS-外观</string>
-    <string name="settings_preset_appearance_desc">套用高画质参数与高采样率</string>
-    <string name="settings_preset_battery">iOS-省电</string>
-    <string name="settings_preset_battery_desc">套用低画质参数，降低性能占用</string>
-    <string name="settings_preset_apply">一键</string>
-    <string name="settings_preset_appearance_applied">已套用高画质预设</string>
-    <string name="settings_preset_ios">iOS 预设</string>
-    <string name="settings_preset_ios_desc">画质三档与玻璃风格五档，点选立即生效</string>
-    <string name="settings_preset_tier_performance">性能</string>
-    <string name="settings_preset_tier_performance_desc">低画质低占用，最流畅</string>
-    <string name="settings_preset_tier_balance">平衡</string>
-    <string name="settings_preset_tier_balance_desc">画质与性能折中</string>
-    <string name="settings_preset_tier_appearance">外观</string>
-    <string name="settings_preset_tier_appearance_desc">高画质与高采样，画面优先</string>
-    <string name="settings_preset_tier_applied">%1$s 档生效</string>
     <string name="settings_preset_tier_current">当前</string>
-    <string name="settings_preset_battery_applied">已套用省电预设</string>
     <string name="settings_preset_custom">自定义预设…</string>
-    <string name="settings_preset_custom_desc">保存当前参数组合为新预设</string>
+    <string name="settings_preset_custom_desc">新建一份自己的配置，进去逐项调参数并实时预览</string>
     <string name="settings_glass_config_default">配置%1$d</string>
     <string name="settings_glass_config_desc">点击进入参数调节与实时预览</string>
     <string name="settings_glass_config_value">参数</string>
@@ -334,9 +318,13 @@
 
     <!-- 流体云 -->
     <string name="settings_seedling_takeover">接管流体云</string>
-    <string name="settings_seedling_takeover_desc">由本模块自行绘制小岛与展开卡片，取代系统原有渲染。当前为预留项，开关暂不改变显示效果。</string>
+    <string name="settings_seedling_takeover_desc">开启后灵动岛完全由本模块在独立悬浮窗口中自行绘制，悬浮于状态栏之上，系统原有小岛同时隐藏。关闭即恢复系统原有显示。</string>
     <string name="settings_seedling_takeover_glass">接管后使用液态玻璃</string>
-    <string name="settings_seedling_takeover_glass_desc">接管生效后，自绘的小岛与卡片使用液态玻璃材质。当前为预留项。</string>
+    <string name="settings_seedling_takeover_glass_desc">接管生效后，自绘的小岛与卡片背景使用液态玻璃材质。需先开启「接管流体云」。</string>
+    <string name="settings_seedling_anchor_follow">岛位置跟随摄像头</string>
+    <string name="settings_seedling_anchor_follow_desc">关闭时小岛始终居中（与系统原生一致）；开启后左右挖孔机型的小岛贴边跟随摄像头。</string>
+    <string name="settings_seedling_card_mode">拉开所有卡（OP 式）</string>
+    <string name="settings_seedling_card_mode_desc">关闭=苹果式单卡，大卡左右滑动切换卡片；开启=OP 式展开时直接拉开所有卡片竖排显示。</string>
     <string name="settings_seedling_card_glass">流体云液态玻璃</string>
     <string name="settings_seedling_card_glass_desc">灵动岛/流体云的液态玻璃总开关，横幅玻璃也受此控制。</string>
     <string name="settings_seedling_capsule_glass">小胶囊（小岛）也玻璃化（默认开）</string>
@@ -355,14 +343,14 @@
     <!-- [2026-09-17] 追踪器相关字符串已随追踪器整体移除 -->
 
     <!-- 日志与诊断 -->
-    <string name="settings_enable_logs">运行日志</string>
-    <string name="settings_enable_logs_desc">关闭后 logcat 只保留错误日志。修改后需重启系统界面。</string>
+    <string name="settings_enable_logs">记录效果细节</string>
+    <string name="settings_enable_logs_desc">看「玻璃为什么没出来」要开这个：记录每个元素画没画、背景抓没抓到。改完要重启系统界面才生效。平时关着省电。</string>
     <string name="settings_tile_on_blue_glass">开启态蓝色透明</string>
     <string name="settings_tile_on_blue_glass_desc">开启状态的磁贴按半透明蓝色状态色叠加在玻璃上，呈现蓝色透明效果；关闭则只保留玻璃本身。</string>
     <string name="settings_double_layer_glass">双层玻璃渲染</string>
-    <string name="settings_double_layer_glass_desc">允许卡片内外层玻璃叠加渲染（如卡片中嵌套卡片）；关闭后内层回退系统原样。</string>
-    <string name="settings_engine_full_log">引擎全量日志</string>
-    <string name="settings_engine_full_log_desc">排查引擎行为时打开，全量流水进 logcat，平时关闭省电防刷屏。</string>
+    <string name="settings_double_layer_glass_desc">允许磁贴内外两层玻璃叠加渲染；关闭后内层不画，回退系统原样。</string>
+    <string name="settings_engine_full_log">记录每一步动作（很吵）</string>
+    <string name="settings_engine_full_log_desc">给作者排查内部流程用的，会把每次调用都记下来，量非常大、容易把有用信息挤掉。一般不用开，开了也看不出「有没有效果」。</string>
     <string name="settings_ball_section">悬浮球</string>
     <string name="settings_root_ball_start">启动悬浮球（root）</string>
     <string name="settings_root_ball_stop">停止悬浮球</string>
@@ -371,16 +359,28 @@
     <string name="settings_share_log">分享日志</string>
     <string name="settings_share_log_failed">分享失败：%1$s</string>
     <string name="settings_capture_include_all">含全部日志（默认只抓模块标签）</string>
-    <string name="settings_capture_start">开始抓取</string>
-    <string name="settings_capture_stop">停止抓取</string>
+    <string name="settings_capture_start">一键抓取</string>
+    <string name="settings_capture_stop">一键结束</string>
+    <string name="settings_capture_stop_desc">停止记录，并把刚才自动打开的开关关回去</string>
     <string name="settings_capture_idle">未在抓取</string>
-    <string name="settings_capture_running">正在抓取：%1$s</string>
-    <string name="settings_capture_probing">正在检测 root…</string>
-    <string name="settings_capture_no_root">未检测到 root（su 不可用），无法抓取。请先授予 root。</string>
-    <string name="settings_capture_failed">启动抓取失败。</string>
-    <string name="settings_capture_logs_off_hint">「运行日志」开关关闭，抓取内容仅错误级。需要完整日志请先打开它。</string>
-    <string name="settings_capture_empty">还没有抓取文件。点「开始抓取」→ 复现问题 → 点「停止抓取」，然后点文件分享。</string>
+    <string name="settings_capture_running">正在记录：%1$s</string>
+    <string name="settings_capture_probing">正在准备…</string>
+    <string name="settings_capture_no_root">需要 root 权限才能记录，请先在管理器里授予。</string>
+    <string name="settings_capture_failed">启动记录失败，请再点一次。</string>
+    <string name="settings_capture_started_hint">已开始记录，界面会黑一下回到锁屏（正常）。请解锁后把问题复现一遍，再点「一键结束」。</string>
+    <string name="settings_capture_started_no_restart">已开始记录。请把问题复现一遍，再点「一键结束」。</string>
+    <string name="settings_capture_stopped_hint">已停止，记录已保存。点下面的文件即可发给我们。</string>
+    <string name="settings_capture_restart_failed">已开始记录，但界面没能自动重启。请把问题复现一遍，再点「一键结束」。</string>
+    <string name="settings_capture_empty">还没有记录文件。点「一键抓取」→ 复现问题 → 点「一键结束」，然后点文件分享。</string>
     <string name="settings_capture_item">%1$s（%2$d KB）</string>
+    <string name="settings_capture_page_hint">反馈问题只需要三步：一键抓取 → 复现问题 → 一键结束，然后点文件发给我们。记录期间会自动打开细节日志，结束时自动关回去。</string>
+    <string name="settings_scope_bundle">打包作用域应用</string>
+    <string name="settings_scope_bundle_desc">把模块作用的系统应用打包成一个文件，便于我们适配你的版本</string>
+    <string name="settings_scope_bundle_running">正在打包，可能需要一两分钟…</string>
+    <string name="settings_scope_bundle_done">打包完成：%1$d 个应用，点下面的文件发给我们</string>
+    <string name="settings_scope_bundle_partial">打包完成：%1$d 个应用成功，%2$d 个没取到</string>
+    <string name="settings_scope_bundle_failed">打包失败，请确认已授予 root 后重试</string>
+    <string name="settings_scope_bundle_empty">作用域清单为空，没什么可打包</string>
     <string name="settings_dump_original_note">原图 dump 诊断已改走触发文件机制（/data/local/tmp/lg_dump_trigger → lg_dump.png）。</string>
 
     <!-- 关于 -->
@@ -504,6 +504,12 @@
     <string name="settings_calculator_glass_desc">对话框与弹出菜单背景接管</string>
     <string name="settings_smart_sidebar_glass">智能侧边栏</string>
     <string name="settings_smart_sidebar_glass_desc">面板与卡片背景接管</string>
+    <string name="settings_calendar_glass">日历</string>
+    <string name="settings_calendar_glass_desc">弹出菜单与底栏加玻璃效果</string>
+    <string name="settings_note_glass">笔记</string>
+    <string name="settings_note_glass_desc">弹出菜单加玻璃效果</string>
+    <string name="settings_weather_glass">天气</string>
+    <string name="settings_weather_glass_desc">弹出菜单加玻璃效果</string>
     <string name="settings_assistant_screen_glass">速览（负一屏）</string>
     <string name="settings_assistant_screen_glass_desc">卡片和控件加玻璃效果</string>
     <string name="settings_quick_search_glass">全局搜索弹窗</string>
@@ -663,10 +669,6 @@
     <!-- 面板 / 桌面 / 流体云 / 息屏 页 -->
     <string name="settings_panel_group_notification">通知</string>
     <string name="settings_panel_group_cc">控制中心</string>
-    <string name="settings_cc_tile_glass">磁贴液态玻璃</string>
-    <string name="settings_cc_tile_glass_desc">磁贴内层自绘玻璃并与外层叠加；关闭后磁贴回退系统原样。</string>
-    <string name="settings_cc_tile_on_blue">开启态保留系统蓝色</string>
-    <string name="settings_cc_tile_on_blue_desc">磁贴打开时保留系统的蓝色状态底；关闭则只显玻璃。</string>
     <string name="settings_cc_tile_hide_secondary">隐藏横向大磁贴的小圆底</string>
     <string name="settings_cc_tile_hide_secondary_desc">2×1 横向磁贴里包图标的小圆底不再绘制，大磁贴玻璃与状态色保留。</string>
     <string name="settings_cc_progress_fill">滑杆进度亮白填充</string>
@@ -681,6 +683,40 @@
     <string name="settings_seedling_glass_row_title">玻璃化开关</string>
     <string name="settings_seedling_glass_row_desc">展开卡片、折叠小胶囊、去原色 —— 在「玻璃」页设置</string>
     <string name="settings_seedling_page_hint">流体云在锁屏、息屏、横屏、下拉等场景的显示规则，后续会在这里提供开关。</string>
+    <string name="settings_seedling_preview_hint">点按预览岛展开/收起 · 与真机共用同一套弹簧与内容模型</string>
+    <string name="settings_seedling_test_show">测试岛</string>
+    <string name="settings_seedling_test_expand">展开/收起</string>
+    <string name="settings_seedling_test_hide">隐藏岛</string>
+    <string name="settings_seedling_test_recording">录音岛</string>
+    <string name="settings_seedling_test_recall">召回划掉</string>
+    <string name="settings_seedling_test_charging">充电岛</string>
+    <string name="settings_seedling_test_headset">耳机岛</string>
+    <string name="settings_seedling_test_media">媒体大卡</string>
+    <string name="settings_seedling_test_timer">计时大卡</string>
+    <string name="settings_seedling_test_msg">消息大卡</string>
+    <string name="settings_seedling_test_delivery">配送大卡</string>
+    <string name="settings_seedling_test_real_media">真实媒体</string>
+    <string name="settings_seedling_test_real_media_on">关闭真实媒体</string>
+    <string name="settings_seedling_test_clear">清空活动</string>
+    <string name="settings_seedling_test_desc">手动唤醒自绘岛验证渲染与动画，不依赖系统流体云事件。需先开启「接管流体云」。</string>
+    <string name="settings_seedling_takeover_bounce">岛回弹</string>
+    <string name="settings_seedling_takeover_bounce_desc">0=无回弹直达，8=最强弹性。默认 5（阻尼 0.62）。</string>
+    <string name="settings_seedling_takeover_speed">岛动画速度</string>
+    <string name="settings_seedling_takeover_speed_desc">0.4×~2.0×，默认 1.0×。展开收起与过渡同缩放。</string>
+    <string name="settings_seedling_takeover_ambient">环境共生描边</string>
+    <string name="settings_seedling_takeover_ambient_desc">岛周细描边随背景明暗显隐，亮壁纸显、暗壁纸隐；胶囊态带月牙呼吸装饰。</string>
+    <string name="settings_seedling_takeover_lyrics">岛内歌词</string>
+    <string name="settings_seedling_takeover_lyrics_desc">接入歌词提供者（Lyricon 生态）后，媒体大卡显示当前歌词行与译文。</string>
+    <string name="settings_seedling_kind_title">上岛内容类型</string>
+    <string name="settings_seedling_kind_media">媒体播放</string>
+    <string name="settings_seedling_kind_call">通话</string>
+    <string name="settings_seedling_kind_timer">计时与闹钟</string>
+    <string name="settings_seedling_kind_status">录音与状态</string>
+    <string name="settings_seedling_kind_live">实时进度（外卖/打车等）</string>
+    <string name="settings_seedling_kind_message">消息</string>
+    <string name="settings_seedling_kind_code">验证码</string>
+    <string name="settings_seedling_kind_face">人脸解锁</string>
+    <string name="settings_seedling_kind_desc">关闭的类型不再上岛；已在岛上的内容即时让位。默认与参考实现一致：消息/验证码/人脸默认关。</string>
     <string name="settings_aod_page_hint">点三态条播放动画 · 长按拖动看中间帧</string>
     <string name="settings_aod_scrub_hint">拖动逐帧 · 松开停在最近一端</string>
     <string name="settings_aod_header">息屏样式</string>
@@ -758,14 +794,29 @@
     <string name="settings_language_row_desc">跟随系统应用语言</string>
     <string name="settings_config_io_row">配置导入导出</string>
     <string name="settings_config_io_row_desc">全局备份与恢复</string>
-    <string name="settings_logpage_row">日志页</string>
-    <string name="settings_logpage_row_desc">运行日志 · 引擎全量 · 日志采集</string>
+    <string name="settings_logpage_row">反馈问题</string>
+    <string name="settings_logpage_row_desc">一键抓取 · 一键结束 · 导出给作者</string>
     <string name="settings_diagpage_row">诊断页</string>
     <string name="settings_diagpage_row_desc">旁路裁切 · 点选元素玻璃 · 悬浮球启停</string>
+    <string name="settings_internal_log_row">内部调试</string>
+    <string name="settings_internal_log_row_desc">给作者与测试用的日志开关，普通用户不用动</string>
+    <string name="settings_internal_group_logs">内部日志开关</string>
+    <string name="settings_internal_log_hint">这几项只影响日志量与抓取范围，不改任何效果。抓完日志记得关回去，开着费电也刷屏。</string>
+    <string name="settings_internal_capture_all_desc">开了「一键抓取」会连系统与别的应用的日志一起录，文件很大；关着只录本模块标签。</string>
     <string name="settings_about_row">关于</string>
     <string name="settings_about_row_desc">联系与反馈</string>
-    <string name="settings_logpage_group_runtime">运行日志</string>
-    <string name="settings_logpage_group_capture">日志采集</string>
+
+    <string name="settings_logpage_group_capture">导出日志给作者</string>
+
+
+
+
+
+
+
+
+    <string name="settings_capture_health_first">先体检再导出</string>
+    <string name="settings_capture_health_first_desc">多数问题体检就能定位，不用导日志</string>
     <string name="settings_diag_group_bypass">旁路与探针</string>
     <string name="settings_diag_group_ball">悬浮球</string>
     <string name="settings_language_open_failed">无法打开系统语言设置</string>
@@ -786,7 +837,7 @@
     <string name="settings_chip_launch">启动</string>
     <string name="settings_chip_stop">停止</string>
     <string name="settings_row_state">状态</string>
-    <string name="settings_capture_start_desc">抓取当前 logcat 到文件</string>
+    <string name="settings_capture_start_desc">自动打开记录并重启界面，界面会黑一下回到锁屏</string>
     <string name="settings_root_ball_start_desc">root 独立进程，盖在一切界面最上层</string>
     <string name="settings_chip_capture_running">抓取中</string>
     <string name="settings_chip_capture_idle">空闲</string>
@@ -890,14 +941,11 @@
     <string name="sb_slot_zen">勿扰</string>
     <string name="sb_slot_nosim_all">无卡</string>
     <string name="sb_slot_secure_pay">支付</string>
-    <string name="settings_preset_hint">三档调整抓屏帧率、采样比例、定时抓屏间隔与画质参数（高光精修、色散）</string>
-    <string name="settings_preset_style_group">玻璃风格</string>
-    <string name="settings_preset_style_hint">点选风格立即生效：整套玻璃材质、遮罩与文字观感一次写入，玻璃化对象默认全开；随后可在材质页微调</string>
     <string name="settings_home_style_group">一键风格</string>
-    <string name="settings_home_style_hint">点选即整套切换：玻璃材质、画质与抓屏、倾斜透视、玻璃化对象一次到位，长期保存；各项仍可单独微调</string>
+    <string name="settings_home_style_hint">点选即整套切换观感：玻璃材质、倾斜透视、玻璃化对象一次到位，长期保存；抓屏帧率与采样等性能参数保持默认不动，各项仍可单独微调</string>
+    <string name="settings_home_capture_group">反馈问题</string>
     <string name="settings_preset_style_applied">已套用「%1$s」风格</string>
-    <string name="settings_preset_style_ios_clear_desc">近清晰透镜，边缘细亮线，色彩饱满</string>
-    <string name="settings_preset_style_ios_frost_desc">强磨砂提亮，保留背景色，柔和亮边</string>
+    <string name="settings_preset_style_ios_desc">近清晰透镜，边缘细亮线，色彩饱满</string>
     <string name="settings_preset_style_harmony_soft_desc">轻磨砂柔白亮边，全向光感，通透不糊</string>
     <string name="settings_preset_style_crystal_desc">强透镜彩虹色散边，高饱和风格化</string>
     <string name="settings_preset_style_classic_frost_desc">传统毛玻璃，无透镜折射，稳重耐看</string>
@@ -912,6 +960,11 @@
     <string name="wp_3d_section">3D 相机壁纸</string>
     <string name="wp_3d_desc">分层真实三维场景（星空 / 月球 / 山脊），画面来自透视相机；相机位置、朝向与视场角由曲线驱动，可选用内置路径或手写关键帧。</string>
     <string name="wp_3d_set">设为 3D 壁纸</string>
+    <string name="wp_3d_scene">场景</string>
+    <string name="wp_3d_scene_desc">选场景后由场景自己的相机随息屏 / 锁屏 / 桌面三态推进，不再走下面的曲线。</string>
+    <string name="wp_3d_scene_none">无（用相机曲线）</string>
+    <string name="wp_3d_scene_snow">雪山</string>
+    <string name="wp_3d_curve_locked_by_scene">已选场景，相机由场景驱动；把场景改回「无」即可重新选曲线。</string>
     <string name="wp_3d_curve">相机曲线</string>
     <string name="wp_3d_cycle">循环时长</string>
     <string name="wp_3d_speed">相机速度</string>
@@ -1132,14 +1185,14 @@
     <string name="settings_aod_edit_title_lock">锁屏编辑</string>
     <string name="settings_aod_edit_title_aod">息屏编辑</string>
     <string name="settings_aod_edit_row">编辑</string>
-    <string name="settings_aod_edit_row_desc_lock">时钟大小与位置、右侧小组件、底部大丸。</string>
-    <string name="settings_aod_edit_row_desc_aod">调整时钟与小组件的位置与大小。</string>
-    <string name="settings_aod_edit_hint_lock">长按时钟拖动改位置，拖右下角圆点改大小；点时钟出字体面板；点空白进全屏预览。</string>
-    <string name="settings_aod_edit_hint_aod">长按时钟拖动改位置；拖右下角圆点调大小；点时钟出字体面板；点空白进全屏预览。息屏另有轻微防烧屏漂移。</string>
+    <string name="settings_aod_edit_row_desc_lock">时钟位置与横纵拉伸、右侧小组件、底部大丸。</string>
+    <string name="settings_aod_edit_row_desc_aod">调整时钟的位置与横纵拉伸。</string>
+    <string name="settings_aod_edit_hint_lock">长按时钟拖动改位置，拖右下角圆点上下左右自由拉伸；点时钟出字体面板；点空白进全屏预览。</string>
+    <string name="settings_aod_edit_hint_aod">长按时钟拖动改位置；拖右下角圆点上下左右自由拉伸；点时钟出字体面板；点空白进全屏预览。息屏另有轻微防烧屏漂移。</string>
     <string name="settings_aod_edit_stage_hint">长按时钟拖动 · 点空白预览</string>
-    <string name="settings_aod_edit_inline_hint">拖动调整位置 · 拖右下圆点缩放 · 点小组件改尺寸</string>
+    <string name="settings_aod_edit_inline_hint">拖动调整位置 · 拖右下圆点自由拉伸 · 点小组件改尺寸</string>
     <string name="settings_aod_edit_widget_picker">添加小组件</string>
-    <string name="settings_aod_edit_widget_picker_desc">在编辑页的画布上点选添加，并可拖动摆放。</string>
+    <string name="settings_aod_edit_widget_picker_desc">在预览画布上点选添加，并可拖动摆放。</string>
     <string name="settings_aod_edit_snap">自动吸附</string>
     <string name="settings_aod_edit_snap_desc">拖动时对齐中线、三分线与左右边距，并显示参考线。</string>
     <string name="settings_aod_edit_widgets">小组件</string>
@@ -1152,8 +1205,9 @@
     <string name="settings_aod_edit_size_1x4">1×4</string>
     <string name="settings_aod_edit_preview">全屏预览</string>
     <string name="settings_aod_edit_preview_desc">底部三段按钮切换 息屏 / 锁屏 / 桌面。</string>
+    <string name="settings_aod_edit_layout_group">位置与形状</string>
     <string name="settings_aod_edit_reset">恢复默认布局</string>
-    <string name="settings_aod_edit_reset_desc">时钟、小组件、大丸位置全部回到默认。</string>
+    <string name="settings_aod_edit_reset_desc">时钟位置、大小与横纵拉伸全部回到默认；小组件与大丸不变。</string>
     <string name="settings_aod_edit_clock_panel">时钟样式</string>
     <string name="settings_aod_edit_font">字体</string>
     <string name="settings_aod_edit_font_sans">默认</string>
@@ -1189,6 +1243,9 @@
     <string name="settings_aod_edit_pill_scan">扫一扫</string>
     <string name="settings_aod_edit_pill_pay">收付款</string>
     <string name="settings_aod_edit_pill_scale">大小 %1$d%%</string>
+    <string name="settings_aod_edit_pill_add">添加快捷入口</string>
+    <string name="settings_aod_edit_pill_add_empty">已放满，先删掉一个再添加</string>
+    <string name="settings_aod_edit_pill_add_limit">系统锁屏底部只有两个位置，超出两个的只在预览里可见</string>
     <string name="settings_aod_edit_close">关闭</string>
     <string name="lock_widget_weather">天气</string>
     <string name="lock_widget_music">音乐</string>

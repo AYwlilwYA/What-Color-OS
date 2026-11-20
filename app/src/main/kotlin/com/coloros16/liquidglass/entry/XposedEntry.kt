@@ -76,16 +76,18 @@ class XposedEntry : XposedModule() {
         // 进程不再注入，系统模糊管线完全原样，玻璃完全靠 SystemUI 端每元素背景源）。
         // [2026-08-13 spec/10] Launcher 进程（com.android.launcher）加入：桌面文件夹背景液态玻璃化，
         // 与 SystemUI 共用同一套 posteffect drawBlurShader hook（FQCN 相同，两份独立 hook 实例）。
-        if (param.packageName != PACKAGE_SYSTEMUI && param.packageName != PACKAGE_LAUNCHER &&
-            param.packageName != PACKAGE_GALLERY && param.packageName != PACKAGE_CALCULATOR &&
-            param.packageName != PACKAGE_SMART_SIDEBAR && param.packageName != PACKAGE_ASSISTANT_SCREEN &&
-            param.packageName != PACKAGE_QUICK_SEARCH_BOX && param.packageName != PACKAGE_DEMO
+        val pkg = basePackage(param.packageName)
+        if (pkg != PACKAGE_SYSTEMUI && pkg != PACKAGE_LAUNCHER &&
+            pkg != PACKAGE_GALLERY && pkg != PACKAGE_CALCULATOR &&
+            pkg != PACKAGE_SMART_SIDEBAR && pkg != PACKAGE_ASSISTANT_SCREEN &&
+            pkg != PACKAGE_QUICK_SEARCH_BOX && pkg != PACKAGE_CALENDAR &&
+            pkg != PACKAGE_NOTE && pkg != PACKAGE_WEATHER && pkg != PACKAGE_DEMO
         ) return
         val classLoader = param.getDefaultClassLoader() ?: return
         // [doc/spec/110] 存宿主 classLoader：同 ClassLoader 复用重载时 onHotReloaded 直接取用；
         // 新 ClassLoader 场景下新类静态为空，由 resolveClassLoader 的兜底链接管。
-        cacheClassLoader(param.packageName, classLoader)
-        if (param.packageName == PACKAGE_SYSTEMUI) {
+        cacheClassLoader(pkg, classLoader)
+        if (pkg == PACKAGE_SYSTEMUI) {
             // 等应用初始化完成再装 hook；装载点挂失败时不锁死、不往未知时序里硬装
             val mounted = SystemUiLifecycle.install(this, classLoader) {
                 doInstall(PACKAGE_SYSTEMUI, classLoader)
@@ -94,7 +96,7 @@ class XposedEntry : XposedModule() {
                 Lg.e(TAG, "SystemUI lifecycle mount failed, hooks not installed this load")
             }
         } else {
-            doInstall(param.packageName, classLoader)
+            doInstall(pkg, classLoader)
         }
     }
 
@@ -143,9 +145,12 @@ class XposedEntry : XposedModule() {
             Lg.e(TAG, "hot-reload: null processName, keep old hooks")
             return
         }
-        if (pkg != PACKAGE_SYSTEMUI && pkg != PACKAGE_LAUNCHER &&
-            pkg != PACKAGE_GALLERY && pkg != PACKAGE_CALCULATOR && pkg != PACKAGE_SMART_SIDEBAR &&
-            pkg != PACKAGE_ASSISTANT_SCREEN && pkg != PACKAGE_QUICK_SEARCH_BOX && pkg != PACKAGE_DEMO
+        val basePkg = basePackage(pkg)
+        if (basePkg != PACKAGE_SYSTEMUI && basePkg != PACKAGE_LAUNCHER &&
+            basePkg != PACKAGE_GALLERY && basePkg != PACKAGE_CALCULATOR && basePkg != PACKAGE_SMART_SIDEBAR &&
+            basePkg != PACKAGE_ASSISTANT_SCREEN && basePkg != PACKAGE_QUICK_SEARCH_BOX &&
+            basePkg != PACKAGE_CALENDAR && basePkg != PACKAGE_NOTE && basePkg != PACKAGE_WEATHER &&
+            basePkg != PACKAGE_DEMO
         ) {
             // 非目标进程：按框架语义卸掉旧 hook（这些进程本就不该有模块 hook）
             param.oldHookHandles.forEach { h ->
@@ -156,9 +161,9 @@ class XposedEntry : XposedModule() {
             }
             return
         }
-        val cl = resolveClassLoader(pkg, param)
+        val cl = resolveClassLoader(basePkg, param)
         if (cl == null) {
-            Lg.e(TAG, "hot-reload: classLoader unresolved for $pkg, KEEP OLD HOOKS (no unhook)")
+            Lg.e(TAG, "hot-reload: classLoader unresolved for $basePkg, KEEP OLD HOOKS (no unhook)")
             return
         }
         // 旧 hook → 新 hook 的交接（等价框架 default，再立即重装）
@@ -170,9 +175,9 @@ class XposedEntry : XposedModule() {
             } catch (t: Throwable) {
             }
         }
-        Lg.i(TAG, "hot-reload: old hooks unhooked=$unhooked/$pkg, reinstalling into $pkg")
+        Lg.i(TAG, "hot-reload: old hooks unhooked=$unhooked/$pkg, reinstalling into $basePkg")
         try {
-            doInstall(pkg, cl, hotReload = true)
+            doInstall(basePkg, cl, hotReload = true)
         } catch (t: Throwable) {
             Lg.e(TAG, "hot-reload: reinstall threw ${t.javaClass.name}: ${t.message}", t)
         }
@@ -229,10 +234,9 @@ class XposedEntry : XposedModule() {
                 }
                 DesktopClockAnchorHook.install(this, classLoader)
             }
-            // 第三方 App（相册/计算器/智能侧边栏/速览）：A/B 族模糊挂载点登记（组件清单 + 预设按组件命中）。
-            // 渲染腿尚未接通（进程内无抓屏权限拿不到背景源），背景仍由系统模糊渲染，见 AppGlassHook 头注。
+            // 第三方 App（相册/计算器/侧边栏/速览/搜索/日历/笔记/天气）：A/B 族 + COUI 弹窗 + 背板玻璃，见 AppGlassHook 头注。
             PACKAGE_GALLERY, PACKAGE_CALCULATOR, PACKAGE_SMART_SIDEBAR, PACKAGE_ASSISTANT_SCREEN,
-            PACKAGE_QUICK_SEARCH_BOX -> {
+            PACKAGE_QUICK_SEARCH_BOX, PACKAGE_CALENDAR, PACKAGE_NOTE, PACKAGE_WEATHER -> {
                 VersionPool.query(packageName, VersionPool.readVersion(packageName))
                 AppGlassHook.install(this, classLoader, packageName)
             }
@@ -424,6 +428,11 @@ class XposedEntry : XposedModule() {
     private fun cachedClassLoader(pkg: String): ClassLoader? = cachedLoaders[pkg]
 
     companion object {
+        /** 进程名归一为基础包名：`pkg:sub` 子进程（如 smartsidebar:ui/:edgepanel）与主进程走同一安装链。 */
+        @JvmStatic
+        fun basePackage(processName: String): String =
+            com.coloros16.liquidglass.engine.ProcessName.basePackage(processName)
+
         /** SystemUI 进程（通知中心/控制中心）：Hook B 绘制替换 / Hook C 场景过滤。
          *  [2026-08-13 用户决定] BlurService 进程（com.oplus.blur）已全移除干预，不再有 PACKAGE_BLUR 常量。 */
         const val PACKAGE_SYSTEMUI = "com.android.systemui"
@@ -440,6 +449,12 @@ class XposedEntry : XposedModule() {
         const val PACKAGE_ASSISTANT_SCREEN = "com.coloros.assistantscreen"
         /** 全局搜索进程：COUI 长按菜单/弹窗窗口模糊组件登记（AppGlassHook B 族）。 */
         const val PACKAGE_QUICK_SEARCH_BOX = "com.heytap.quicksearchbox"
+        /** 日历进程：COUI 弹窗菜单/底栏玻璃（AppGlassHook + COUI 弹窗挂点）。 */
+        const val PACKAGE_CALENDAR = "com.coloros.calendar"
+        /** 笔记进程：COUI 弹窗菜单玻璃。 */
+        const val PACKAGE_NOTE = "com.coloros.note"
+        /** 天气进程：COUI 弹窗菜单玻璃。 */
+        const val PACKAGE_WEATHER = "com.coloros.weather2"
 
         const val PACKAGE_DEMO = "com.coloros16.liquidglass.demo"
         /** 模块自身包名（守卫读自己的 APK 更新时间用；宿主进程内 ctx.packageName 是宿主）。 */

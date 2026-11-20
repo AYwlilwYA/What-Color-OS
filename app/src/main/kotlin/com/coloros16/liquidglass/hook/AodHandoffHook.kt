@@ -5,20 +5,31 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
+import com.coloros16.liquidglass.config.EffectConfigStore
 import com.coloros16.liquidglass.config.Prefs
 import com.coloros16.liquidglass.engine.ChromakeyMask
 import com.coloros16.liquidglass.engine.ContentLayerConfig
+import com.coloros16.liquidglass.engine.HomeTransitionOverride
+import com.coloros16.liquidglass.engine.MaskCenterPolicy
 import com.coloros16.liquidglass.engine.MaskLayerConfig
+import com.coloros16.liquidglass.engine.PumpTakeoverPolicy
+import com.coloros16.liquidglass.engine.ReplayLedger
+import com.coloros16.liquidglass.engine.SceneState
 import com.coloros16.liquidglass.engine.SceneStateMapper
+import com.coloros16.liquidglass.engine.SeamProfilePolicy
 import com.coloros16.liquidglass.engine.ScreenMetrics
 import com.coloros16.liquidglass.engine.StyleCapabilities
 import com.coloros16.liquidglass.engine.TransitionBridge
 import com.coloros16.liquidglass.engine.TransitionEdge
 import com.coloros16.liquidglass.engine.TransitionEvaluator
 import com.coloros16.liquidglass.engine.TransitionProfile
+import com.coloros16.liquidglass.engine.effect.HomeMotion
 import com.coloros16.liquidglass.log.Lg
 import com.coloros16.liquidglass.ui.aod.AodSceneCatalog
+import com.coloros16.liquidglass.ui.aod.AodStyleCatalog
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedInterface.ExceptionMode
 import java.lang.reflect.Method
@@ -56,6 +67,9 @@ object AodHandoffHook {
     private const val METHOD_START = "startTransition"
     private const val METHOD_UPDATE = "updateTransition"
     private const val METHOD_EMIT = "emitTransition"
+    private const val MODULE_PACKAGE = "com.coloros16.liquidglass"
+    private const val STATE_STARTED = "STARTED"
+    private const val SELFTIME_WATCH_MS = 120L
     private const val CLASS_TRANSITION_STEP =
         "com.android.systemui.keyguard.shared.model.TransitionStep"
 
@@ -66,6 +80,12 @@ object AodHandoffHook {
         sceneContinuous = false,
         mask = true,
         crossfade = true,
+    )
+
+    /** 走几何揭开、需要消费样式遮罩中心的两条边（与预览侧同一组）。 */
+    private val MASK_CENTER_EDGES = arrayOf(
+        TransitionEdge.AOD_TO_LOCK,
+        TransitionEdge.LOCK_TO_AOD,
     )
 
     /** 照片类息屏：揭开由色键帧承担，几何遮罩让位。 */
@@ -90,15 +110,23 @@ object AodHandoffHook {
     private val updateHits = AtomicLong()
     private val emitHits = AtomicLong()
     private val replayDrops = AtomicLong()
+    private val selfTimeSerial = AtomicLong()
 
     @Volatile private var installed = false
     @Volatile private var gateEnabled = false
     @Volatile private var gateReadAt = 0L
     @Volatile private var revealByFrame = false
     @Volatile private var revealReadAt = 0L
+    @Volatile private var maskCenterX = MaskCenterPolicy.SCREEN_CENTER
+    @Volatile private var maskCenterY = MaskCenterPolicy.SCREEN_CENTER
+    @Volatile private var homeOverrideId: String? = null
+    @Volatile private var homeOverrideMs = 0L
     @Volatile private var stopped = false
     @Volatile private var lastFrom = "?"
     @Volatile private var lastTo = "?"
+
+    /** 最近一次由确定来源（完整转场 / 锁屏边沿）记录的真实态；起点名不具判定力时兜底。 */
+    @Volatile private var lastRealScene: SceneState? = null
     @Volatile private var lastUuid = "?"
     @Volatile private var lastProgress = Float.NaN
     @Volatile private var lastState = "?"
@@ -128,10 +156,11 @@ object AodHandoffHook {
         refreshGate()
         var hook = 0
         try {
-            val repo = Class.forName(CLASS_REPO, false, classLoader)
-            val info = Class.forName(CLASS_TRANSITION_INFO, false, classLoader)
-            val state = Class.forName(CLASS_TRANSITION_STATE, false, classLoader)
-            val cont = Class.forName("kotlin.coroutines.Continuation", false, classLoader)
+            val loader = hostLoader(classLoader)
+            val repo = Class.forName(CLASS_REPO, false, loader)
+            val info = Class.forName(CLASS_TRANSITION_INFO, false, loader)
+            val state = Class.forName(CLASS_TRANSITION_STATE, false, loader)
+            val cont = Class.forName("kotlin.coroutines.Continuation", false, loader)
             fromGetter = info.getMethod("getFrom")
             toGetter = info.getMethod("getTo")
             try {
@@ -151,7 +180,7 @@ object AodHandoffHook {
             } catch (t: Throwable) {
                 Lg.e(TAG, "aod-install $METHOD_START 失败 ${t.javaClass.simpleName}: ${t.message}", t)
             }
-            hook += mountEmit(api, repo, classLoader)
+            hook += mountEmit(api, repo, loader)
             val update = resolveUpdateMethod(repo, state, cont)
             if (update == null) {
                 Lg.e(TAG, "aod-install $METHOD_UPDATE 两种签名都取不到，进度泵不可用")
@@ -190,14 +219,35 @@ object AodHandoffHook {
     }
 
     /**
+     * 宿主 loader 解析：入参能加载仓库类就用入参，否则退到进程 Application loader。
+     *
+     * 热重载线程的 contextClassLoader 可能是模块自己的，用它加载宿主类必然 CNFE。
+     */
+    private fun hostLoader(fallback: ClassLoader): ClassLoader {
+        if (canLoadRepo(fallback)) return fallback
+        val host = runCatching { Lg.processContext()?.classLoader }.getOrNull()
+        if (host != null && canLoadRepo(host)) {
+            Lg.i(TAG, "aod-loader 入参不可用，改用宿主 Application loader")
+            return host
+        }
+        logThrottled("aod-loader-miss", "两种 loader 都加载不到转场仓库类")
+        return fallback
+    }
+
+    private fun canLoadRepo(loader: ClassLoader): Boolean =
+        runCatching { Class.forName(CLASS_REPO, false, loader) }.isSuccess
+
+    /**
      * 热重载停机点：清装载标志与全部缓存/取值反射，让新类能重新装载。
      *
      * 不清 installed 会让新类的 install 走重复装载分支直接 return，整条进度泵停在旧类上。
      */
     fun shutdownForHotReload() {
+        unregisterScreenReceiver()
         installed = false
         bridge = null
         currentEdge = null
+        lastRealScene = null
         fromGetter = null
         toGetter = null
         stepFromGetter = null
@@ -207,9 +257,16 @@ object AodHandoffHook {
         throttleAt.clear()
         gateReadAt = 0L
         revealReadAt = 0L
+        maskCenterX = MaskCenterPolicy.SCREEN_CENTER
+        maskCenterY = MaskCenterPolicy.SCREEN_CENTER
+        homeOverrideId = null
+        homeOverrideMs = 0L
         lastProgress = Float.NaN
         lastState = "?"
         lastStartToken = -1L
+        selfTimeSerial.incrementAndGet()
+        watchHandler?.removeCallbacksAndMessages(null)
+        watchHandler = null
         Lg.i(
             TAG,
             "handoff-hotreload-shutdown start=${startHits.get()} upd=${updateHits.get()} " +
@@ -268,23 +325,73 @@ object AodHandoffHook {
         if (to != null) lastTo = to
         lastProgress = normalizeProgress(stepValueGetter?.invoke(step) as? Float ?: Float.NaN)
         lastState = stepStateGetter?.invoke(step)?.toString() ?: "?"
-        resolveEdge()?.let { edge ->
-            if (currentEdge != edge) {
-                currentEdge = edge
-                logThrottled("aod-edge", "edge=$edge from=$lastFrom to=$lastTo src=emit")
+        val edge = resolveEdge()
+        if (currentEdge != edge) {
+            currentEdge = edge
+            if (edge != null) {
+                logThrottled("aod-edge", "edge=$edge from=$lastFrom to=$lastTo src=emit${fallbackTag()}")
+            } else {
+                logThrottled(
+                    "aod-edge-unknown",
+                    "边未识别 from=$lastFrom to=$lastTo src=emit",
+                    UNKNOWN_EDGE_LOG_MS,
+                )
             }
-        } ?: run {
-            currentEdge = null
-            logThrottled(
-                "aod-edge-unknown",
-                "边未识别 from=$lastFrom to=$lastTo src=emit",
-                UNKNOWN_EDGE_LOG_MS,
-            )
+            notifyStageEdge(edge)
         }
         if (!guard.stillCurrent(lastStartToken)) {
             replayDrops.incrementAndGet()
         }
         feedBridge()
+        if (lastState == STATE_STARTED) {
+            armSelfTimedWatch()
+        }
+    }
+
+    /**
+     * 系统宣告开边后的一次性延后判定：到点仍没见过中间帧就交内部时间轴补播。
+     *
+     * 单次延迟、边变了就作废，不是固定间隔轮询。
+     */
+    private fun armSelfTimedWatch() {
+        val edge = currentEdge ?: return
+        val b = bridge ?: return
+        if (!refreshGate()) return
+        val token = selfTimeSerial.incrementAndGet()
+        val handler = watchHandler() ?: run {
+            logThrottled("aod-selftime-nolooper", "主线程Looper取不到，无帧边不补播 edge=$edge")
+            return
+        }
+        handler.postDelayed(
+            {
+                if (token != selfTimeSerial.get()) return@postDelayed
+                if (currentEdge != edge) return@postDelayed
+                if (!refreshGate()) return@postDelayed
+                if (!PumpTakeoverPolicy.shouldSelfTime(edge, true, b.clock.pumpSawMovement())) {
+                    return@postDelayed
+                }
+                try {
+                    com.coloros16.liquidglass.hook.aod.AodStageHook.playSystemEdge(edge)
+                } catch (t: Throwable) {
+                    logThrottled(
+                        "aod-selftime",
+                        "内部时间轴接管失败 ${t.javaClass.simpleName} edge=$edge",
+                    )
+                }
+            },
+            SELFTIME_WATCH_MS,
+        )
+    }
+
+    private var screenReceiver: BroadcastReceiver? = null
+    private var watchHandler: Handler? = null
+
+    private fun watchHandler(): Handler? {
+        watchHandler?.let { return it }
+        val looper = runCatching { Looper.getMainLooper() }.getOrNull() ?: return null
+        val created = Handler(looper)
+        watchHandler = created
+        return created
     }
 
     /**
@@ -337,9 +444,21 @@ object AodHandoffHook {
                 content = ContentLayerConfig(),
             ),
         )
+        for (edge in TransitionEdge.values()) {
+            val profile = TransitionProfile(
+                mask = MaskLayerConfig(enabled = true),
+                content = ContentLayerConfig(),
+            )
+            SeamProfilePolicy.apply(edge, profile)
+            evaluator.setProfile(edge, profile)
+        }
         val created = TransitionBridge(ScreenMetrics(w, h, dm?.density ?: 1f), evaluator = evaluator)
         created.setCapabilities(HOST_CAPABILITIES, HOST_CAPABILITIES)
-        Lg.i(TAG, "aod-bridge ready ${w.toInt()}x${h.toInt()} caps host=mask+crossfade")
+        Lg.i(
+            TAG,
+            "aod-bridge ready ${w.toInt()}x${h.toInt()} caps host=mask+crossfade " +
+                "seam=reveal(noOuterFade)+slide(${SeamProfilePolicy.SLIDE_FRACTION})",
+        )
         return created
     }
 
@@ -366,21 +485,25 @@ object AodHandoffHook {
             fromGetter?.let { m -> safeEnumName(m, info)?.let { lastFrom = it } }
             toGetter?.let { m -> safeEnumName(m, info)?.let { lastTo = it } }
         }
+        val previous = lastStartToken
         lastStartToken = guard.generation()
         lastStartInWindow = guard.startWithinWindow(SystemClock.uptimeMillis())
-        if (!guard.stillCurrent(lastStartToken)) {
+        if (ReplayLedger.superseded(previous, lastStartToken)) {
             replayDrops.incrementAndGet()
         }
-        resolveEdge()?.let { edge ->
+        val edge = resolveEdge()
+        if (currentEdge != edge) {
             currentEdge = edge
-            logThrottled("aod-edge", "edge=$edge from=$lastFrom to=$lastTo")
-        } ?: run {
-            currentEdge = null
-            logThrottled(
-                "aod-edge-unknown",
-                "边未识别 from=$lastFrom to=$lastTo（待真机校准命名）",
-                UNKNOWN_EDGE_LOG_MS,
-            )
+            if (edge != null) {
+                logThrottled("aod-edge", "edge=$edge from=$lastFrom to=$lastTo${fallbackTag()}")
+            } else {
+                logThrottled(
+                    "aod-edge-unknown",
+                    "边未识别 from=$lastFrom to=$lastTo（待真机校准命名）",
+                    UNKNOWN_EDGE_LOG_MS,
+                )
+            }
+            notifyStageEdge(edge)
         }
     }
 
@@ -395,8 +518,30 @@ object AodHandoffHook {
         feedBridge()
     }
 
-    private fun resolveEdge(): TransitionEdge? =
-        SceneStateMapper.resolveEdge(lastFrom, lastTo)
+    private fun resolveEdge(): TransitionEdge? {
+        val edge = SceneStateMapper.resolveEdge(lastFrom, lastTo, lastRealScene)
+        if (!SceneStateMapper.isAmbiguousStart(lastFrom)) {
+            SceneStateMapper.fromTransitionStateName(lastTo)?.let { lastRealScene = it }
+        }
+        return edge
+    }
+
+    private fun fallbackTag(): String =
+        if (SceneStateMapper.isAmbiguousStart(lastFrom)) " fb=$lastRealScene" else ""
+
+    /** 供确定来源（锁屏边沿等）记录当前真实态。 */
+    fun noteScene(state: SceneState) {
+        lastRealScene = state
+    }
+
+    /** 边变化通知舞台武装帧回调；舞台异常不影响进度记账（fail-open）。 */
+    private fun notifyStageEdge(edge: TransitionEdge?) {
+        try {
+            com.coloros16.liquidglass.hook.aod.AodStageHook.noteSystemEdge(edge)
+        } catch (t: Throwable) {
+            logThrottled("aod-stage-notify", "舞台通知失败 ${t.javaClass.simpleName} edge=$edge")
+        }
+    }
 
     /** 门控开着且有有效边/进度时，把系统进度写进求值桥；每 500ms 打一条参数摘要。 */
     private fun feedBridge() {
@@ -405,6 +550,7 @@ object AodHandoffHook {
         val edge = currentEdge ?: return
         val progress = lastProgress
         if (progress.isNaN()) return
+        noteSupersede(bridge, edge)
         bridge.onSystemProgress(edge, progress)
         val p = bridge.evaluateNow()
         logThrottled(
@@ -418,13 +564,35 @@ object AodHandoffHook {
         )
     }
 
+    /**
+     * 新边在旧边未播完时到达：留痕以区分「后继边」与「误判边」。
+     *
+     * 只在新旧边不同且旧边仍在播放时打一条，后续帧边已相等，不会连打，也不轮询。
+     */
+    private fun noteSupersede(bridge: TransitionBridge, edge: TransitionEdge) {
+        val st = bridge.clock.state()
+        val old = st.edge ?: return
+        if (!st.playing || old == edge) return
+        Lg.i(
+            TAG,
+            String.format(
+                Locale.US,
+                "aod-edge-supersede old=%s tOld=%.3f src=%s new=%s",
+                old, st.t, st.source, edge,
+            ),
+        )
+    }
+
     /** 供后续渲染消费方取同一份桥（未装载时返回 null）。 */
     fun bridgeOrNull(): TransitionBridge? = bridge
 
+    /** 当前已识别的系统转场边；舞台挂层时据此补武装帧回调。 */
+    fun currentEdgeOrNull(): TransitionEdge? = currentEdge
+
     /**
-     * 按当前息屏样式刷新揭开能力：照片类交给色键帧，其余走几何遮罩。
+     * 按当前息屏样式刷新揭开能力与遮罩中心：照片类交给色键帧，其余走几何遮罩。
      *
-     * 读键走 TTL 缓存，只在档位真变时写桥并打一条日志。
+     * 读键走 TTL 缓存，能力与中心各自只在真变时写桥；两者共用一次读键。
      */
     fun refreshRevealCapability() {
         val b = bridge ?: return
@@ -432,20 +600,105 @@ object AodHandoffHook {
         if (revealReadAt != 0L && now - revealReadAt < GATE_TTL_MS) return
         revealReadAt = now
         val a = api ?: return
-        val byFrame = try {
+        val styleId = try {
             val prefs = Prefs.read(a)
             val styleOn = prefs.getBoolean(Prefs.KEY_ALIVE_AOD_STYLE, false)
             val id = prefs.getString(Prefs.KEY_ALIVE_AOD_STYLE_ID, Prefs.DEFAULT_ALIVE_AOD_STYLE_ID)
-            styleOn && ChromakeyMask.revealsByFrame(AodSceneCatalog.photoOf(id ?: "")?.id ?: 0)
+            val byFrame = styleOn &&
+                ChromakeyMask.revealsByFrame(AodSceneCatalog.photoOf(id ?: "")?.id ?: 0)
+            applyReveal(b, byFrame)
+            if (styleOn) id else null
         } catch (t: Throwable) {
             logThrottled("aod-reveal-read", "读样式失败 ${t.javaClass.simpleName} 保持 $revealByFrame")
-            revealByFrame
+            null
         }
+        applyMaskCenter(b, styleId)
+        applyHomeTransition(b)
+    }
+
+    /**
+     * 桌面过渡选项覆盖：用户主动选了才改配方，默认「不接管」保持接缝配方。
+     *
+     * 与揭开能力共用同一次 TTL 读键节奏；选项与时长都只在真变时写桥。
+     */
+    private fun applyHomeTransition(b: TransitionBridge) {
+        val a = api ?: return
+        val settings = try {
+            EffectConfigStore.read(a)
+        } catch (t: Throwable) {
+            logThrottled("aod-home-read", "桌面过渡配置读失败 ${t.javaClass.simpleName} 保持 $homeOverrideId")
+            return
+        }
+        val id = HomeMotion.transitionForEdge(TransitionEdge.LOCK_TO_HOME, settings)
+        val ms = HomeTransitionOverride.durationMs(TransitionEdge.LOCK_TO_HOME, settings)
+        if (id == homeOverrideId && ms == homeOverrideMs) return
+        homeOverrideId = id
+        homeOverrideMs = ms
+        for (edge in TransitionEdge.values()) {
+            val override = HomeTransitionOverride.profileFor(edge, settings)
+            val profile = TransitionProfile(
+                mask = MaskLayerConfig(enabled = true),
+                content = ContentLayerConfig(),
+            )
+            if (override != null) {
+                profile.mask.enabled = override.mask.enabled
+                profile.content.enabled = override.content.enabled
+                profile.content.easing = override.content.easing
+                profile.content.direction = override.content.direction
+                profile.content.slideFraction = override.content.slideFraction
+            } else {
+                SeamProfilePolicy.apply(edge, profile)
+            }
+            b.evaluator.setProfile(edge, profile)
+        }
+        Lg.i(TAG, "aod-home-transition id=$id durationMs=$ms governed=${HomeTransitionOverride.governs(TransitionEdge.LOCK_TO_HOME)}")
+    }
+
+    /** 桌面过渡选项生效时该边的时长；返回 0 表示交回样式时长。 */
+    fun homeTransitionMs(edge: TransitionEdge): Long {
+        if (homeOverrideMs <= 0L) return 0L
+        return if (HomeTransitionOverride.governs(edge)) homeOverrideMs else 0L
+    }
+
+    /** 能力位只在档位真变时写桥，避免逐帧重设。 */
+    private fun applyReveal(b: TransitionBridge, byFrame: Boolean) {
         if (byFrame == revealByFrame) return
         revealByFrame = byFrame
         val caps = if (byFrame) FRAME_CAPABILITIES else HOST_CAPABILITIES
         b.setCapabilities(caps, caps)
         Lg.i(TAG, "aod-reveal caps: frame=$byFrame")
+    }
+
+    /**
+     * 把样式声明的遮罩中心写进两条揭开边的配方，与预览侧同源。
+     *
+     * 样式关闭时回正中；中心未变则不写，避免逐帧改配方触发无谓重算。
+     */
+    private fun applyMaskCenter(b: TransitionBridge, styleId: String?) {
+        val style = styleId?.let { AodStyleCatalog.find(it) }
+        val center = FloatArray(2)
+        MaskCenterPolicy.resolve(
+            style?.maskCenterX ?: MaskCenterPolicy.SCREEN_CENTER,
+            style?.maskCenterY ?: MaskCenterPolicy.SCREEN_CENTER,
+            center,
+        )
+        if (!MaskCenterPolicy.changed(maskCenterX, maskCenterY, center[0], center[1])) return
+        maskCenterX = center[0]
+        maskCenterY = center[1]
+        for (edge in MASK_CENTER_EDGES) {
+            val mask = b.evaluator.profileOf(edge).mask
+            mask.centerXFraction = center[0]
+            mask.centerYFraction = center[1]
+        }
+        Lg.i(
+            TAG,
+            String.format(
+                Locale.US,
+                "aod-mask-center style=%s cx=%.3f cy=%.3f declared=%b",
+                styleId ?: "-", center[0], center[1],
+                style != null && MaskCenterPolicy.declared(style.maskCenterX, style.maskCenterY),
+            ),
+        )
     }
 
     private fun safeEnumName(m: Method, target: Any): String? =
@@ -467,15 +720,17 @@ object AodHandoffHook {
 
     /**
      * 停机点：SCREEN_ON 恢复打印并武装等待窗，SCREEN_OFF 置 stopped 停进度打印。
-     * 注册用进程 Application context（生命周期与进程一致，无需 unregister）；
-     * context 拿不到则留 stub（stopped 恒 false = 打印不停）并打日志。
+     *
+     * 每代自己注册、自己在热重载停机点摘掉；不摘就会逐代堆叠，
+     * 同一次屏幕事件被 N 代各处理一次（代次跳 N、停机标志互相覆盖）。
      */
     private fun registerScreenReceiver() {
-        val ctx = Lg.processContext()
+        val ctx = Lg.processContext()?.applicationContext
         if (ctx == null) {
             logThrottled("aod-screen-reg", "进程 context 为空，停机点未挂（打印不停机）")
             return
         }
+        unregisterScreenReceiver()
         try {
             val filter = IntentFilter().apply {
                 addAction(Intent.ACTION_SCREEN_ON)
@@ -484,6 +739,10 @@ object AodHandoffHook {
             }
             val receiver = object : BroadcastReceiver() {
                 override fun onReceive(context: Context?, intent: Intent?) {
+                    if (screenReceiver !== this) {
+                        runCatching { ctx.unregisterReceiver(this) }
+                        return
+                    }
                     try {
                         when (intent?.action) {
                             Intent.ACTION_SCREEN_ON -> {
@@ -492,19 +751,18 @@ object AodHandoffHook {
                                 com.coloros16.liquidglass.hook.aod.AodStageHook.noteInteraction()
                                 Lg.i(TAG, "aod-screen on gen=$gen wake=${guard.wakeSerial()}")
                             }
-                            Intent.ACTION_WALLPAPER_CHANGED -> {
-                                com.coloros16.liquidglass.hook.aod.AodWorldLayer.noteWallpaperChanged()
-                                com.coloros16.liquidglass.hook.aod.AodStageHook.anyLayer()?.let { l ->
-                                    com.coloros16.liquidglass.hook.aod.AodWorldLayer.ensureWallpaper {
-                                        l.postInvalidate()
-                                    }
-                                }
-                                Lg.i(TAG, "aod-wallpaper changed, world source refresh queued")
-                            }
                             Intent.ACTION_SCREEN_OFF -> {
                                 stopped = true
                                 val gen = guard.onScreenOff()
                                 Lg.i(TAG, "aod-screen off gen=$gen wake=${guard.wakeSerial()}")
+                            }
+                            Intent.ACTION_WALLPAPER_CHANGED -> {
+                                com.coloros16.liquidglass.hook.aod.AodWorldLayer.noteWallpaperChanged()
+                                com.coloros16.liquidglass.hook.aod.AodStageHook.anyLayer()?.let { l ->
+                                    com.coloros16.liquidglass.hook.aod.AodWorldLayer
+                                        .ensureWallpaper { l.postInvalidate() }
+                                }
+                                Lg.i(TAG, "aod-wallpaper changed, world source refresh queued")
                             }
                         }
                     } catch (t: Throwable) {
@@ -513,14 +771,24 @@ object AodHandoffHook {
                 }
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                ctx.applicationContext.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+                ctx.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
             } else {
-                ctx.applicationContext.registerReceiver(receiver, filter)
+                ctx.registerReceiver(receiver, filter)
             }
+            screenReceiver = receiver
             Lg.i(TAG, "aod-screen 停机点已挂 stop=$stopped")
         } catch (t: Throwable) {
             logThrottled("aod-screen-reg", "屏幕广播注册失败 ${t.javaClass.simpleName} 停机点为 stub")
         }
+    }
+
+    /** 摘本代广播：热重载停机点与重复注册前都要调，否则接收器逐代堆叠。 */
+    private fun unregisterScreenReceiver() {
+        val old = screenReceiver ?: return
+        screenReceiver = null
+        val ctx = Lg.processContext()?.applicationContext ?: return
+        runCatching { ctx.unregisterReceiver(old) }
+            .onFailure { logThrottled("aod-screen-unreg", "摘广播失败 ${it.javaClass.simpleName}") }
     }
 }
 

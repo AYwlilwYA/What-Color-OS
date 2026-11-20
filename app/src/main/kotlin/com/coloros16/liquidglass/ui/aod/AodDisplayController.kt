@@ -168,8 +168,13 @@ class AodDisplayController(
 
         bound = true
         appliedConfigId = localPrefs.getString(Prefs.KEY_ALIVE_AOD_CONFIG_ID, null)
-        appliedId = store.find(appliedConfigId)?.styleId
-            ?: styleOf(readString(Prefs.KEY_ALIVE_AOD_STYLE_ID, Prefs.DEFAULT_ALIVE_AOD_STYLE_ID)).id
+        appliedId = styleOf(
+            AodStyleSelection.resolve(
+                appliedConfigId,
+                { store.find(it)?.styleId },
+                readString(Prefs.KEY_ALIVE_AOD_STYLE_ID, Prefs.DEFAULT_ALIVE_AOD_STYLE_ID),
+            ),
+        ).id
         draftId = appliedId
         draftConfigId = appliedConfigId
         appliedEnabled = readBoolean(Prefs.KEY_ALIVE_AOD_STYLE, Prefs.DEFAULT_ALIVE_AOD_STYLE)
@@ -252,9 +257,12 @@ class AodDisplayController(
         playing = true
         bar.setInteractive(false)
         val startDelay = if (fromAod) AOD_OPEN_DELAY_MS else 0L
-        clock.play(edge, AodSceneCatalog.durationOf(draftId, edge), 0f, ClockSource.PREVIEW, startDelay)
+        val effects = EffectSettings.parse(readString(Prefs.KEY_EFFECT_CONFIG, ""))
+        val edgeMs = AodSceneCatalog.durationOf(draftId, edge, effects)
+        preview.playbackEdgeMs = edgeMs
+        clock.play(edge, edgeMs, 0f, ClockSource.PREVIEW, startDelay)
         scheduleFrame()
-        Lg.i(TAG, "play edge=$edge target=$target delay=$startDelay")
+        Lg.i(TAG, "play edge=$edge target=$target delay=$startDelay dur=$edgeMs")
     }
 
     override fun onScrubStart() {
@@ -263,6 +271,9 @@ class AodDisplayController(
             return
         }
         scrub = true
+        // 播放边长是「本次播放」的账本，拖动时边由 scrubP 决定、可能换成另一条
+        // ⇒ 不清零就会拿上一条边的边长去归一化，曲线被按错的绝对时长拉伸。
+        preview.playbackEdgeMs = 0L
         scrubP = SceneTimeline.anchor(current)
         bar.setScrub(true, scrubP)
         badge.visibility = View.VISIBLE
@@ -360,6 +371,9 @@ class AodDisplayController(
         preview.aodColorMix = effects.param(com.coloros16.liquidglass.engine.effect.EffectParams.AOD_COLOR_MIX)
         preview.aodRotateSpeed = effects.param(com.coloros16.liquidglass.engine.effect.EffectParams.AOD_ROTATE_SPEED)
         preview.aodPhotoTilt = effects.param(com.coloros16.liquidglass.engine.effect.EffectParams.AOD_PHOTO_TILT)
+        preview.homeTransition = effects.homeTransition
+        preview.homeTransitionDurationMs =
+            effects.param(com.coloros16.liquidglass.engine.effect.EffectParams.HOME_TRANSITION_DURATION)
         preview.homeIconEffect = effects.homeIconEffect
         preview.homeIconDurationMs =
             effects.param(com.coloros16.liquidglass.engine.effect.EffectParams.HOME_ICON_DURATION)
@@ -472,6 +486,10 @@ class AodDisplayController(
                 editPanel?.showPillPanel(typeId, currentLayout() ?: return)
             }
 
+            override fun onPillSlotTapped(xFrac: Float, yFrac: Float) {
+                editPanel?.showPillSlotPanel(xFrac, yFrac, currentLayout() ?: return)
+            }
+
             override fun onLayoutEdited() {
                 persistLayout()
             }
@@ -489,6 +507,28 @@ class AodDisplayController(
             },
         )
         Lg.i(TAG, "inline edit bound lock=${delegate.lockSettings != null} aod=${delegate.aodSettings != null}")
+    }
+
+    /**
+     * 设置行「编辑」→ 就地编辑：关面板、把预览落到该态、选中时钟露出手柄。
+     *
+     * 正在播动画或拖动时不硬切，只选中当前态，避免打断转场。
+     */
+    private fun enterInlineEdit(editPageId: String) {
+        settingsSheet?.dismiss()
+        settingsSheet = null
+        val target =
+            if (editPageId == AodSettingsPages.PAGE_AOD_EDIT) SceneState.AOD else SceneState.LOCK
+        val busy = playing || scrub || settling
+        if (!busy && current != target) {
+            current = target
+            rebuildDock()
+            preview.render(target, null, 0f)
+            bar.setActive(indexOf(target))
+        }
+        preview.edit.selectClock()
+        hint.text = context.getString(R.string.settings_aod_edit_inline_hint)
+        Lg.i(TAG, "inline edit enter page=$editPageId target=$target busy=$busy state=$current")
     }
 
     private fun sceneSpecAnchor(state: SceneState): com.coloros16.liquidglass.engine.ClockAnchor =
@@ -615,8 +655,11 @@ class AodDisplayController(
             onChanged = { updateUi() },
             styleOverride = draftId,
             editAction = { action ->
-                if (action == "widget_picker") {
-                    currentLayout()?.let { editPanel?.showWidgetPicker(it) }
+                when {
+                    action == "widget_picker" -> currentLayout()?.let { editPanel?.showWidgetPicker(it) }
+                    action.startsWith("inline_edit:") ->
+                        enterInlineEdit(action.removePrefix("inline_edit:"))
+                    else -> Lg.w(TAG, "edit action unknown=$action")
                 }
             },
             pickPhoto = pickPhoto,

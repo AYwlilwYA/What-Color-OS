@@ -6,6 +6,8 @@ import com.coloros16.liquidglass.engine.CameraPath
 import com.coloros16.liquidglass.engine.CameraPaths
 import com.coloros16.liquidglass.engine.CameraPose
 import com.coloros16.liquidglass.engine.Mat4
+import com.coloros16.liquidglass.engine.SceneWorldLayout
+import com.coloros16.liquidglass.engine.SnowMountainCamera
 import com.coloros16.liquidglass.log.Lg
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -36,10 +38,13 @@ class Gl3DSceneRenderer {
     private var starViewProj = 0
     private var starTime = 0
     private var ridgeViewProj = 0
+    private var ridgeModel = 0
     private var ridgeHeightBase = 0
     private var ridgeHeightScale = 0
+    private var ridgeFogScale = 0
     private var ridgeColorLow = 0
     private var ridgeColorHigh = 0
+    private var ridgeFogColor = 0
 
     private var moonPosAttr = 0
     private var moonNormalAttr = 0
@@ -61,6 +66,21 @@ class Gl3DSceneRenderer {
 
     private var camera: CameraPath = CameraPaths.byId(CameraPaths.STILL)
     private val pose = CameraPose()
+    private val scenePose = CameraPose()
+    private var sceneMode = false
+    private var sceneFar = CameraMatrices.FAR_PLANE
+    private var sceneDark = 0f
+    private var sceneRot = 0f
+
+    private var worldFarRidgeBuffer: FloatBuffer? = null
+    private var worldFarRidgeCount = 0
+    private var worldNearRidgeBuffer: FloatBuffer? = null
+    private var worldNearRidgeCount = 0
+    private var worldStarBuffer: FloatBuffer? = null
+    private var worldDomeBuffer: FloatBuffer? = null
+    private var worldDomeIndexBuffer: ShortBuffer? = null
+    private var worldDomeIndexCount = 0
+    private val dimScratch = FloatArray(3)
     private val viewProj = Mat4()
     private val view = Mat4()
     private val projection = Mat4()
@@ -72,6 +92,31 @@ class Gl3DSceneRenderer {
 
     fun setCamera(path: CameraPath) {
         camera = path
+        sceneMode = false
+    }
+
+    /**
+     * 切到三态场景相机：位置与朝向由外部逐帧喂（指数逼近求值在引擎侧）。
+     *
+     * 远裁剪面按场景尺度放大，否则相机距离超过默认远面会整幅被裁掉。
+     */
+    fun setSceneCamera(farPlane: Float) {
+        sceneMode = true
+        sceneFar = farPlane
+    }
+
+    /** 逐帧写入场景相机位姿（位置 + 由注视点反解的欧拉角）。 */
+    fun setScenePose(source: CameraPose) {
+        scenePose.set(
+            source.x, source.y, source.z,
+            source.yawDeg, source.pitchDeg, source.rollDeg, source.fovDeg,
+        )
+    }
+
+    /** 逐帧写入场景材质态：暗态压夜色、旋转量转山体。 */
+    fun setSceneMaterial(dark: Float, rot: Float) {
+        sceneDark = dark.coerceIn(0f, 1f)
+        sceneRot = rot.coerceIn(0f, 1f)
     }
 
     fun onSurfaceChanged(width: Int, height: Int) {
@@ -96,23 +141,144 @@ class Gl3DSceneRenderer {
 
     fun draw(cameraProgress: Float, offsetX: Float, parallax: Float, elapsedSec: Float) {
         if (!initialized) return
-        camera.sample(cameraProgress, pose)
-        val sway = (offsetX.coerceIn(0f, 1f) - 0.5f) * 2f
-        pose.x += sway * 0.35f * parallax
-        pose.yawDeg += sway * 7f * parallax
+        val active: CameraPose
+        if (sceneMode) {
+            active = scenePose
+        } else {
+            camera.sample(cameraProgress, pose)
+            val sway = (offsetX.coerceIn(0f, 1f) - 0.5f) * 2f
+            pose.x += sway * 0.35f * parallax
+            pose.yawDeg += sway * 7f * parallax
+            active = pose
+        }
 
-        CameraMatrices.buildProjection(pose, aspect, projection)
-        CameraMatrices.buildView(pose, view)
+        if (sceneMode) {
+            CameraMatrices.buildProjection(active, aspect, sceneFar, projection)
+        } else {
+            CameraMatrices.buildProjection(active, aspect, projection)
+        }
+        CameraMatrices.buildView(active, view)
         viewProj.multiply(projection, view)
 
         GLES20.glClearColor(0.008f, 0.012f, 0.028f, 1f)
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
 
         drawSky()
-        drawStars(elapsedSec)
-        drawMoon(elapsedSec)
-        drawRidge(ridgeFarBuffer, ridgeFarCount, -6f, 1f / 4.8f, 0.10f, 0.16f, 0.26f, 0.22f, 0.32f, 0.46f)
-        drawRidge(ridgeNearBuffer, ridgeNearCount, -6f, 1f / 4.0f, 0.025f, 0.035f, 0.055f, 0.06f, 0.09f, 0.13f)
+        if (sceneMode) {
+            drawWorldStars(elapsedSec)
+            drawWorldMoon(elapsedSec)
+            drawWorldRidges()
+        } else {
+            drawStars(elapsedSec)
+            drawMoon(elapsedSec)
+            drawRidge(ridgeFarBuffer, ridgeFarCount, -6f, 1f / 4.8f, 0.10f, 0.16f, 0.26f, 0.22f, 0.32f, 0.46f)
+            drawRidge(ridgeNearBuffer, ridgeNearCount, -6f, 1f / 4.0f, 0.025f, 0.035f, 0.055f, 0.06f, 0.09f, 0.13f)
+        }
+    }
+
+    private fun drawWorldStars(elapsedSec: Float) {
+        val buffer = worldStarBuffer ?: return
+        GLES20.glUseProgram(starProgram)
+        GLES20.glUniformMatrix4fv(starViewProj, 1, false, viewProj.m, 0)
+        GLES20.glUniform1f(starTime, elapsedSec)
+        GLES20.glDepthMask(false)
+        GLES20.glEnable(GLES20.GL_BLEND)
+        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE)
+        val stride = 7 * 4
+        buffer.position(0)
+        GLES20.glEnableVertexAttribArray(starPosAttr)
+        GLES20.glVertexAttribPointer(starPosAttr, 3, GLES20.GL_FLOAT, false, stride, buffer)
+        buffer.position(3)
+        GLES20.glEnableVertexAttribArray(starSizeAttr)
+        GLES20.glVertexAttribPointer(starSizeAttr, 1, GLES20.GL_FLOAT, false, stride, buffer)
+        buffer.position(4)
+        GLES20.glEnableVertexAttribArray(starColorAttr)
+        GLES20.glVertexAttribPointer(starColorAttr, 3, GLES20.GL_FLOAT, false, stride, buffer)
+        GLES20.glDrawArrays(GLES20.GL_POINTS, 0, buffer.limit() / 7)
+        GLES20.glDisableVertexAttribArray(starPosAttr)
+        GLES20.glDisableVertexAttribArray(starSizeAttr)
+        GLES20.glDisableVertexAttribArray(starColorAttr)
+        GLES20.glDepthMask(true)
+        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+    }
+
+    private fun drawWorldMoon(elapsedSec: Float) {
+        val vertexBuffer = worldDomeBuffer ?: return
+        val indexBuffer = worldDomeIndexBuffer ?: return
+        val rotation = Math.toRadians((elapsedSec * 2.2).toDouble())
+        val c = cos(rotation).toFloat()
+        val s = sin(rotation).toFloat()
+        val radius = SceneWorldLayout.MOON_RADIUS
+        model.identity()
+        model.m[0] = c * radius
+        model.m[2] = -s * radius
+        model.m[5] = radius
+        model.m[8] = s * radius
+        model.m[10] = c * radius
+        model.m[12] = SceneWorldLayout.MOON_POS[0]
+        model.m[13] = SceneWorldLayout.MOON_POS[1]
+        model.m[14] = SceneWorldLayout.MOON_POS[2]
+
+        GLES20.glUseProgram(moonProgram)
+        GLES20.glUniformMatrix4fv(moonViewProj, 1, false, viewProj.m, 0)
+        GLES20.glUniformMatrix4fv(moonModel, 1, false, model.m, 0)
+        GLES20.glUniform3f(moonLight, -0.55f, 0.42f, 0.72f)
+        GLES20.glUniform1f(moonTime, elapsedSec)
+        vertexBuffer.position(0)
+        GLES20.glEnableVertexAttribArray(moonPosAttr)
+        GLES20.glVertexAttribPointer(moonPosAttr, 3, GLES20.GL_FLOAT, false, 0, vertexBuffer)
+        GLES20.glEnableVertexAttribArray(moonNormalAttr)
+        GLES20.glVertexAttribPointer(moonNormalAttr, 3, GLES20.GL_FLOAT, false, 0, vertexBuffer)
+        indexBuffer.position(0)
+        GLES20.glDrawElements(GLES20.GL_TRIANGLES, worldDomeIndexCount, GLES20.GL_UNSIGNED_SHORT, indexBuffer)
+        GLES20.glDisableVertexAttribArray(moonPosAttr)
+        GLES20.glDisableVertexAttribArray(moonNormalAttr)
+    }
+
+    private fun drawWorldRidges() {
+        val base = SceneWorldLayout.GROUND_Y
+        val yaw = SnowMountainCamera.MODEL_ROT[1] + SnowMountainCamera.MAX_YAW * sceneRot
+        SceneWorldLayout.dimColor(WORLD_FOG_R, WORLD_FOG_G, WORLD_FOG_B, sceneDark, dimScratch)
+        val fogR = dimScratch[0]
+        val fogG = dimScratch[1]
+        val fogB = dimScratch[2]
+
+        SceneWorldLayout.dimColor(0.34f, 0.42f, 0.54f, sceneDark, dimScratch)
+        val farHighR = dimScratch[0]
+        val farHighG = dimScratch[1]
+        val farHighB = dimScratch[2]
+        SceneWorldLayout.dimColor(0.12f, 0.17f, 0.26f, sceneDark, dimScratch)
+        drawRidge(
+            worldFarRidgeBuffer, worldFarRidgeCount, base,
+            1f / SceneWorldLayout.RIDGE_FAR_AMP,
+            dimScratch[0], dimScratch[1], dimScratch[2],
+            farHighR, farHighG, farHighB,
+            WORLD_FOG_SCALE, fogR, fogG, fogB, yaw,
+        )
+        SceneWorldLayout.dimColor(0.20f, 0.26f, 0.36f, sceneDark, dimScratch)
+        val nearHighR = dimScratch[0]
+        val nearHighG = dimScratch[1]
+        val nearHighB = dimScratch[2]
+        SceneWorldLayout.dimColor(0.05f, 0.07f, 0.12f, sceneDark, dimScratch)
+        drawRidge(
+            worldNearRidgeBuffer, worldNearRidgeCount, base,
+            1f / SceneWorldLayout.RIDGE_NEAR_AMP,
+            dimScratch[0], dimScratch[1], dimScratch[2],
+            nearHighR, nearHighG, nearHighB,
+            WORLD_FOG_SCALE, fogR, fogG, fogB, yaw,
+        )
+    }
+
+    private fun ridgeModelYaw(yawDeg: Float) {
+        model.identity()
+        if (yawDeg == 0f) return
+        val rad = Math.toRadians(yawDeg.toDouble())
+        val c = cos(rad).toFloat()
+        val s = sin(rad).toFloat()
+        model.m[0] = c
+        model.m[2] = -s
+        model.m[8] = s
+        model.m[10] = c
     }
 
     private fun drawSky() {
@@ -199,12 +365,21 @@ class Gl3DSceneRenderer {
         highR: Float,
         highG: Float,
         highB: Float,
+        fogScale: Float = CURVE_FOG_SCALE,
+        fogR: Float = 0.075f,
+        fogG: Float = 0.105f,
+        fogB: Float = 0.175f,
+        yawDeg: Float = 0f,
     ) {
         if (buffer == null || count <= 0) return
         GLES20.glUseProgram(ridgeProgram)
         GLES20.glUniformMatrix4fv(ridgeViewProj, 1, false, viewProj.m, 0)
+        ridgeModelYaw(yawDeg)
+        GLES20.glUniformMatrix4fv(ridgeModel, 1, false, model.m, 0)
         GLES20.glUniform1f(ridgeHeightBase, base)
         GLES20.glUniform1f(ridgeHeightScale, scale)
+        GLES20.glUniform1f(ridgeFogScale, fogScale)
+        GLES20.glUniform3f(ridgeFogColor, fogR, fogG, fogB)
         GLES20.glUniform3f(ridgeColorLow, lowR, lowG, lowB)
         GLES20.glUniform3f(ridgeColorHigh, highR, highG, highB)
         buffer.position(0)
@@ -246,10 +421,13 @@ class Gl3DSceneRenderer {
 
         ridgePosAttr = GLES20.glGetAttribLocation(ridgeProgram, "aPos")
         ridgeViewProj = GLES20.glGetUniformLocation(ridgeProgram, "uViewProj")
+        ridgeModel = GLES20.glGetUniformLocation(ridgeProgram, "uModel")
         ridgeHeightBase = GLES20.glGetUniformLocation(ridgeProgram, "uHeightBase")
         ridgeHeightScale = GLES20.glGetUniformLocation(ridgeProgram, "uHeightScale")
+        ridgeFogScale = GLES20.glGetUniformLocation(ridgeProgram, "uFogScale")
         ridgeColorLow = GLES20.glGetUniformLocation(ridgeProgram, "uColorLow")
         ridgeColorHigh = GLES20.glGetUniformLocation(ridgeProgram, "uColorHigh")
+        ridgeFogColor = GLES20.glGetUniformLocation(ridgeProgram, "uFogColor")
     }
 
     private fun initGeometry() {
@@ -257,6 +435,39 @@ class Gl3DSceneRenderer {
         buildSphere(40, 80)
         buildStars(1600)
         buildRidges()
+        buildWorldGeometry()
+    }
+
+    private fun buildWorldGeometry() {
+        val seg = SceneWorldLayout.RIDGE_SEGMENTS
+        val floats = SceneWorldLayout.ridgeVertexFloats(seg)
+        val far = FloatArray(floats)
+        SceneWorldLayout.ridgeRing(
+            SceneWorldLayout.RIDGE_FAR_RADIUS, SceneWorldLayout.RIDGE_FAR_AMP, 1.7f, seg, far,
+        )
+        worldFarRidgeBuffer = floatBuffer(far)
+        worldFarRidgeCount = far.size / 3
+        val near = FloatArray(floats)
+        SceneWorldLayout.ridgeRing(
+            SceneWorldLayout.RIDGE_NEAR_RADIUS, SceneWorldLayout.RIDGE_NEAR_AMP, 4.3f, seg, near,
+        )
+        worldNearRidgeBuffer = floatBuffer(near)
+        worldNearRidgeCount = near.size / 3
+
+        val stars = FloatArray(SceneWorldLayout.starVertexFloats(SceneWorldLayout.STAR_COUNT))
+        SceneWorldLayout.starField(SceneWorldLayout.STAR_COUNT, SceneWorldLayout.STAR_SEED, stars)
+        worldStarBuffer = floatBuffer(stars)
+
+        val dome = FloatArray(SceneWorldLayout.domeVertexFloats(WORLD_DOME_LAT, WORLD_DOME_LON))
+        SceneWorldLayout.domeVertices(WORLD_DOME_LAT, WORLD_DOME_LON, 1f, dome)
+        worldDomeBuffer = floatBuffer(dome)
+        val indices = ShortArray(SceneWorldLayout.domeIndexCount(WORLD_DOME_LAT, WORLD_DOME_LON))
+        SceneWorldLayout.domeIndices(WORLD_DOME_LAT, WORLD_DOME_LON, indices)
+        worldDomeIndexBuffer = directShortBuffer(indices.size).apply {
+            put(indices)
+            position(0)
+        }
+        worldDomeIndexCount = indices.size
     }
 
     private fun buildSphere(latSteps: Int, lonSteps: Int) {
@@ -397,6 +608,15 @@ class Gl3DSceneRenderer {
     companion object {
         private const val TAG = "lg-wallpaper"
 
+        private const val WORLD_DOME_LAT = 28
+        private const val WORLD_DOME_LON = 56
+
+        private const val CURVE_FOG_SCALE = 0.075f
+        private const val WORLD_FOG_SCALE = 0.0042f
+        private const val WORLD_FOG_R = 0.075f
+        private const val WORLD_FOG_G = 0.105f
+        private const val WORLD_FOG_B = 0.175f
+
         private const val SKY_VS = """
             attribute vec2 aPos;
             varying vec2 vPos;
@@ -528,11 +748,13 @@ class Gl3DSceneRenderer {
         private const val RIDGE_VS = """
             attribute vec3 aPos;
             uniform mat4 uViewProj;
+            uniform mat4 uModel;
             varying float vHeight;
             varying float vDepth;
             void main() {
-                vHeight = aPos.y;
-                vec4 clip = uViewProj * vec4(aPos, 1.0);
+                vec4 world = uModel * vec4(aPos, 1.0);
+                vHeight = world.y;
+                vec4 clip = uViewProj * world;
                 vDepth = clip.w;
                 gl_Position = clip;
             }
@@ -544,13 +766,15 @@ class Gl3DSceneRenderer {
             varying float vDepth;
             uniform float uHeightBase;
             uniform float uHeightScale;
+            uniform float uFogScale;
             uniform vec3 uColorLow;
             uniform vec3 uColorHigh;
+            uniform vec3 uFogColor;
             void main() {
                 float h = clamp((vHeight - uHeightBase) * uHeightScale, 0.0, 1.0);
                 vec3 col = mix(uColorLow, uColorHigh, h * h);
-                float fog = clamp(1.0 - exp(-vDepth * 0.075), 0.0, 0.72);
-                col = mix(col, vec3(0.075, 0.105, 0.175), fog);
+                float fog = clamp(1.0 - exp(-vDepth * uFogScale), 0.0, 0.72);
+                col = mix(col, uFogColor, fog);
                 gl_FragColor = vec4(col, 1.0);
             }
         """

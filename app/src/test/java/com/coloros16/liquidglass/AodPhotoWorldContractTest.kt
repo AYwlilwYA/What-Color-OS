@@ -139,11 +139,14 @@ class AodPhotoWorldContractTest {
         assertNotNull(AodSceneCatalog.forStyle(AodStyleCatalog.ID_SAIL))
         assertEquals(null, AodSceneCatalog.forStyle(AodStyleCatalog.ID_SAIL)!!.photo)
         for (id in listOf(
-            AodStyleCatalog.ID_FULLSCREEN, AodStyleCatalog.ID_HANDPAINT,
+            AodStyleCatalog.ID_FULLSCREEN,
             AodStyleCatalog.ID_TEXT, AodStyleCatalog.ID_PORTRAIT,
         )) {
             assertEquals("$id 不该有世界契约", null, AodSceneCatalog.forStyle(id))
         }
+        val handPaint = AodSceneCatalog.forStyle(AodStyleCatalog.ID_HANDPAINT)
+        assertNotNull("手绘有世界契约但不是照片类", handPaint)
+        assertEquals("手绘不该有照片风格", null, handPaint!!.photo)
     }
 
     @Test

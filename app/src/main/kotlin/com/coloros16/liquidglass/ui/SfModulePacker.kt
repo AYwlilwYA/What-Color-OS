@@ -29,6 +29,8 @@ internal object SfModulePacker {
     private const val TRAMPOLINE_NAME = "trampoline.so"
     private const val SERVICE_SH_NAME = "service.sh"
     private const val WATCHCALL_NAME = "watchcall_patched.so"
+    private const val SYMTAB_NAME = "symtab.txt"
+    private const val SYMTAB_TREE_PATH = "system/system_ext/lib64/oplusex/lg_symtab.txt"
     private const val WATCHCALL_TARGET_PATH = "/system_ext/lib64/liboplus_display_watchcall.so"
     private const val WATCHCALL_SHA256 = "3486e37093d97a41e1968041291ac324ce6ca15cf1a7f7b29cee4b1b72a77780"
     private const val EXPECTED_FINGERPRINT = "OnePlus/PJZ110/OP5D0DL1:16/BP2A.250605.015/V.24d75ae-2bd31-33d92:user/release-keys"
@@ -71,7 +73,8 @@ internal object SfModulePacker {
             val symbols = DynsymParser.parse(real)
             if (symbols.isEmpty()) throw PackError("解析系统库符号失败：动态符号为空")
             val name = zipName(fingerprint)
-            val entries = buildEntries(trampoline, real, sha256, fingerprint, symbols, serviceSh, installSh, watchcall, watchcallSha)
+            val symtab = readOptionalAsset(context, SYMTAB_NAME)
+            val entries = buildEntries(trampoline, real, sha256, fingerprint, symbols, serviceSh, installSh, watchcall, watchcallSha, symtab)
             if (stageDir != null) stageTree(entries, stageDir)
             val size = publish(context, name) { zip -> writeZip(zip, entries) }
             Lg.i(TAG, "pack ok name=$name size=$size symbols=${symbols.size} sha256=$sha256")
@@ -104,6 +107,24 @@ internal object SfModulePacker {
         }
         if (bytes.isEmpty()) throw PackError(missingMsg)
         return bytes
+    }
+
+    /** 可选打包件：缺失或读失败返回 null（内置解码器已能直解符号，表只是加速项）。 */
+    private fun readOptionalAsset(context: Context, name: String): ByteArray? = try {
+        val listed = context.assets.list(TRAMPOLINE_DIR) ?: emptyArray()
+        if (name !in listed) {
+            Lg.i(TAG, "pack: 可选件 $name 不在 assets，跳过（走内置解码）")
+            null
+        } else {
+            val b = context.assets.open("$TRAMPOLINE_DIR/$name").use { it.readBytes() }
+            if (b.isEmpty()) {
+                Lg.i(TAG, "pack: 可选件 $name 为空，跳过")
+                null
+            } else b
+        }
+    } catch (t: Throwable) {
+        Lg.i(TAG, "pack: 可选件 $name 读取失败 ${t.javaClass.simpleName}，跳过")
+        null
     }
 
     private fun readRealSo(trampoline: ByteArray): ByteArray {
@@ -172,6 +193,7 @@ internal object SfModulePacker {
         installSh: ByteArray,
         watchcall: ByteArray,
         watchcallSha: String,
+        symtab: ByteArray?,
     ): List<Pair<String, ByteArray>> {
         val symbolsTxt = buildString {
             append("# lg-sf-channel symbols v1\n")
@@ -192,7 +214,7 @@ internal object SfModulePacker {
             append("watchcall.path=").append(WATCHCALL_TARGET_PATH).append('\n')
             append("watchcall.sha256=").append(watchcallSha).append('\n')
         }
-        return listOf(
+        val tree = mutableListOf(
             "META-INF/com/google/android/update-binary" to UPDATE_BINARY.toByteArray(Charsets.UTF_8),
             "META-INF/com/google/android/updater-script" to UPDATER_SCRIPT.toByteArray(Charsets.UTF_8),
             "module.prop" to moduleProp().toByteArray(Charsets.UTF_8),
@@ -206,6 +228,11 @@ internal object SfModulePacker {
             "sepolicy.rule" to SEPOLICY_RULE.toByteArray(Charsets.UTF_8),
             "install.sh" to installSh,
         )
+        if (symtab != null) {
+            tree.add(SYMTAB_TREE_PATH to symtab)
+            Lg.i(TAG, "pack: 符号表进树 $SYMTAB_TREE_PATH bytes=${symtab.size}")
+        }
+        return tree
     }
 
     private fun moduleProp(): String = """
@@ -453,6 +480,10 @@ internal object SfModulePacker {
               mv -f "${'$'}f.bak" "${'$'}f" && lg_log "树内件自 bak 恢复"
             fi
           done
+          # 符号表是可选加速件：恢复但不进下面的在位硬门（缺表走内置解码）
+          if [ ! -f "${'$'}TREE/lg_symtab.txt" ] && [ -f "${'$'}TREE/lg_symtab.txt.bak" ]; then
+            mv -f "${'$'}TREE/lg_symtab.txt.bak" "${'$'}TREE/lg_symtab.txt" && lg_log "符号表自 bak 恢复"
+          fi
           if [ -f "${'$'}MODDIR/module.prop" ] && [ -f "${'$'}TRAMP" ] && [ -f "${'$'}REAL" ] && [ -f "${'$'}WCALL" ]; then
             lg_log "树校验通过（module.prop+三 so 在位）交 overlay"
             exit 0

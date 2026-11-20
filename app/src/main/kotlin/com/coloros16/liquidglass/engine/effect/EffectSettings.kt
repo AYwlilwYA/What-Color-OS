@@ -96,6 +96,9 @@ class EffectSettings {
         const val VERSION = "v1"
         const val DEFAULT_STYLE_ID = "aod.sail"
 
+        /** id 上限：照片键存的是 SAF content URI，长路径编码后可达数百字符。 */
+        const val MAX_ID_LEN = 512
+
         fun defaults(): EffectSettings = EffectSettings()
 
         /** 容错解析；空文本 / 非法内容一律回默认，不抛异常。 */
@@ -161,7 +164,7 @@ class EffectSettings {
 
         private fun parseId(value: String): String? {
             val id = value.trim()
-            if (id.isEmpty() || id.length > 80) return null
+            if (id.isEmpty() || id.length > MAX_ID_LEN) return null
             if (id.any { it == '\n' || it == '\r' || it == '=' }) return null
             return id
         }

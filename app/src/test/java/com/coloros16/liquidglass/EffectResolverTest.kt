@@ -2,6 +2,7 @@ package com.coloros16.liquidglass
 
 import com.coloros16.liquidglass.engine.TransitionEdge
 import com.coloros16.liquidglass.engine.effect.EffectBlockReason
+import com.coloros16.liquidglass.engine.effect.EffectCapabilities
 import com.coloros16.liquidglass.engine.effect.EffectCatalog
 import com.coloros16.liquidglass.engine.effect.EffectResolver
 import com.coloros16.liquidglass.engine.effect.EffectSettings
@@ -15,9 +16,13 @@ class EffectResolverTest {
 
     private fun settings(): EffectSettings = EffectSettings.defaults()
 
+    private val noCaps = EffectCapabilities.NONE
+    private val panoramaOnly = EffectCapabilities.NONE.copy(panoramaAodActive = true)
+    private val panoramaGyro = panoramaOnly.copy(hasGyro = true)
+
     @Test
     fun noneEffectsPassWithoutCapabilities() {
-        val resolved = EffectResolver.resolve(settings())
+        val resolved = EffectResolver.resolve(settings(), noCaps)
         assertEquals(EffectBlockReason.NONE, resolved.lockWallpaper.reason)
         assertTrue(resolved.lockWallpaper.noop)
         assertTrue(resolved.lockSpecial.noop)
@@ -28,7 +33,7 @@ class EffectResolverTest {
     fun unknownIdReported() {
         val s = settings()
         s.lockWallpaperEffect = "lock.wp.unknown"
-        val resolved = EffectResolver.resolve(s)
+        val resolved = EffectResolver.resolve(s, noCaps)
         assertEquals(EffectBlockReason.UNKNOWN_ID, resolved.lockWallpaper.reason)
         assertEquals(EffectCatalog.LOCK_WP_NONE, resolved.lockWallpaper.effectiveId)
     }
@@ -37,7 +42,7 @@ class EffectResolverTest {
     fun unimplementedDepth3dIsBlockedFirst() {
         val s = settings()
         s.lockSpecialEffect = EffectCatalog.LOCK_SP_DEPTH_3D
-        val resolved = EffectResolver.resolve(s, photoSceneAvailable = true, panoramaAodActive = true)
+        val resolved = EffectResolver.resolve(s, panoramaOnly.copy(photoSceneAvailable = true))
         assertEquals(EffectBlockReason.UNIMPLEMENTED, resolved.lockSpecial.reason)
     }
 
@@ -46,12 +51,12 @@ class EffectResolverTest {
         val s = settings()
         s.lockSpecialEffect = EffectCatalog.LOCK_SP_LIQUID
 
-        assertEquals(EffectBlockReason.NEEDS_AOD_DYNAMIC, EffectResolver.resolve(s).lockSpecial.reason)
+        assertEquals(EffectBlockReason.NEEDS_AOD_DYNAMIC, EffectResolver.resolve(s, noCaps).lockSpecial.reason)
 
         s.allowAodDynamic = true
-        assertEquals(EffectBlockReason.NEEDS_PANORAMA_AOD, EffectResolver.resolve(s).lockSpecial.reason)
+        assertEquals(EffectBlockReason.NEEDS_PANORAMA_AOD, EffectResolver.resolve(s, noCaps).lockSpecial.reason)
 
-        val ok = EffectResolver.resolve(s, panoramaAodActive = true)
+        val ok = EffectResolver.resolve(s, panoramaOnly)
         assertEquals(EffectBlockReason.NONE, ok.lockSpecial.reason)
         assertTrue(ok.lockSpecial.applied)
     }
@@ -63,11 +68,11 @@ class EffectResolverTest {
         s.lockSpecialEffect = EffectCatalog.LOCK_SP_LENTICULAR
         assertEquals(
             EffectBlockReason.NEEDS_GYRO,
-            EffectResolver.resolve(s, panoramaAodActive = true, hasGyro = false).lockSpecial.reason,
+            EffectResolver.resolve(s, panoramaOnly).lockSpecial.reason,
         )
         assertEquals(
             EffectBlockReason.NONE,
-            EffectResolver.resolve(s, panoramaAodActive = true, hasGyro = true).lockSpecial.reason,
+            EffectResolver.resolve(s, panoramaGyro).lockSpecial.reason,
         )
     }
 
@@ -75,16 +80,16 @@ class EffectResolverTest {
     fun bokehNeedsDynamicOnly() {
         val s = settings()
         s.lockSpecialEffect = EffectCatalog.LOCK_SP_BOKEH
-        assertEquals(EffectBlockReason.NEEDS_AOD_DYNAMIC, EffectResolver.resolve(s).lockSpecial.reason)
+        assertEquals(EffectBlockReason.NEEDS_AOD_DYNAMIC, EffectResolver.resolve(s, noCaps).lockSpecial.reason)
         s.allowAodDynamic = true
-        assertEquals(EffectBlockReason.NONE, EffectResolver.resolve(s).lockSpecial.reason)
+        assertEquals(EffectBlockReason.NONE, EffectResolver.resolve(s, noCaps).lockSpecial.reason)
     }
 
     @Test
     fun wallpaperEffectsNeedNoCapabilities() {
         val s = settings()
         s.lockWallpaperEffect = EffectCatalog.LOCK_WP_RIPPLE
-        val resolved = EffectResolver.resolve(s)
+        val resolved = EffectResolver.resolve(s, noCaps)
         assertEquals(EffectBlockReason.NONE, resolved.lockWallpaper.reason)
         assertEquals(EffectCatalog.LOCK_WP_RIPPLE, resolved.lockWallpaper.effectiveId)
         assertFalse(resolved.lockWallpaper.noop)
@@ -96,12 +101,12 @@ class EffectResolverTest {
         s.aodStyleId = "aod.galaxy"
         s.homeAodStyleId = "aod.door"
         s.homeAodIndependent = false
-        val follow = EffectResolver.resolve(s)
+        val follow = EffectResolver.resolve(s, noCaps)
         assertTrue(follow.homeUsesAodStyle)
         assertEquals("aod.galaxy", follow.homeAodStyleId)
 
         s.homeAodIndependent = true
-        val independent = EffectResolver.resolve(s)
+        val independent = EffectResolver.resolve(s, noCaps)
         assertFalse(independent.homeUsesAodStyle)
         assertEquals("aod.door", independent.homeAodStyleId)
     }

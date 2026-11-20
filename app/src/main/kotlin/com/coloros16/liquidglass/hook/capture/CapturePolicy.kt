@@ -71,6 +71,15 @@ object CapturePolicy {
         return (1000.0 / clamped).toLong().coerceIn(4L, 1000L)
     }
 
+    /**
+     * 瞬态元素（流体云岛 / 横幅）持续抓屏 tick 间隔：恒定 30FPS，不随静止减半。
+     * 岛内图标与波形一直在动，减半会让背景滞后表现为卡顿；区域抓屏只取小 bbox，代价可控。
+     */
+    fun transientCaptureIntervalMs(): Long = 1000L / TRANSIENT_CAPTURE_HZ
+
+    /** 瞬态元素抓屏帧率（区域抓屏，只取瞬态 bbox）。 */
+    private const val TRANSIENT_CAPTURE_HZ = 30L
+
     /** 抓屏降采样比例（KEY_BG_CAPTURE_SCALE，clamp 0.25~1.0，默认 0.5f）。 */
     fun bgCaptureScale(): Float {
         val now = SystemClock.uptimeMillis()

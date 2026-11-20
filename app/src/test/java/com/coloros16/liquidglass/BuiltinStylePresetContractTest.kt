@@ -13,9 +13,9 @@ class BuiltinStylePresetContractTest {
     private val all = BuiltinGlassPresets.all()
 
     @Test
-    fun fiveStylesInDisplayOrder() {
+    fun fourStylesInDisplayOrder() {
         assertEquals(
-            listOf("ios_clear", "ios_frost", "harmony_soft", "crystal", "classic_frost"),
+            listOf("ios", "harmony_soft", "crystal", "classic_frost"),
             all.map { it.id.removePrefix(BuiltinGlassPresets.ID_PREFIX) },
         )
     }
@@ -60,7 +60,7 @@ class BuiltinStylePresetContractTest {
     @Test
     fun seedIntoDoesNotDuplicateOrOverwrite() {
         val userEdited = GlassRegistry.Preset(
-            BuiltinGlassPresets.ID_PREFIX + "ios_clear", "我的通透", emptyList(), mapOf(Prefs.KEY_BLUR_RADIUS to 99f),
+            BuiltinGlassPresets.ID_PREFIX + "ios", "我的iOS", emptyList(), mapOf(Prefs.KEY_BLUR_RADIUS to 99f),
         )
         val seeded = BuiltinGlassPresets.seedInto(listOf(userEdited))
         assertEquals(all.size, seeded.size)
@@ -71,24 +71,75 @@ class BuiltinStylePresetContractTest {
     }
 
     @Test
-    fun companionCoversCaptureAndTiltForEveryStyle() {
+    fun retiredIosTiersAreDroppedFromExistingList() {
+        val old = listOf(
+            GlassRegistry.Preset(BuiltinGlassPresets.ID_PREFIX + "ios_clear", "iOS 通透", emptyList(), emptyMap()),
+            GlassRegistry.Preset(BuiltinGlassPresets.ID_PREFIX + "ios_frost", "iOS 磨砂", emptyList(), emptyMap()),
+            GlassRegistry.Preset("p1", "我的配置", listOf("com.x.Y"), mapOf(Prefs.KEY_BLUR_RADIUS to 7f)),
+        )
+        val out = BuiltinGlassPresets.seedInto(old)
+        assertTrue("旧通透档必须清掉", out.none { it.id.endsWith("ios_clear") })
+        assertTrue("旧磨砂档必须清掉", out.none { it.id.endsWith("ios_frost") })
+        assertTrue("用户自建档必须保留", out.any { it.id == "p1" && it.params[Prefs.KEY_BLUR_RADIUS] == 7f })
+        for (p in all) assertTrue("新档必须补齐: ${p.id}", out.any { it.id == p.id })
+    }
+
+    @Test
+    fun positiveControlMigrationDetectedEvenWhenSizeUnchanged() {
+        // 已有新 iOS 档时：删两条旧档、补零条 ⇒ 数量差 2；构造相等场景=旧列表只含一条待删档 + 缺一条新档
+        val old = all.filterNot { it.id == BuiltinGlassPresets.ID_PREFIX + "crystal" } + listOf(
+            GlassRegistry.Preset(BuiltinGlassPresets.ID_PREFIX + "ios_clear", "iOS 通透", emptyList(), emptyMap()),
+        )
+        val out = BuiltinGlassPresets.seedInto(old)
+        assertEquals("删一条旧档补一条新档，数量恰好相等", old.size, out.size)
+        assertTrue("内容必须已变（否则迁移会静默不落盘）", out != old)
+        assertTrue(out.none { it.id.endsWith("ios_clear") })
+        assertTrue(out.any { it.id == BuiltinGlassPresets.ID_PREFIX + "crystal" })
+    }
+
+    @Test
+    fun noStyleTouchesPerformanceDefaults() {
+        val perf = BuiltinGlassPresets.PERFORMANCE_KEYS
+        assertTrue("性能键名单不能空", perf.isNotEmpty())
         for (p in all) {
             val c = BuiltinGlassPresets.companionOf(p.id)
-            assertTrue("capture hz: ${p.id}", Prefs.KEY_PANEL_CAPTURE_HZ in c.ints)
-            assertTrue("capture interval: ${p.id}", Prefs.KEY_BG_PERIODIC_CAPTURE_INTERVAL_MS in c.ints)
-            assertTrue("capture scale: ${p.id}", Prefs.KEY_BG_CAPTURE_SCALE in c.floats)
-            assertTrue("tilt switch: ${p.id}", Prefs.KEY_ANIM_TILT_ENABLED in c.bools)
-            val hz = c.ints[Prefs.KEY_PANEL_CAPTURE_HZ]!!
-            assertTrue("hz range: ${p.id}", hz in Prefs.PANEL_CAPTURE_HZ_MIN..Prefs.PANEL_CAPTURE_HZ_MAX)
+            for (key in c.ints.keys + c.floats.keys + c.bools.keys) {
+                assertFalse("风格不得改性能默认值: ${p.id} $key", key in perf)
+            }
+            for (key in p.params.keys) {
+                assertFalse("配方也不得含性能键: ${p.id} $key", key in perf)
+            }
         }
     }
 
     @Test
+    fun performanceGuardListCoversCaptureAndTiltTuning() {
+        val perf = BuiltinGlassPresets.PERFORMANCE_KEYS
+        assertTrue(Prefs.KEY_PANEL_CAPTURE_HZ in perf)
+        assertTrue(Prefs.KEY_BG_CAPTURE_SCALE in perf)
+        assertTrue(Prefs.KEY_BG_PERIODIC_CAPTURE_INTERVAL_MS in perf)
+        assertTrue(Prefs.KEY_BG_PERIODIC_CAPTURE_ENABLE in perf)
+        assertTrue(Prefs.KEY_ANIM_TILT_STRENGTH in perf)
+        assertTrue(Prefs.KEY_ANIM_TILT_PERSPECTIVE in perf)
+        assertFalse("倾斜总开关属观感项，不在性能名单", Prefs.KEY_ANIM_TILT_ENABLED in perf)
+    }
+
+    @Test
+    fun positiveControlGuardWouldCatchInjectedPerfKey() {
+        val injected = BuiltinGlassPresets.Companion(
+            ints = mapOf(Prefs.KEY_PANEL_CAPTURE_HZ to 30),
+        )
+        assertTrue(
+            "阳性对照：注入性能键必须被名单识别",
+            injected.ints.keys.any { it in BuiltinGlassPresets.PERFORMANCE_KEYS },
+        )
+    }
+
+    @Test
     fun companionTiltFollowsStyleFamily() {
-        assertTrue(BuiltinGlassPresets.companionOf("builtin_ios_clear").bools[Prefs.KEY_ANIM_TILT_ENABLED]!!)
-        assertTrue(BuiltinGlassPresets.companionOf("builtin_ios_frost").bools[Prefs.KEY_ANIM_TILT_ENABLED]!!)
-        assertFalse(BuiltinGlassPresets.companionOf("builtin_harmony_soft").bools[Prefs.KEY_ANIM_TILT_ENABLED]!!)
-        assertFalse(BuiltinGlassPresets.companionOf("builtin_classic_frost").bools[Prefs.KEY_ANIM_TILT_ENABLED]!!)
+        assertTrue(BuiltinGlassPresets.companionOf("builtin_ios").bools[Prefs.KEY_ANIM_TILT_ENABLED]!!)
+        assertTrue("鸿蒙档不写倾斜开关，保持用户现值", BuiltinGlassPresets.companionOf("builtin_harmony_soft").bools[Prefs.KEY_ANIM_TILT_ENABLED] == null)
+        assertTrue("经典档不写任何配套", BuiltinGlassPresets.companionOf("builtin_classic_frost").bools.isEmpty())
     }
 
     @Test
@@ -117,7 +168,7 @@ class BuiltinStylePresetContractTest {
             assertTrue(Prefs.animKey(group, Prefs.ANIM_PARAM_X_STIFFNESS) in hm.ints)
         }
         val springKeys = BuiltinGlassPresets.harmonySpringInts().keys
-        for (id in listOf("builtin_ios_clear", "builtin_ios_frost", "builtin_crystal", "builtin_classic_frost")) {
+        for (id in listOf("builtin_ios", "builtin_crystal", "builtin_classic_frost")) {
             val c = BuiltinGlassPresets.companionOf(id)
             assertTrue("non-harmony must not touch spring: $id", c.ints.keys.none { it in springKeys })
             assertTrue(c.bools.keys.none { it in Prefs.ANIM_GROUPS.map { g -> Prefs.animEnabledKey(g) } })

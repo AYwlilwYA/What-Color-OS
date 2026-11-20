@@ -15,6 +15,7 @@ object EngineLog {
     private const val TAG = "LiquidGlass"
     private const val TTL_MS = 500L
 
+
     @Volatile
     private var prefsProvider: (() -> SharedPreferences?)? = null
 
@@ -43,9 +44,33 @@ object EngineLog {
         return cachedEnabled
     }
 
-    /** 全量流水一行（开关关 = 零输出）。 */
+    /** 全量流水一行（开关关 = 零输出）；高频源限流，超限累计后跨秒汇总一条。 */
     fun log(source: String, event: String) {
         if (!fullLogEnabled()) return
+        if (EngineLogRate.isHot(source) && !admitHot(source)) return
         Lg.i(TAG, "[E|$source] $event")
+    }
+
+    private val hotWindowStart = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val hotCount = java.util.concurrent.ConcurrentHashMap<String, Int>()
+    private val hotSuppressed = java.util.concurrent.ConcurrentHashMap<String, Int>()
+
+    /** 同一源每秒放行前 [EngineLogRate.PER_SEC] 条；跨秒把上一秒被压制条数汇总打一条。 */
+    private fun admitHot(source: String): Boolean {
+        val sec = SystemClock.uptimeMillis() / 1000L
+        val start = hotWindowStart[source]
+        val sameSecond = start != null && start == sec
+        val n = if (sameSecond) (hotCount[source] ?: 0) + 1 else 1
+        if (!sameSecond) {
+            hotWindowStart[source] = sec
+            val dropped = hotSuppressed.remove(source) ?: 0
+            if (dropped > 0) {
+                Lg.i(TAG, "[E|$source] rate-limited: $dropped line(s) suppressed in previous second")
+            }
+        }
+        hotCount[source] = n
+        if (EngineLogRate.admit(sameSecond, n)) return true
+        hotSuppressed[source] = (hotSuppressed[source] ?: 0) + 1
+        return false
     }
 }

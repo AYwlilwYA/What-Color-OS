@@ -308,10 +308,10 @@
                     android:background="?attr/colorOutlineVariant" />
 
                 <com.coloros16.liquidglass.ui.LgSwitch
-                    android:id="@+id/switchCcTileGlass"
+                    android:id="@+id/switchCcTileOnBlue"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="@string/settings_cc_tile_glass"
+                    android:text="@string/settings_tile_on_blue_glass"
                     android:thumb="@drawable/lg_sw_thumb"
                     android:track="@drawable/lg_sw_track"
                     android:textSize="15sp"
@@ -322,16 +322,16 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
-                    android:text="@string/settings_cc_tile_glass_desc"
+                    android:text="@string/settings_tile_on_blue_glass_desc"
                     android:textAppearance="?attr/textAppearanceBodySmall"
                     android:textColor="?android:attr/textColorSecondary" />
 
                 <com.coloros16.liquidglass.ui.LgSwitch
-                    android:id="@+id/switchCcTileOnBlue"
+                    android:id="@+id/switchCcTileGlass"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="14dp"
-                    android:text="@string/settings_cc_tile_on_blue"
+                    android:text="@string/settings_double_layer_glass"
                     android:thumb="@drawable/lg_sw_thumb"
                     android:track="@drawable/lg_sw_track"
                     android:textSize="15sp"
@@ -342,7 +342,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
-                    android:text="@string/settings_cc_tile_on_blue_desc"
+                    android:text="@string/settings_double_layer_glass_desc"
                     android:textAppearance="?attr/textAppearanceBodySmall"
                     android:textColor="?android:attr/textColorSecondary" />
 

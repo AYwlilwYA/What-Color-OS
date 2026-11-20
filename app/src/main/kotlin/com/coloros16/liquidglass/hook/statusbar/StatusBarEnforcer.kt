@@ -413,6 +413,52 @@ object StatusBarEnforcer {
 
     private val notifClockOrig = WeakHashMap<View, NotifClockOrig>()
 
+    /**
+     * 找大时钟容器：先在传入根内找；找不到再走已登记的 QS 页脚根。
+     * 合并式面板把时钟挂在 qs_footer（OplusQSFooterImpl），与状态栏图标容器不同树，
+     * 沿图标容器父链上溯够不到，故由页脚自身布局事件登记根视图。
+     */
+    private fun findClockContainer(root: View): ViewGroup? {
+        (childView(root, "settings_button_container") as? ViewGroup)?.let { return it }
+        val footer = qsFooterRef?.get()
+        if (footer != null && footer !== root) {
+            (childView(footer, "settings_button_container") as? ViewGroup)?.let { return it }
+        }
+        containerFromClock(root)?.let { return it }
+        footer?.let { containerFromClock(it) }?.let { return it }
+        var node: View = root
+        var depth = 0
+        while (depth < 12) {
+            val p = node.parent as? View ?: break
+            containerFromClock(p)?.let { return it }
+            node = p
+            depth++
+        }
+        return null
+    }
+
+    /** 页脚 hook 未命中时的兜底：先找时钟自身，再取其父容器（时钟与设置按钮同挂一个 ConstraintLayout）。 */
+    private fun containerFromClock(root: View): ViewGroup? {
+        val clock = childView(root, "qs_footer_clock") ?: return null
+        val p = clock.parent as? ViewGroup ?: return null
+        logThrottled("sb-notifclock-by-clock", "sb-notifclock 容器经时钟反查 parent=${p.javaClass.simpleName}")
+        return p
+    }
+
+    private var qsFooterRef: WeakReference<View>? = null
+
+    /** QS 页脚布局后调用：登记根并应用大时钟配置（事件驱动，无轮询）。 */
+    fun onQsFooterLayout(footer: View, cfg: StatusBarConfig) {
+        qsFooterRef = WeakReference(footer)
+        if (!cfg.enabled) return
+        if (!cfg.notifClockTouched && !(cfg.notifClockEnable && cfg.notifHideSettingsBtn)) return
+        try {
+            applyNotifClock(footer, cfg)
+        } catch (t: Throwable) {
+            logThrottled("sb-qsfooter-err", "sb-skip qs_footer ${t.javaClass.simpleName}")
+        }
+    }
+
     /** ConstraintLayout.LayoutParams 字段读写器（宿主自带该类，反射一次缓存）。 */
     private object ConstraintLp {
         private val fields = ConcurrentHashMap<String, java.lang.reflect.Field>()
@@ -472,7 +518,7 @@ object StatusBarEnforcer {
      * 位置与日期上下排走约束改写；全部先记原值，关闸或回默认逐项还原。
      */
     private fun applyNotifClock(root: View, cfg: StatusBarConfig) {
-        val container = childView(root, "settings_button_container") as? ViewGroup
+        val container = findClockContainer(root)
         if (container == null) {
             if (cfg.notifClockTouched || (cfg.notifClockEnable && cfg.notifHideSettingsBtn)) {
                 logThrottled("sb-notifclock-miss", "sb-notifclock skip 容器缺失 settings_button_container")

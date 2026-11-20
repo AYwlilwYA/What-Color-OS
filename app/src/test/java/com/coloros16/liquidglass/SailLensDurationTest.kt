@@ -63,7 +63,9 @@ class SailLensDurationTest {
 
     @Test
     fun otherEdgesKeepTheirOwnDurations() {
-        assertEquals(950L, SailLensMotion.durationMs(TransitionEdge.AOD_TO_LOCK))
+        assertEquals("整组取最长轨（装饰角 1000ms）", 1000L, SailLensMotion.durationMs(TransitionEdge.AOD_TO_LOCK))
+        assertEquals("位移轨仍是 950ms", 950f, SailLensMotion.AOD_TO_LOCK_MOVE_MS, 1e-3f)
+        assertTrue("位移轨必须短于整组", SailLensMotion.AOD_TO_LOCK_MOVE_MS < SailLensMotion.AOD_TO_LOCK_MS)
         assertEquals(1000L, SailLensMotion.durationMs(TransitionEdge.AOD_TO_HOME))
         assertEquals(650L, SailLensMotion.durationMs(TransitionEdge.LOCK_TO_AOD))
         assertEquals(650L, SailLensMotion.durationMs(TransitionEdge.HOME_TO_AOD))

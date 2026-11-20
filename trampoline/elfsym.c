@@ -1,6 +1,6 @@
 // ELF 符号获取件：mangled 名 → 函数 vaddr
 // 来源优先级：.symtab（完整符号表）→ .dynsym（导出表）→ .gnu_debugdata（xz 压缩 mini symtab）
-// 解压走设备 liblzma：标准 lzma_stream_buffer_decode 或 7-Zip 变体 XzUnpacker_* 两套 API 任一
+// 解压优先走内置解码器（无外部依赖），失败再试设备 liblzma 两套 API
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <stdarg.h>
@@ -13,6 +13,7 @@
 #include <unistd.h>
 
 #include "elfsym.h"
+#include "xzdec.h"
 
 #define SYMTAB_ENT 24
 #define SHDR_ENT 64
@@ -86,7 +87,42 @@ static int sh_name_is(const struct elf_view *v, const unsigned char *sh, const c
     return l == strlen(want) && memcmp(nm, want, l) == 0;
 }
 
-// 在一张符号表里找 mangled 名；只收 STT_FUNC 且 st_value 非零
+// 子串命中选优状态：全名精确相等者胜，否则最短名（并列取字典序）
+struct pick {
+    const char *name;
+    size_t len;
+    unsigned long va;
+    int exact;
+    int matches;
+};
+
+static void pick_offer(struct pick *p, const char *nm, size_t l, unsigned long va,
+                       const char *want, size_t wl) {
+    p->matches++;
+    int is_exact = (l == wl && memcmp(nm, want, l) == 0);
+    if (!p->name) {
+        p->name = nm;
+        p->len = l;
+        p->va = va;
+        p->exact = is_exact;
+        return;
+    }
+    if (p->exact && !is_exact) return;
+    if (is_exact && !p->exact) {
+        p->name = nm;
+        p->len = l;
+        p->va = va;
+        p->exact = 1;
+        return;
+    }
+    if (l < p->len || (l == p->len && strncmp(nm, p->name, l) < 0)) {
+        p->name = nm;
+        p->len = l;
+        p->va = va;
+    }
+}
+
+// 在一张符号表里子串搜索；只收 STT_FUNC 且 st_value 非零
 static int symtab_lookup(const struct elf_view *v, const unsigned char *sh,
                          const char *want, unsigned long *va_out) {
     uint64_t off = sh_u64(sh, 24), size = sh_u64(sh, 32), ent = sh_u64(sh, 56);
@@ -98,6 +134,7 @@ static int symtab_lookup(const struct elf_view *v, const unsigned char *sh,
     if (st + stsz > v->n) return -1;
     size_t n = (size_t)(size / ent);
     size_t wl = strlen(want);
+    struct pick p = {0};
     for (size_t k = 0; k < n; k++) {
         const unsigned char *e = v->b + off + k * ent;
         uint32_t no;
@@ -112,11 +149,21 @@ static int symtab_lookup(const struct elf_view *v, const unsigned char *sh,
         const char *nm = (const char *)(v->b + st + no);
         size_t cap = (size_t)(stsz - no);
         size_t l = strnlen(nm, cap);
-        if (l != wl || memcmp(nm, want, l) != 0) continue;
-        *va_out = (unsigned long)val;
-        return 0;
+        if (l == cap || l < wl) continue;
+        // 有界子串搜索（strtab 不保证 NUL 终止在视图内）
+        int found = 0;
+        for (size_t s = 0; s + wl <= l; s++) {
+            if (memcmp(nm + s, want, wl) == 0) {
+                found = 1;
+                break;
+            }
+        }
+        if (!found) continue;
+        pick_offer(&p, nm, l, (unsigned long)val, want, wl);
     }
-    return -1;
+    if (!p.name) return -1;
+    *va_out = p.va;
+    return 0;
 }
 
 // 按节类型扫一遍符号表（.symtab 优先于 .dynsym，由调用方分两轮）
@@ -128,6 +175,90 @@ static int scan_type(const struct elf_view *v, uint32_t type,
         if (symtab_lookup(v, sh, want, va_out) == 0) return 0;
     }
     return -1;
+}
+
+// 读 .note.gnu.build-id（name="GNU", type=3）→ 小写 hex
+static int buildid_of(const struct elf_view *v, char *out, size_t cap) {
+    for (uint16_t i = 0; i < v->shnum; i++) {
+        const unsigned char *sh = shdr(v, i);
+        if (sh_u32(sh, 4) != 7 /* SHT_NOTE */) continue;
+        uint64_t off = sh_u64(sh, 24), size = sh_u64(sh, 32);
+        if (off + size > v->n || size < 16) continue;
+        uint64_t p = off, end = off + size;
+        while (p + 12 <= end) {
+            uint32_t nsz, dsz, ntype;
+            memcpy(&nsz, v->b + p, 4);
+            memcpy(&dsz, v->b + p + 4, 4);
+            memcpy(&ntype, v->b + p + 8, 4);
+            uint64_t name_off = p + 12;
+            uint64_t desc_off = name_off + ((nsz + 3) & ~3u);
+            if (desc_off + dsz > end || dsz > 64) break;
+            if (ntype == 3 && nsz >= 4 && memcmp(v->b + name_off, "GNU", 3) == 0) {
+                if (cap < (size_t)dsz * 2 + 1) return -1;
+                static const char hexd[] = "0123456789abcdef";
+                for (uint32_t k = 0; k < dsz; k++) {
+                    unsigned char c = v->b[desc_off + k];
+                    out[k * 2] = hexd[c >> 4];
+                    out[k * 2 + 1] = hexd[c & 15];
+                }
+                out[dsz * 2] = 0;
+                return 0;
+            }
+            p = desc_off + ((dsz + 3) & ~3u);
+        }
+    }
+    return -1;
+}
+
+static char g_table_path[256];
+
+int lg_elfsym_set_table(const char *table_path) {
+    if (!table_path) {
+        g_table_path[0] = 0;
+        return 0;
+    }
+    snprintf(g_table_path, sizeof(g_table_path), "%s", table_path);
+    return 0;
+}
+
+// 预生成表查询：行格式 "buildid substr va"，buildid 必须与目标 ELF 一致
+static int table_lookup(const struct elf_view *v, const char *want, unsigned long *va_out) {
+    if (!g_table_path[0]) return -1;
+    char bid[129];
+    if (buildid_of(v, bid, sizeof(bid)) != 0) return -1;
+    FILE *f = fopen(g_table_path, "r");
+    if (!f) {
+        lg_elfsym_diag("symtab 表打开失败 %s", g_table_path);
+        return -1;
+    }
+    char line[512];
+    int rc = -1;
+    size_t wl = strlen(want);
+    struct pick p = {0};
+    static char best_name[256];
+    while (fgets(line, sizeof(line), f)) {
+        if (line[0] == '#' || line[0] == '\n') continue;
+        char t_bid[129], t_name[256];
+        unsigned long t_va = 0;
+        if (sscanf(line, "%128s %255s %lx", t_bid, t_name, &t_va) != 3) continue;
+        if (strcmp(t_bid, bid) != 0 || !t_va) continue;
+        size_t l = strlen(t_name);
+        if (l < wl) continue;
+        if (!strstr(t_name, want)) continue;
+        // 表内名字驻留静态缓冲：只保留最优一条
+        pick_offer(&p, t_name, l, t_va, want, wl);
+        if (p.name == t_name) {
+            snprintf(best_name, sizeof(best_name), "%s", t_name);
+            p.name = best_name;
+        }
+    }
+    fclose(f);
+    if (p.name) {
+        *va_out = p.va;
+        lg_elfsym_diag("symtab 表命中 bid=%s va=0x%lx matches=%d", bid, p.va, p.matches);
+        rc = 0;
+    }
+    return rc;
 }
 
 #ifdef LG_HOST_TEST
@@ -152,7 +283,7 @@ static int xz_standard(const unsigned char *src, size_t sn,
     return 0;
 }
 
-// 7-Zip 变体（设备 liblzma 实为 7-Zip 派生，无标准 lzma_* 导出）
+// 设备 liblzma 的私有变体（无标准 lzma_* 导出，只有 XzUnpacker_* 一族）
 // XzUnpacker_CodeFull(p, src, &srcLen, dst, &dstLen, finishMode, &status)
 //   反汇编实证：内部把 x1→x8、x2  deref→x9 存进 p+904/+912，再尾调 XzUnpacker_Code
 // ISzAlloc = { void *(*Alloc)(ISzAllocPtr, size_t); void (*Free)(ISzAllocPtr, void *); }
@@ -174,7 +305,7 @@ static void sz_free_impl(const struct sz_alloc *p, void *q) {
 // CXzUnpacker 实测字段最高偏移 920（CodeFull 写 p+920），给 2KB 冗余
 #define XZ_OBJ_SIZE 2048
 
-static int xz_7zip(const unsigned char *src, size_t sn,
+static int xz_vendor_api(const unsigned char *src, size_t sn,
                    unsigned char *dst, size_t cap, size_t *out_n) {
     typedef void (*ctor_t)(void *, const struct sz_alloc *);
     typedef void (*dtor_t)(void *, const struct sz_alloc *);
@@ -217,8 +348,9 @@ static int xz_decode(const unsigned char *src, size_t sn,
     if (g_host_xz) return g_host_xz(src, sn, dst, cap, out_n);
 #endif
     if (sn < 6 || memcmp(src, "\xfd""7zXZ\x00", 6) != 0) return -1;
+    if (lg_xz_decode(src, sn, dst, cap, out_n) == 0) return 0;
     if (xz_standard(src, sn, dst, cap, out_n) == 0) return 0;
-    return xz_7zip(src, sn, dst, cap, out_n);
+    return xz_vendor_api(src, sn, dst, cap, out_n);
 }
 
 // 解压能力自检日志：区分「无解码 API」与「有 API 但解码失败」
@@ -228,7 +360,7 @@ static void xz_diag_once(void) {
     done = 1;
     int std_api = dlsym(RTLD_DEFAULT, "lzma_stream_buffer_decode") != NULL;
     int z7_api = dlsym(RTLD_DEFAULT, "XzUnpacker_Code") != NULL;
-    lg_elfsym_diag("xz-api std=%d 7z=%d", std_api, z7_api);
+    lg_elfsym_diag("xz-api builtin=1 std=%d 7z=%d", std_api, z7_api);
 }
 
 // .gnu_debugdata：xz 压缩的独立 ELF（只含 .symtab/.strtab/.shstrtab）
@@ -292,7 +424,10 @@ int lg_elfsym_find(const char *path, const char *mangled, unsigned long *va_out)
     struct elf_view v;
     int rc = -1;
     if (view_open(b, n, &v) == 0) {
-        if (scan_type(&v, SH_SYMTAB, mangled, va_out) == 0) {
+        if (table_lookup(&v, mangled, va_out) == 0) {
+            g_last_source = 4;
+            rc = 0;
+        } else if (scan_type(&v, SH_SYMTAB, mangled, va_out) == 0) {
             g_last_source = 1;
             rc = 0;
         } else if (scan_type(&v, SH_DYNSYM, mangled, va_out) == 0) {

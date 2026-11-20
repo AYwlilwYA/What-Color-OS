@@ -27,6 +27,7 @@ import com.coloros16.liquidglass.config.Prefs
 import com.coloros16.liquidglass.debug.DebugElement
 import com.coloros16.liquidglass.debug.DebugOverlay
 import com.coloros16.liquidglass.glass.GlassRegistry
+import com.coloros16.liquidglass.hook.capture.StaticCaptureBootstrap
 import com.coloros16.liquidglass.liquidglass.LiquidGlassShader
 import com.coloros16.liquidglass.liquidglass.LowResTier
 import com.coloros16.liquidglass.liquidglass.ShaderInstancePool
@@ -625,6 +626,9 @@ object LauncherHook {
     private val elementCaptureQuitAt = ConcurrentHashMap<Int, Long>()
     /** 事件驱动一次性补抓标记（壁纸变更等）：静态模式下也放行本轮抓屏，worker 消费后即清。 */
     private val forceCaptureIds = ConcurrentHashMap.newKeySet<Int>()
+    /** 静态档首帧补抓的连续失败数：拿到可用快照即归零，达上限本窗口不再尝试。 */
+    @Volatile
+    private var staticBootstrapFailures = 0
     @Volatile
     private var elementCaptureWorkerRunning = 0
     /** 上次整屏抓屏入队时刻（桌面抓屏节流用） */
@@ -3358,12 +3362,35 @@ object LauncherHook {
     }
 
     /** 渲染触发整屏快照请求：**异步**（不阻塞渲染线程；失败冷却期内不重抓）。快照缺失返回 null。
-     *  静态模式 → 不入队（零抓屏），返回最近快照。 */
+     *  静态模式有旧帧 → 冻结不抓；一帧都没有 → 放行有界首帧补抓（否则冷启后永远没有背景源）。 */
     private fun requestScreenSnapshotAsync(): ElementBackground? {
         val snap = screenSnapshot
         val valid = snap != null && snap.bitmap.width > 0 && snap.bitmap.height > 0
-        if (valid) return snap
-        if (captureMode() == Prefs.BG_CAPTURE_MODE_STATIC) return snap
+        if (valid) {
+            staticBootstrapFailures = 0
+            return snap
+        }
+        val mode = captureMode()
+        if (mode == Prefs.BG_CAPTURE_MODE_STATIC) {
+            val sf = SfGlassChannel.renderMode(api) == Prefs.RENDER_MODE_SF
+            if (!StaticCaptureBootstrap.shouldBootstrap(
+                    mode, Prefs.BG_CAPTURE_MODE_STATIC,
+                    hasSnapshot = false, sfRenderMode = sf, failures = staticBootstrapFailures,
+                )
+            ) {
+                if (!sf) {
+                    logOncePerSecond("staticBootstrapGiveUp") {
+                        Lg.i(TAG, "bg-static: launcher no snapshot, bootstrap exhausted (failures=$staticBootstrapFailures), keep system blur")
+                    }
+                }
+                return snap
+            }
+            logOncePerSecond("staticBootstrap") {
+                Lg.i(TAG, "bg-static: launcher first-frame bootstrap capture (no snapshot yet, failures=$staticBootstrapFailures)")
+            }
+            // 下游 captureScreenSnapshotWithSfc 还有一道静态门，首帧补抓必须一并放行
+            forceCaptureIds.add(SNAPSHOT_ID)
+        }
         val now = SystemClock.uptimeMillis()
         if (now < (elementCaptureQuitAt[SNAPSHOT_ID] ?: 0L)) return null
         if (!captureInFlightIds.contains(SNAPSHOT_ID) && pendingCaptureIds.add(SNAPSHOT_ID)) {
@@ -3607,6 +3634,7 @@ object LauncherHook {
                     if (liveWallpaperActive()) liveStillFrames = if (unchanged) (liveStillFrames + 1).coerceAtMost(8) else 0
                     LowResTier.prebuild(bg.bitmap)
                     screenSnapshot = bg
+                    staticBootstrapFailures = 0
                     elementCaptureRetries[id] = 0
                     elementCaptureQuitAt.remove(id)
                     if (unchanged) {
@@ -3636,6 +3664,13 @@ object LauncherHook {
                     } else {
                         elementCaptureRetries[id] = 0
                         elementCaptureQuitAt[id] = SystemClock.uptimeMillis() + ELEMENT_CAPTURE_COOLDOWN_MS
+                        if (screenSnapshot == null &&
+                            captureMode() == Prefs.BG_CAPTURE_MODE_STATIC &&
+                            staticBootstrapFailures < StaticCaptureBootstrap.MAX_FAILURES
+                        ) {
+                            staticBootstrapFailures++
+                            Lg.i(TAG, "bg-static: launcher first-frame bootstrap failed ($staticBootstrapFailures/${StaticCaptureBootstrap.MAX_FAILURES})")
+                        }
                         Lg.w(TAG, "bg-element: launcher background capture failed 3 x, cooldown ${ELEMENT_CAPTURE_COOLDOWN_MS}ms")
                     }
                 }
@@ -4510,6 +4545,9 @@ object LauncherHook {
 
     // ------------------------------------------------------------ 点按位置发光 ------------------------------------------------------------
 
+    /** 按住态无事件兜底时限：超过即视为流已断，帧泵收尾（正常按住/滚动续流不受影响）。 */
+    private const val PRESS_GLOW_HOLD_TIMEOUT_MS = 5000L
+
     /** 发光状态表：宿主 View id → 包络；区域表键是 drawable id，靠别名表桥接。 */
     private val pressGlowStates = HashMap<Int, MutableList<PressGlow.State>>()
     private val pressGlowAlias = HashMap<Int, MutableSet<Int>>()
@@ -4641,19 +4679,31 @@ object LauncherHook {
             }
             MotionEvent.ACTION_MOVE -> {
                 if (pressGlowStates.isEmpty()) return
-                // 逐 pointer 按 id 找归属宿主并更新坐标（多指各归各的宿主）
+                // 逐 pointer 按 id 找归属宿主并更新坐标（多指各归各的宿主）；
+                // 本事件没带该 pointer（子 View 被 CANCEL 后父容器续流）→ 触点已交棒，在这里收尾
                 val vloc = IntArray(2)
                 view.getLocationOnScreen(vloc)
                 val hloc = IntArray(2)
                 for ((hid, list) in pressGlowStates) {
-                    val host = pressGlowHostById(hid) ?: continue
+                    val host = pressGlowHostById(hid)
+                    if (host == null) {
+                        list.clear()
+                        continue
+                    }
                     host.getLocationOnScreen(hloc)
                     var touched = false
                     for (i in list.indices) {
                         val st = list[i]
                         if (st.upAtMs != null) continue
                         val idx = ev.findPointerIndex(st.pid)
-                        if (idx < 0) continue
+                        if (idx < 0) {
+                            list[i] = st.copy(upAtMs = now)
+                            touched = true
+                            logOncePerSecond("pressGlowHandoff") {
+                                Lg.i(TAG, "press-glow: handoff-release hid=$hid pid=${st.pid} (pointer left this stream)")
+                            }
+                            continue
+                        }
                         list[i] = st.copy(
                             x = ev.getX(idx) + (vloc[0] - hloc[0]),
                             y = ev.getY(idx) + (vloc[1] - hloc[1]),
@@ -4675,11 +4725,11 @@ object LauncherHook {
                     }
                 }
             }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                // 主流结束：本视图窗口内全部未松手触点一起收尾（防单指残留常亮）
+            MotionEvent.ACTION_UP -> {
+                // 真松手：全部未松手触点一起收尾（防单指残留常亮）
                 if (pressGlowStates.values.any { l -> l.any { it.upAtMs == null } }) {
                     logOncePerSecond("pressGlowUpAll") {
-                        Lg.i(TAG, "press-glow: up/cancel view=${view.javaClass.simpleName} action=$action (release all)")
+                        Lg.i(TAG, "press-glow: up view=${view.javaClass.simpleName} (release all)")
                     }
                 }
                 for ((hid, list) in pressGlowStates) {
@@ -4693,6 +4743,17 @@ object LauncherHook {
                     if (any) {
                         logOncePerSecond("pressGlowUp") { Lg.i(TAG, "press-glow: up-all hid=$hid") }
                         pressGlowHostById(hid)?.invalidate()
+                    }
+                }
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                // 夺流≠松手：Workspace/抽屉滚动拦截给子 View 发 CANCEL 时手指可能仍按着——
+                // 不收尾（光斑保持），交给后续 MOVE 续跟 / UP 收尾 / 帧泵超时兜底
+                var held = 0
+                for (list in pressGlowStates.values) held += list.count { it.upAtMs == null }
+                if (held > 0) {
+                    logOncePerSecond("pressGlowCancel") {
+                        Lg.i(TAG, "press-glow: cancel view=${view.javaClass.simpleName} held=$held (keep)")
                     }
                 }
             }
@@ -4716,6 +4777,16 @@ object LauncherHook {
                             val it = pressGlowStates.entries.iterator()
                             while (it.hasNext()) {
                                 val e = it.next()
+                                // 按住超时兜底：流被别的窗口整体夺走且再无 MOVE/UP 时防冻结常亮
+                                for (i in e.value.indices) {
+                                    val st = e.value[i]
+                                    if (st.upAtMs == null && now - st.downAtMs > PRESS_GLOW_HOLD_TIMEOUT_MS) {
+                                        e.value[i] = st.copy(upAtMs = now)
+                                        logOncePerSecond("pressGlowTimeout") {
+                                            Lg.i(TAG, "press-glow: hold-timeout hid=${e.key} pid=${st.pid}")
+                                        }
+                                    }
+                                }
                                 e.value.removeAll { st -> PressGlow.finished(st, now) }
                                 if (e.value.isEmpty()) {
                                     it.remove()

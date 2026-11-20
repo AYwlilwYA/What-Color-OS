@@ -71,6 +71,32 @@
 
 ---
 
+## XZ Embedded
+
+- **来源**：https://github.com/tukaani-project/xz-embedded（`linux/lib/xz/` 与 `userspace/`）
+- **许可证**：0BSD
+- **许可证副本**：[`trampoline/vendor/xz-embedded/COPYING`](trampoline/vendor/xz-embedded/COPYING)
+
+**涉及文件**
+
+| 文件 | 说明 |
+|------|------|
+| `trampoline/vendor/xz-embedded/xz.h` / `xz_private.h` / `xz_config.h` / `xz_lzma2.h` / `xz_stream.h` | 上游头文件，原样 vendored |
+| `trampoline/vendor/xz-embedded/xz_dec_stream.c` / `xz_dec_lzma2.c` | .xz 容器层与 LZMA2 解码器，原样 vendored |
+| `trampoline/vendor/xz-embedded/xz_crc32.c` / `xz_crc64.c` / `xz_sha256.c` | 完整性校验实现，原样 vendored |
+| `trampoline/vendor/xz-embedded/xz_dec_syms.c` | 上游符号导出清单（本项目未参与编译） |
+| `trampoline/vendor/xz-embedded/lg_xz_config.h` | **本项目新增**：编译配置（单次调用 + 四种 check 全覆盖） |
+
+**用途与修改说明**
+
+装载层需要在系统进程内解压 ELF 的 `.gnu_debugdata`（xz 压缩的 mini 符号表）以定位函数地址。
+设备自带的解压库为 7-Zip 派生分支、无标准 API，故内置本解码器消除外部依赖。
+
+上游源文件**未作任何修改**；本项目仅新增 `lg_xz_config.h` 配置头与薄封装
+`trampoline/xzdec.c`（对外单一入口 `lg_xz_decode`），以静态方式编入 `trampoline.so`。
+
+---
+
 ## 其他依赖
 
 项目通过 Gradle 依赖的第三方库（AndroidX、Material Components、Kotlin 标准库、LibXposed API 等）遵循各自许可证，其声明随依赖产物分发。
@@ -104,3 +130,12 @@
 **修改说明**
 
 素材未改动像素数据，仅原样解压到包内（`zlib` RGB8 掩膜：R 通道主色、G 通道壁纸窗口、B 通道白色），运行时由 `PhotoSceneRenderer` 做色键合成。对外发布若触及素材再分发，需先取得授权或替换为自绘素材。
+
+
+## Lyricon 歌词桥协议（io.github.proify.lyricon）
+
+| 项 | 说明 |
+|------|------|
+| 上游 | https://github.com/proify/Lyricon（开源歌词桥） |
+| 使用方式 | **协议互操作，非代码复制**：`hook/SeedlingLyricsBridge.kt` 按 Lyricon 公开的广播 action（`REGISTER_PROVIDER`/`CENTRAL_BOOT_COMPLETED`）与 AIDL 接口描述符（`IProviderBinder`/`IRemoteService`/`IRemotePlayer`）独立重写 Binder 收发，使本模块可作为歌词消费端接入 Lyricon 生态提供者 App。 |
+| 字符串保留原因 | `io.github.proify.lyricon.*` 为跨进程 IPC 功能标识符（广播 action / Binder descriptor），协议互操作必须逐字一致，不属于品牌署名展示。 |

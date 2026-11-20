@@ -97,12 +97,14 @@ static float g_last_rect[4];
 
 #if defined(__aarch64__) && !defined(LG_HOST_TEST)
 #define LG_RGEN_N 4
-// B 路 generate 家族：符号名为主（跨 ROM 通用），硬偏移仅作符号缺失时的兜底
+// B 路 generate 家族：符号子串为主（跨 ROM 通用，抗参数段漂移），硬偏移仅作兜底
+// 子串带类名长度前缀，唯一锁定成员函数本体（排除同名 lambda /  thunk）
 static const char *const k_rgen_sym[LG_RGEN_N] = {
-    "_ZNK7android12renderengine4skia16KawaseBlurFilter8generateEPNS1_14SkiaGpuContextEj5sk_spI7SkImageERK6SkRect",
-    "_ZNK7android12renderengine4skia18GaussianBlurFilter8generateEPNS1_14SkiaGpuContextEj5sk_spI7SkImageERK6SkRect",
-    "_ZNK7android12renderengine4skia20KawaseBlurDualFilter8generateEPNS1_14SkiaGpuContextEj5sk_spI7SkImageERK6SkRect",
-    "_ZN7android12renderengine4skia13IBlurUtilsExt8generateEP18GrRecordingContextj5sk_spI7SkImageERK6SkRect"};
+    "16KawaseBlurFilter8generateE",
+    "18GaussianBlurFilter8generateE",
+    "20KawaseBlurDualFilter8generateE",
+    "13IBlurUtilsExt8generateE"};
+#define LG_SYMTAB_PATH "/system_ext/lib64/oplusex/lg_symtab.txt"
 // 兜底偏移：C15 三项 + C16 四项，paciasp/RX 门过滤不适用项
 #define LG_RGEN_FB_N 7
 static const unsigned long k_rgen_fb[LG_RGEN_FB_N] = {
@@ -883,6 +885,7 @@ static void resolve_rgen_offsets(const char *exe, unsigned long rx_s, unsigned l
                                  unsigned long bias) {
     if (g_rgen_resolved) return;
     lg_elfsym_set_diag(lg_logf);
+    lg_elfsym_set_table(LG_SYMTAB_PATH);
     int hit = 0;
     for (int i = 0; i < LG_RGEN_N; i++) {
         unsigned long va = 0;

@@ -10,6 +10,8 @@ data class ClockAnchor(
     val scale: Float = 1f,
     val alpha: Float = 1f,
     val rotationDeg: Float = 0f,
+    val stretchX: Float = 1f,
+    val stretchY: Float = 1f,
 )
 
 /** 时钟当前形态；复用实例，逐帧不分配。 */
@@ -19,6 +21,8 @@ class ClockPose {
     var scale: Float = 1f
     var alpha: Float = 1f
     var rotationDeg: Float = 0f
+    var stretchX: Float = 1f
+    var stretchY: Float = 1f
 
     fun set(anchor: ClockAnchor) {
         centerX = anchor.centerX
@@ -26,6 +30,8 @@ class ClockPose {
         scale = anchor.scale
         alpha = anchor.alpha
         rotationDeg = anchor.rotationDeg
+        stretchX = anchor.stretchX
+        stretchY = anchor.stretchY
     }
 
     fun copyFrom(other: ClockPose) {
@@ -34,6 +40,8 @@ class ClockPose {
         scale = other.scale
         alpha = other.alpha
         rotationDeg = other.rotationDeg
+        stretchX = other.stretchX
+        stretchY = other.stretchY
     }
 
     /** 可见性只由 alpha 推导，避免出现「透明但占位」的中间态。 */
@@ -57,6 +65,7 @@ class ClockStateMachine(
 
     val pose: ClockPose = ClockPose()
     private val anchors = HashMap<SceneState, ClockAnchor>()
+    private val written = HashSet<SceneState>()
     private val start = ClockPose()
     private var target: ClockAnchor? = null
     private var tweenStartMs: Long = 0L
@@ -70,13 +79,17 @@ class ClockStateMachine(
     init {
         anchors[SceneState.AOD] = ClockAnchor()
         anchors[SceneState.LOCK] = ClockAnchor()
-        // 桌面默认隐藏；桌面有时钟控件时由调用方 setAnchor 覆盖为控件位置
-        anchors[SceneState.HOME] = ClockAnchor(alpha = 0f)
+        // 桌面默认隐藏；有真机终点时由调用方 setAnchor 覆盖为控件或状态栏位置
+        anchors[SceneState.HOME] = ClockAnchorMapper.HOME_FALLBACK
     }
 
     fun anchorOf(state: SceneState): ClockAnchor = anchors[state] ?: ClockAnchor()
 
+    /** 该态锚点是否被调用方写过；构造期的缺省位不算，[anchorOf] 那时返回的不是真值。 */
+    fun hasAnchor(state: SceneState): Boolean = state in written
+
     fun setAnchor(state: SceneState, anchor: ClockAnchor, nowMs: Long, follow: Boolean = true) {
+        written.add(state)
         anchors[state] = anchor
         if (follow && transitionEdge == null && currentState == state) {
             startTween(anchor, nowMs, tuning.followMs)
@@ -123,6 +136,8 @@ class ClockStateMachine(
         pose.scale = lerp(from.scale, to.scale, e)
         pose.alpha = lerp(from.alpha, to.alpha, e)
         pose.rotationDeg = lerp(from.rotationDeg, to.rotationDeg, e)
+        pose.stretchX = lerp(from.stretchX, to.stretchX, e)
+        pose.stretchY = lerp(from.stretchY, to.stretchY, e)
     }
 
     /** 整轨直控：u=0 息屏 / 0.5 锁屏 / 1 桌面，不走缓动，拖动时与手指 1:1。 */
@@ -143,6 +158,8 @@ class ClockStateMachine(
         pose.scale = lerp(from.scale, to.scale, f)
         pose.alpha = lerp(from.alpha, to.alpha, f)
         pose.rotationDeg = lerp(from.rotationDeg, to.rotationDeg, f)
+        pose.stretchX = lerp(from.stretchX, to.stretchX, f)
+        pose.stretchY = lerp(from.stretchY, to.stretchY, f)
     }
 
     /** 转场结束：若当前态与进度终点不一致，补间收尾到当前态锚点。 */
@@ -167,6 +184,8 @@ class ClockStateMachine(
         pose.scale = lerp(start.scale, t.scale, e)
         pose.alpha = lerp(start.alpha, t.alpha, e)
         pose.rotationDeg = lerp(start.rotationDeg, t.rotationDeg, e)
+        pose.stretchX = lerp(start.stretchX, t.stretchX, e)
+        pose.stretchY = lerp(start.stretchY, t.stretchY, e)
         if (raw >= 1f) target = null
         return pose
     }

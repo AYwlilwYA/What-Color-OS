@@ -19,44 +19,68 @@ object ClockLayout {
         return min(widthPx, heightPx) * BASE_FRACTION * scale
     }
 
-    /** 用户可拖缩放范围钳位，只在写回配置时用。 */
-    fun clampUserScale(scale: Float): Float =
-        scale.coerceIn(LockLayoutSettings.MIN_CLOCK_SCALE, LockLayoutSettings.MAX_CLOCK_SCALE)
+    /** 横纵拉伸范围钳位。 */
+    fun clampStretch(stretch: Float): Float =
+        stretch.coerceIn(LockLayoutSettings.MIN_CLOCK_STRETCH, LockLayoutSettings.MAX_CLOCK_STRETCH)
 
     /**
-     * 右下角手柄拖动求缩放：左上角钉死，位移换算成字号增量。
+     * 右下角手柄自由变形：横向位移改横向拉伸、纵向位移改纵向拉伸，两轴互不影响。
      *
-     * [startScale] 为按下时缩放，[dx]/[dy] 为手指位移，[shortEdgePx] 为画布短边。
-     * 结果按用户可拖范围钳位；框左上角不动由调用方按新字号反算中心实现。
+     * [startX]/[startY] 为按下时两轴拉伸，[dx]/[dy] 为手指位移，
+     * [halfWPx]/[halfHPx] 为按下时框的半宽半高——位移按框自身尺寸折算，
+     * 拖过一个框宽即拉伸翻倍，手感与框大小无关。
      */
-    fun resizeScale(startScale: Float, dx: Float, dy: Float, shortEdgePx: Float): Float {
-        if (shortEdgePx <= 0f) return clampUserScale(startScale)
-        val delta = (dx + dy) / (shortEdgePx * RESIZE_TRAVEL)
-        return clampUserScale(startScale + delta)
-    }
-
-    /**
-     * 缩放后保持左上角不动的中心位移（归一化）。
-     *
-     * 框半宽/半高随字号线性变化，中心须同量右移/下移，左上角才不漂。
-     */
-    fun anchorShift(
-        oldHalfWPx: Float,
-        oldHalfHPx: Float,
-        newHalfWPx: Float,
-        newHalfHPx: Float,
-        widthPx: Float,
-        heightPx: Float,
+    fun resizeStretch(
+        startX: Float,
+        startY: Float,
+        dx: Float,
+        dy: Float,
+        halfWPx: Float,
+        halfHPx: Float,
     ): FloatArray {
-        if (widthPx <= 0f || heightPx <= 0f) return floatArrayOf(0f, 0f)
-        return floatArrayOf(
-            (newHalfWPx - oldHalfWPx) / widthPx,
-            (newHalfHPx - oldHalfHPx) / heightPx,
-        )
+        val sx = if (halfWPx > 0f) startX * (1f + dx / (halfWPx * 2f)) else startX
+        val sy = if (halfHPx > 0f) startY * (1f + dy / (halfHPx * 2f)) else startY
+        return floatArrayOf(clampStretch(sx), clampStretch(sy))
     }
 
-    /** 手柄拖动行程系数：短边的该倍数对应缩放 1.0。 */
-    const val RESIZE_TRAVEL = 0.35f
+    /**
+     * 超框即按比例收：框宽含固定留白，故按 (bound−pad)/(measured−pad) 收；直接乘 bound/measured 会欠收。
+     */
+    fun fitStretch(
+        stretchX: Float,
+        stretchY: Float,
+        measuredW: Float,
+        measuredH: Float,
+        padW: Float,
+        boundW: Float,
+        boundH: Float,
+    ): FloatArray {
+        val nx = if (measuredW > boundW && measuredW > padW && boundW > padW) {
+            stretchX * (boundW - padW) / (measuredW - padW)
+        } else {
+            stretchX
+        }
+        val ny = if (measuredH > boundH && measuredH > 0f && boundH > 0f) {
+            stretchY * boundH / measuredH
+        } else {
+            stretchY
+        }
+        return floatArrayOf(nx.coerceIn(LockLayoutSettings.MIN_CLOCK_STRETCH, LockLayoutSettings.MAX_CLOCK_STRETCH),
+            ny.coerceIn(LockLayoutSettings.MIN_CLOCK_STRETCH, LockLayoutSettings.MAX_CLOCK_STRETCH),)
+    }
+
+    /**
+     * 视觉中心 ↔ 配置中心换算（逐轴，位置是「替换」不是「平移」）。
+     *
+     * 配置值仍是缺省值 = 这一轴没被编辑过 ⇒ 视觉落在场景锚点；
+     * 一旦编辑过，配置值就是屏幕归一化的目标位置，视觉直接取它。
+     * 编辑手势与绘制必须共用这套换算，否则手柄与画面不同源。
+     */
+    fun configToVisual(config: Float, anchor: Float, default: Float): Float =
+        if (EditAnchorOverlay.isDefaultAxis(config, default)) anchor else config
+
+    fun visualToConfig(visual: Float, anchor: Float, default: Float): Float =
+        if (EditAnchorOverlay.isDefaultAxis(visual, anchor)) default else visual
 
     /**
      * 按整串时间宽度再钳一次缩放，避免大字号时横向溢出。

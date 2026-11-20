@@ -37,7 +37,7 @@ object AodStyleCatalog {
 
     val styles: List<AodStyle> = listOf(
         AodStyle(ID_FULLSCREEN, R.string.aod_style_fullscreen, AodForm.FULL, 0xFF8FA6C4.toInt(), AodTransition.MASK),
-        AodStyle(ID_HANDPAINT, R.string.aod_style_handpaint, AodForm.PARTIAL, 0xFFE8D8B0.toInt(), AodTransition.MASK),
+        AodStyle(ID_HANDPAINT, R.string.aod_style_handpaint, AodForm.PARTIAL, 0xFFE8D8B0.toInt(), AodTransition.SCENE),
         AodStyle(ID_TEXT, R.string.aod_style_text, AodForm.PARTIAL, 0xFFA9D3C2.toInt(), AodTransition.MASK),
         AodStyle(ID_PORTRAIT, R.string.aod_style_portrait, AodForm.PARTIAL, 0xFFC4B4E0.toInt(), AodTransition.MASK),
         AodStyle(ID_SAIL, R.string.aod_style_sail, AodForm.PARTIAL, 0xFFC9A227.toInt(), AodTransition.MASK),

@@ -181,9 +181,9 @@ class TransitionEvaluator(
         out.maskRadius = endRadius * e
         out.maskFeather = feather
 
-        val fadeStart = config.outerFadeStart.coerceIn(0f, 0.999f)
-        val outerAlpha = if (e <= fadeStart) 1f else {
-            val local = (e - fadeStart) / (1f - fadeStart)
+        val fadeStart = config.outerFadeStart
+        val outerAlpha = if (fadeStart >= 1f || e <= fadeStart) 1f else {
+            val local = (e - fadeStart) / (1f - fadeStart.coerceAtMost(0.999f))
             1f - smoothStep(local)
         }
         out.srcAlpha *= outerAlpha

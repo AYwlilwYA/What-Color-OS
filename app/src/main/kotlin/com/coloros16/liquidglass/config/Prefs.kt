@@ -336,11 +336,11 @@ object Prefs {
     /** 持续抓屏间隔上限毫秒（5000ms） */
     const val BG_PERIODIC_CAPTURE_INTERVAL_MAX_MS = 5000
 
-    /** 区域级抓屏（实验性）：true=瞬态场景（横幅/流体云/simple-banner）强制抓时只抓活跃瞬态区域并集，
-     *  存入独立缓冲供瞬态元素采样；false（默认）=恒整屏抓屏。shade 展开时不接管。改动 ≤1s 生效。 */
+    /** 区域级抓屏：true（默认）=瞬态场景（横幅/流体云/simple-banner）只抓活跃瞬态区域并集，
+     *  存入独立缓冲供瞬态元素采样；false=恒整屏抓屏。shade 展开时不接管。改动 ≤1s 生效。 */
     const val KEY_BG_REGION_CAPTURE_EXPERIMENTAL = "bg_region_capture_experimental"
-    /** 区域级抓屏默认值（false = 默认关闭） */
-    const val DEFAULT_BG_REGION_CAPTURE_EXPERIMENTAL = false
+    /** 区域级抓屏默认值（true = 瞬态元素只抓自己那一小块，省电且背景跟手） */
+    const val DEFAULT_BG_REGION_CAPTURE_EXPERIMENTAL = true
 
     // ---------- 模块日志（2026-08-13 用户要求「提供关闭日志的选项」） ----------
     /** 模块日志开关：true=打日志；false=热路径/渲染诊断日志静默（保留挂载一次性日志与 Log.e 错误日志）。
@@ -355,6 +355,10 @@ object Prefs {
     const val KEY_ENGINE_FULL_LOG = "engine_full_log_enable"
     /** 引擎全量日志开关默认值（默认关，防刷屏省电） */
     const val DEFAULT_ENGINE_FULL_LOG = false
+
+    /** 抓取范围：true=全量日志（*:V）；false=仅模块标签。内部调试页开关，用户版一键抓取固定 false。 */
+    const val KEY_CAPTURE_INCLUDE_ALL = "capture_include_all"
+    const val DEFAULT_CAPTURE_INCLUDE_ALL = false
 
     /** 用户 hook 覆盖表（JSON 数组，字段与出厂 HookSpec 同名）：按 id 整条覆盖出厂条目。
      *  框架侧存储，设置页/工作台写入，install 期 ConfigStore.loadMerged 合并。 */
@@ -689,6 +693,18 @@ object Prefs {
     /** 全局搜索弹窗玻璃化默认值（false = 不干预） */
     const val DEFAULT_QUICK_SEARCH_GLASS = false
 
+    /** 日历玻璃化（com.coloros.calendar，COUI 弹窗菜单/底栏）。默认 **false**，语义同 [KEY_GALLERY_GLASS]。 */
+    const val KEY_CALENDAR_GLASS = "calendar_glass_enable"
+    const val DEFAULT_CALENDAR_GLASS = false
+
+    /** 笔记玻璃化（com.coloros.note，COUI 弹窗菜单）。默认 **false**，语义同 [KEY_GALLERY_GLASS]。 */
+    const val KEY_NOTE_GLASS = "note_glass_enable"
+    const val DEFAULT_NOTE_GLASS = false
+
+    /** 天气玻璃化（com.coloros.weather2，COUI 弹窗菜单）。默认 **false**，语义同 [KEY_GALLERY_GLASS]。 */
+    const val KEY_WEATHER_GLASS = "weather_glass_enable"
+    const val DEFAULT_WEATHER_GLASS = false
+
     /** 负一屏整页玻璃：批量挂载器扫 assistantscreen 视图树，纯色/渐变背板与 HighlightShadow
      *  自绘背板控件统一挂背板玻璃（与弹窗玻璃 [KEY_ASSISTANT_SCREEN_GLASS] 独立）。
      *  默认 **false**。开关切换即时生效（TTL 500ms 重读）。 */
@@ -779,17 +795,62 @@ object Prefs {
     /** 强制透明背景默认值（true = 默认透明，用户硬需求） */
     const val DEFAULT_SEEDLING_CARD_FORCE_TRANSPARENT_BG = true
 
-    /** 流体云接管：开启后由模块自绘小岛与大卡片，取代系统渲染路径。
-     *  当前仅登记配置项，渲染侧尚未接线，开关不产生行为变化。 */
+    /** 流体云接管：开启后由模块在独立悬浮窗口自绘小岛与大卡片，抑制系统原渲染。 */
     const val KEY_SEEDLING_TAKEOVER_ENABLE = "seedling_takeover_enable"
     /** 流体云接管默认值（false = 不接管） */
     const val DEFAULT_SEEDLING_TAKEOVER_ENABLE = false
 
-    /** 流体云自绘接管下的液态玻璃材质开关，供接管实现接线时读取。
+    /** 流体云自绘接管下的液态玻璃材质开关。
      *  与 [KEY_SEEDLING_CARD_GLASS_ENABLE]（系统渲染路径上的玻璃）互不覆盖。 */
     const val KEY_SEEDLING_TAKEOVER_GLASS = "seedling_takeover_glass"
     /** 接管态玻璃默认值（false = 关闭） */
     const val DEFAULT_SEEDLING_TAKEOVER_GLASS = false
+
+    /** 接管岛回弹档位 dp（0/1/2/5/8 → ζ 1.0/0.8/0.75/0.62/0.42，档间插值）。 */
+    const val KEY_SEEDLING_TAKEOVER_BOUNCE_DP = "seedling_takeover_bounce_dp"
+    const val DEFAULT_SEEDLING_TAKEOVER_BOUNCE_DP = 5f
+
+    /** 接管岛动画速度缩放（0.4~2.0）。 */
+    const val KEY_SEEDLING_TAKEOVER_SPEED = "seedling_takeover_speed"
+    const val DEFAULT_SEEDLING_TAKEOVER_SPEED = 1f
+
+    /** 接管岛环境共生描边（随背景明暗显隐）。 */
+    const val KEY_SEEDLING_TAKEOVER_AMBIENT_STROKE = "seedling_takeover_ambient_stroke"
+    const val DEFAULT_SEEDLING_TAKEOVER_AMBIENT_STROKE = true
+
+    /** 接管岛歌词显示（Lyricon 提供者接入时生效）。 */
+    const val KEY_SEEDLING_TAKEOVER_LYRICS = "seedling_takeover_lyrics"
+    const val DEFAULT_SEEDLING_TAKEOVER_LYRICS = true
+
+    /** 接管岛无操作隐藏（开启后 180s 无交互撤窗，任何交互重置计时）。 */
+    const val KEY_SEEDLING_TAKEOVER_IDLE_HIDE = "seedling_takeover_idle_hide"
+    const val DEFAULT_SEEDLING_TAKEOVER_IDLE_HIDE = false
+
+    /** 接管岛位置跟随挖孔（false=屏幕居中；true=左/右挖孔贴边）。 */
+    const val KEY_SEEDLING_ANCHOR_FOLLOW = "seedling_anchor_follow"
+    const val DEFAULT_SEEDLING_ANCHOR_FOLLOW = false
+
+    /** 接管大卡样式模式（apple=单卡横滑换卡 / op=拉开所有卡竖排）。 */
+    const val KEY_SEEDLING_CARD_MODE = "seedling_card_mode"
+    const val DEFAULT_SEEDLING_CARD_MODE = "apple"
+
+    /** 接管岛 kind 级开关（默认照参考表：media/call/timer/status/live 开，message/face/code 关）。 */
+    const val KEY_SEEDLING_KIND_MEDIA = "seedling_kind_media"
+    const val DEFAULT_SEEDLING_KIND_MEDIA = true
+    const val KEY_SEEDLING_KIND_MESSAGE = "seedling_kind_message"
+    const val DEFAULT_SEEDLING_KIND_MESSAGE = false
+    const val KEY_SEEDLING_KIND_CALL = "seedling_kind_call"
+    const val DEFAULT_SEEDLING_KIND_CALL = true
+    const val KEY_SEEDLING_KIND_TIMER = "seedling_kind_timer"
+    const val DEFAULT_SEEDLING_KIND_TIMER = true
+    const val KEY_SEEDLING_KIND_STATUS = "seedling_kind_status"
+    const val DEFAULT_SEEDLING_KIND_STATUS = true
+    const val KEY_SEEDLING_KIND_FACE = "seedling_kind_face"
+    const val DEFAULT_SEEDLING_KIND_FACE = false
+    const val KEY_SEEDLING_KIND_LIVE = "seedling_kind_live"
+    const val DEFAULT_SEEDLING_KIND_LIVE = true
+    const val KEY_SEEDLING_KIND_CODE = "seedling_kind_code"
+    const val DEFAULT_SEEDLING_KIND_CODE = false
 
     // ---------- 锁屏大时钟液态玻璃化（doc/spec/43，2026-08-13） ----------
     /** 锁屏大时钟液态玻璃化开关：true=把锁屏大时钟数字文字用液态玻璃 shader 填充（采样时钟壁纸衬底位图，
@@ -1650,6 +1711,9 @@ object Prefs {
     /** 桌面滑动时相机横向视差强度（0..1）。 */
     const val KEY_WALLPAPER_3D_PARALLAX = "wallpaper_3d_parallax"
     const val DEFAULT_WALLPAPER_3D_PARALLAX = 0.6f
+    /** 3D 壁纸三态场景 id：空串走相机曲线，`snowmountain` 走三态场景相机。 */
+    const val KEY_WALLPAPER_3D_SCENE = "wallpaper_3d_scene"
+    const val DEFAULT_WALLPAPER_3D_SCENE = ""
     /** 2D 壁纸模式：image/video/effect。 */
     const val KEY_WALLPAPER_2D_MODE = "wallpaper_2d_mode"
     const val DEFAULT_WALLPAPER_2D_MODE = "effect"
@@ -1661,4 +1725,22 @@ object Prefs {
     /** 2D 壁纸视差强度（0..1）。 */
     const val KEY_WALLPAPER_2D_PARALLAX = "wallpaper_2d_parallax"
     const val DEFAULT_WALLPAPER_2D_PARALLAX = 0.6f
+
+    // ---------- 体检回传（hook 侧写、设置页读；只读键，UI 不提供写入） ----------
+    /** hook 心跳：SystemClock.elapsedRealtime() 毫秒，每次玻璃绘制链活动时刷新（节流 5s）。 */
+    const val KEY_HEALTH_HEARTBEAT_MS = "health_heartbeat_ms"
+    /** 主渲染腿是否就绪（drawBlurShader / PRE_AGSL draw 任一挂上）。 */
+    const val KEY_HEALTH_MAIN_LEG = "health_main_leg"
+    /** 近 3 秒实际画过玻璃的元素数。 */
+    const val KEY_HEALTH_ACTIVE_COUNT = "health_active_count"
+    /** 玻璃熔断是否触发。 */
+    const val KEY_HEALTH_GLASS_FUSED = "health_glass_fused"
+    /** 抓屏熔断是否触发。 */
+    const val KEY_HEALTH_CAPTURE_FUSED = "health_capture_fused"
+    /** 最近一次成功抓屏的 elapsedRealtime 毫秒（0=从未成功）。 */
+    const val KEY_HEALTH_LAST_CAPTURE_MS = "health_last_capture_ms"
+    /** SF 通道是否可用（仅 render_mode=sf 时有意义）。 */
+    const val KEY_HEALTH_SF_READY = "health_sf_ready"
+    /** 回传写入节流间隔。 */
+    const val HEALTH_PUBLISH_INTERVAL_MS = 5_000L
 }

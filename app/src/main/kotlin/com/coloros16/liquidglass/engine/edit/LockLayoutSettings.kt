@@ -17,6 +17,18 @@ class LockLayoutSettings(val surface: EditSurface = EditSurface.LOCK) {
         set(value) {
             field = value.coerceIn(MIN_CLOCK_SCALE, MAX_CLOCK_SCALE)
         }
+
+    /** 横向拉伸倍率：1=原宽，>1 拉长成长条时钟；与字号缩放独立。 */
+    var clockStretchX: Float = 1f
+        set(value) {
+            field = value.coerceIn(MIN_CLOCK_STRETCH, MAX_CLOCK_STRETCH)
+        }
+
+    /** 纵向拉伸倍率：1=原高，>1 压扁变高；与字号缩放独立。 */
+    var clockStretchY: Float = 1f
+        set(value) {
+            field = value.coerceIn(MIN_CLOCK_STRETCH, MAX_CLOCK_STRETCH)
+        }
     var snapEnabled: Boolean = true
 
     private val widgetMap: MutableMap<String, LockWidget> = LinkedHashMap()
@@ -87,6 +99,8 @@ class LockLayoutSettings(val surface: EditSurface = EditSurface.LOCK) {
         out.append("clock.x=").append(clockX).append('\n')
         out.append("clock.y=").append(clockY).append('\n')
         out.append("clock.scale=").append(clockScale).append('\n')
+        out.append("clock.stretch_x=").append(clockStretchX).append('\n')
+        out.append("clock.stretch_y=").append(clockStretchY).append('\n')
         out.append("clock.font=").append(style.fontFamily).append('\n')
         out.append("clock.weight=").append(style.weight).append('\n')
         out.append("clock.letter_spacing=").append(style.letterSpacing).append('\n')
@@ -125,6 +139,10 @@ class LockLayoutSettings(val surface: EditSurface = EditSurface.LOCK) {
         const val MIN_CLOCK_SCALE = 0.6f
         const val MAX_CLOCK_SCALE = 1.6f
 
+        /** 横纵拉伸范围：下限压到很窄，上限拉到极长条。 */
+        const val MIN_CLOCK_STRETCH = 0.25f
+        const val MAX_CLOCK_STRETCH = 6f
+
         fun defaults(surface: EditSurface): LockLayoutSettings = LockLayoutSettings(surface)
 
         fun parse(text: String?, surface: EditSurface): LockLayoutSettings {
@@ -142,11 +160,7 @@ class LockLayoutSettings(val surface: EditSurface = EditSurface.LOCK) {
             }
             settings.clock = settings.clock.sanitized()
             settings.clockX = settings.clockX.coerceIn(0f, 1f)
-            settings.clockY = if (surface == EditSurface.AOD) {
-                AOD_DEFAULT_CLOCK_Y
-            } else {
-                settings.clockY.coerceIn(0f, 1f)
-            }
+            settings.clockY = settings.clockY.coerceIn(0f, 1f)
             settings.clockScale = settings.clockScale
             return settings
         }
@@ -165,6 +179,8 @@ class LockLayoutSettings(val surface: EditSurface = EditSurface.LOCK) {
                 "clock.x" -> value.toFloatOrNull()?.let { settings.clockX = it }
                 "clock.y" -> value.toFloatOrNull()?.let { settings.clockY = it }
                 "clock.scale" -> value.toFloatOrNull()?.let { settings.clockScale = it }
+                "clock.stretch_x" -> value.toFloatOrNull()?.let { settings.clockStretchX = it }
+                "clock.stretch_y" -> value.toFloatOrNull()?.let { settings.clockStretchY = it }
                 "clock.font" -> parseToken(value)?.let { settings.clock = settings.clock.copy(fontFamily = it) }
                 "clock.weight" -> value.toIntOrNull()?.let { settings.clock = settings.clock.copy(weight = it) }
                 "clock.letter_spacing" -> value.toFloatOrNull()
@@ -200,7 +216,9 @@ class LockLayoutSettings(val surface: EditSurface = EditSurface.LOCK) {
             val typeId = key.substring(0, dot)
             val field = key.substring(dot + 1)
             if (PillType.from(typeId) == null) return
-            var pill = settings.pillMap[typeId] ?: return
+            // 新建槽：写盘时只遍历已有槽，能出现这些行就说明该槽确实存过；
+            // 回读时按初始两槽取会把它整条丢掉（新增的槽重启即消失）
+            var pill = settings.pillMap[typeId] ?: PillPlacement(typeId)
             when (field) {
                 "on" -> parseFlag(value)?.let { pill = pill.copy(enabled = it) }
                 "x" -> value.toFloatOrNull()?.let { pill = pill.copy(x = it) }

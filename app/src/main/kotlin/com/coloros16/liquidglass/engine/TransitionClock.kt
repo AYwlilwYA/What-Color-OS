@@ -37,6 +37,14 @@ class TransitionClock(
     private var playDurationMs: Long = 0L
     private var playDelayMs: Long = 0L
 
+    private var pumpSawMovement: Boolean = false
+    private var pumpEdge: TransitionEdge? = null
+    private var pumpT: Float = Float.NaN
+
+    /** 本轮系统泵宣告以来是否见过进度真的推进（无帧的边恒 false）。 */
+    @Synchronized
+    fun pumpSawMovement(): Boolean = pumpSawMovement
+
     @Synchronized
     fun state(): ClockState = ClockState(edge, source, t, playing, revision)
 
@@ -50,6 +58,21 @@ class TransitionClock(
     @Synchronized
     fun setT(edge: TransitionEdge, value: Float, source: ClockSource) {
         val clamped = clamp01(value)
+        if (source == ClockSource.SYSTEM_PUMP) {
+            if (pumpEdge != edge) {
+                pumpEdge = edge
+                pumpSawMovement = false
+                pumpT = Float.NaN
+            } else if (PumpTakeoverPolicy.interior(pumpT, clamped)) {
+                pumpSawMovement = true
+            }
+            pumpT = clamped
+            if (playing && this.source == ClockSource.INTERNAL_TIMELINE &&
+                this.edge == edge && !pumpSawMovement
+            ) {
+                return
+            }
+        }
         val changed = this.edge != edge || this.t != clamped || this.source != source || playing
         this.edge = edge
         this.t = clamped
@@ -80,6 +103,7 @@ class TransitionClock(
     ) {
         this.edge = edge
         this.source = source
+        if (source == ClockSource.INTERNAL_TIMELINE) pumpSawMovement = false
         this.playFromT = clamp01(from)
         this.t = this.playFromT
         this.playDurationMs = durationMs.coerceAtLeast(1L)
@@ -124,6 +148,9 @@ class TransitionClock(
         source = ClockSource.MANUAL
         t = 0f
         playing = false
+        pumpEdge = null
+        pumpT = Float.NaN
+        pumpSawMovement = false
         notifyChanged()
     }
 

@@ -16,6 +16,7 @@ import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.core.content.ContextCompat
 import com.coloros16.liquidglass.R
+import com.coloros16.liquidglass.engine.SceneState
 import com.coloros16.liquidglass.engine.edit.ClockFonts
 import com.coloros16.liquidglass.engine.edit.ClockInfo
 import com.coloros16.liquidglass.engine.edit.ClockStyle
@@ -36,6 +37,8 @@ class AodEditController(
     private val readLayout: (EditSurface) -> LockLayoutSettings,
     private val writeLayout: (EditSurface, LockLayoutSettings) -> Unit,
     private val openPreview: () -> Unit,
+    /** 当前息屏样式 id：编辑页时钟锚点要跟预览取同一个样式契约。 */
+    private val styleIdOf: () -> String,
 ) {
 
     private companion object {
@@ -67,6 +70,7 @@ class AodEditController(
         val view = root.findViewById<AodEditView>(R.id.aodEditCanvas) ?: return missing("aodEditCanvas")
         canvas = view
         view.surface = surface
+        view.anchor = anchorOfSurface()
         view.settings = settings
         view.listener = object : AodEditView.Listener {
             override fun onClockTapped() = showClockPanel()
@@ -105,6 +109,7 @@ class AodEditController(
 
     fun refresh() {
         settings = readLayout(surface)
+        canvas?.anchor = anchorOfSurface()
         canvas?.settings = settings
         canvas?.invalidate()
         rebuildWidgetRows()
@@ -467,6 +472,23 @@ class AodEditController(
 
     private fun persist() {
         writeLayout(surface, settings)
+    }
+
+    /**
+     * 该编辑面的样式时钟锚点：与预览取同一份契约，取不到契约时返回 null 走缺省位。
+     *
+     * 息屏面取 AOD 锚点、锁屏面取 LOCK 锚点；样式无世界契约（文字/人像等）本就没有锚点。
+     */
+    private fun anchorOfSurface(): Pair<Float, Float>? {
+        val state = if (surface == EditSurface.AOD) SceneState.AOD else SceneState.LOCK
+        val styleId = styleIdOf()
+        val a = runCatching {
+            AodSceneCatalog.forStyle(styleId)?.clockAnchors?.get(state)
+        }.getOrNull()
+        // 取的款与最终锚点必须能取证：两套存储并存时这里取错款只会表现为「位置不对」，没有别的痕迹
+        Lg.i(TAG, "edit-anchor surface=$surface style=$styleId y=${a?.centerY ?: "(none)"}")
+        if (a == null) return null
+        return a.centerX to a.centerY
     }
 
     private fun bindRow(id: Int, title: Int, desc: Int, icon: Int, onClick: () -> Unit) {

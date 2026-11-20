@@ -5,6 +5,7 @@ import com.coloros16.liquidglass.hook.MatchKind
 import com.coloros16.liquidglass.hook.MinorPoint
 import com.coloros16.liquidglass.hook.PosteffectArch
 import com.coloros16.liquidglass.hook.Profiles
+import com.coloros16.liquidglass.hook.SeedlingDataPath
 import com.coloros16.liquidglass.hook.TiltPath
 import com.coloros16.liquidglass.hook.VersionPool
 import com.coloros16.liquidglass.hook.VersionSpec
@@ -34,8 +35,79 @@ class VersionPoolTest {
             "com.coloros.smartsidebar",
             "com.coloros.assistantscreen",
             "com.heytap.quicksearchbox",
+            "com.coloros.calendar",
+            "com.coloros.note",
+            "com.coloros.weather2",
+            "com.oplus.systemui.plugins",
         )
         assertEquals(expected, pkgs)
+    }
+
+    @Test
+    fun seedlingPluginC15PointUsesI4TFPath() {
+        val d = VersionPool.query(VersionPool.PKG_SYSTEMUI_PLUGINS, 15001028L)
+        assertEquals(MatchKind.Exact, d.match)
+        assertSame(Profiles.SEEDLING_PLUGIN_15, d.profile)
+        assertEquals(SeedlingDataPath.C15_I4_T_F, d.profile.seedlingDataPath)
+    }
+
+    @Test
+    fun seedlingPluginC16PointUsesZ3H0EPath() {
+        val d = VersionPool.query(VersionPool.PKG_SYSTEMUI_PLUGINS, 16001002L)
+        assertEquals(MatchKind.Exact, d.match)
+        assertEquals(SeedlingDataPath.C16_Z3_H0_E, d.profile.seedlingDataPath)
+    }
+
+    @Test
+    fun seedlingPluginBelowSegmentMinUsesSegmentProfile() {
+        val d = VersionPool.query(VersionPool.PKG_SYSTEMUI_PLUGINS, 15000000L)
+        assertEquals(MatchKind.Segment, d.match)
+        assertSame(Profiles.SEEDLING_PLUGIN_15, d.profile)
+        assertEquals(SeedlingDataPath.C15_I4_T_F, d.profile.seedlingDataPath)
+    }
+
+    @Test
+    fun seedlingPluginUnregisteredMajorFloorsToHighestKnownPoint() {
+        val d = VersionPool.query(VersionPool.PKG_SYSTEMUI_PLUGINS, 17000000L)
+        assertEquals("17 段未登记 → 全表 floor 取最高已知点（既有 decide 语义）", MatchKind.Nearest, d.match)
+        assertEquals(16001002L, d.point)
+        assertEquals(SeedlingDataPath.C16_Z3_H0_E, d.profile.seedlingDataPath)
+    }
+
+    @Test
+    fun seedlingPluginVerUnknownUsesFirstPoint() {
+        val d = VersionPool.query(VersionPool.PKG_SYSTEMUI_PLUGINS, -1L)
+        assertEquals(MatchKind.VerUnknown, d.match)
+        assertEquals(SeedlingDataPath.C15_I4_T_F, d.profile.seedlingDataPath)
+    }
+
+    @Test
+    fun seedlingPathIsOrthogonalToPosteffectArch() {
+        val d = VersionPool.query(VersionPool.PKG_SYSTEMUI_PLUGINS, 15001028L)
+        assertEquals(
+            "插件档不得污染 posteffect 世代判定",
+            PosteffectArch.UNKNOWN, d.profile.posteffectArch,
+        )
+        val sysui = VersionPool.query(VersionPool.PKG_SYSTEMUI, 160014L)
+        assertEquals(
+            "SystemUI 档不带插件数据路径",
+            SeedlingDataPath.UNKNOWN, sysui.profile.seedlingDataPath,
+        )
+    }
+
+    @Test
+    fun seedlingPathProbePatchOverridesStatic() {
+        VersionPool.notePatch(
+            VersionPool.PKG_SYSTEMUI_PLUGINS,
+            VersionPool.PATCH_SEEDLING_DATA_PATH,
+            SeedlingDataPath.C16_Z3_H0_E,
+        )
+        val d = VersionPool.query(VersionPool.PKG_SYSTEMUI_PLUGINS, 15001028L)
+        assertEquals(
+            SeedlingDataPath.C16_Z3_H0_E,
+            d.patch[VersionPool.PATCH_SEEDLING_DATA_PATH],
+        )
+        assertEquals("静态命中来源不被 patch 改写", SeedlingDataPath.C15_I4_T_F, d.profile.seedlingDataPath)
     }
 
     @Test
@@ -145,8 +217,17 @@ class VersionPoolTest {
     }
 
     @Test
-    fun emptyPointTableWalksSegment() {
+    fun galleryAbovePointFloorsToNearest() {
         val d = VersionPool.query(galleryPkg, 16040008L)
+        assertEquals(MatchKind.Nearest, d.match)
+        assertEquals(16, d.major)
+        assertEquals(16032038L, d.point)
+        assertSame(Profiles.APPGLASS_16, d.profile)
+    }
+
+    @Test
+    fun galleryBelowMinPointWalksSegment() {
+        val d = VersionPool.query(galleryPkg, 16000000L)
         assertEquals(MatchKind.Segment, d.match)
         assertEquals(16, d.major)
         assertEquals(0L, d.point)
@@ -154,27 +235,103 @@ class VersionPoolTest {
     }
 
     @Test
-    fun segmentMissFallsBackToDefaultProfile() {
+    fun qsbAboveAllPointsFloorsToMaxPoint() {
         val d = VersionPool.query(qsbPkg, 1234567L)
-        assertEquals(MatchKind.Segment, d.match)
+        assertEquals(MatchKind.Nearest, d.match)
         assertEquals(12, d.major)
-        assertSame(Profiles.APPGLASS_DEFAULT, d.profile)
-    }
-
-    @Test
-    fun quicksearchboxUsesOwnMajorDivisor() {
-        val d = VersionPool.query(qsbPkg, 1162011L)
-        assertEquals(MatchKind.Segment, d.match)
-        assertEquals(11, d.major)
+        assertEquals(1165003L, d.point)
         assertSame(Profiles.APPGLASS_11, d.profile)
     }
 
     @Test
-    fun emptyTableVerUnknownUsesDefaultProfile() {
+    fun unregisteredSegmentMissFallsBackToDefaultProfile() {
+        val d = VersionPool.query("com.coloros.unknownapp", 1234567L)
+        assertEquals(MatchKind.Segment, d.match)
+        assertSame(Profiles.UNREGISTERED, d.profile)
+    }
+
+    @Test
+    fun quicksearchboxUsesOwnMajorDivisor() {
+        val d = VersionPool.query(qsbPkg, 1166000L)
+        assertEquals(MatchKind.Nearest, d.match)
+        assertEquals(11, d.major)
+        assertEquals(1165003L, d.point)
+        assertSame(Profiles.APPGLASS_11, d.profile)
+    }
+
+    @Test
+    fun appHostVerUnknownTakesMinPoint() {
         val d = VersionPool.query(galleryPkg, -1L)
         assertEquals(MatchKind.VerUnknown, d.match)
-        assertEquals(0L, d.point)
-        assertSame(Profiles.APPGLASS_DEFAULT, d.profile)
+        assertEquals(16032038L, d.point)
+        assertSame(Profiles.APPGLASS_16, d.profile)
+        val calc = VersionPool.query("com.coloros.calculator", -1L)
+        assertEquals(15006026L, calc.point)
+        assertSame(Profiles.APPGLASS_15, calc.profile)
+    }
+
+    @Test
+    fun appHostExactPointsC15AndC16() {
+        val cases = listOf(
+            Triple(galleryPkg, 16032038L, Profiles.APPGLASS_16),
+            Triple("com.coloros.calculator", 15006026L, Profiles.APPGLASS_15),
+            Triple("com.coloros.calculator", 16004002L, Profiles.APPGLASS_16),
+            Triple("com.coloros.smartsidebar", 15005007L, Profiles.APPGLASS_15),
+            Triple("com.coloros.smartsidebar", 160016002L, Profiles.APPGLASS_16),
+            Triple("com.coloros.assistantscreen", 170140060L, Profiles.APPGLASS_17),
+            Triple(qsbPkg, 1154027L, Profiles.APPGLASS_11),
+            Triple(qsbPkg, 1165003L, Profiles.APPGLASS_11),
+        )
+        for ((pkg, ver, profile) in cases) {
+            val d = VersionPool.query(pkg, ver)
+            assertEquals("$pkg@$ver", MatchKind.Exact, d.match)
+            assertEquals("$pkg@$ver", ver, d.point)
+            assertSame("$pkg@$ver", profile, d.profile)
+        }
+    }
+
+    @Test
+    fun calculatorC15SegmentBelowMinPointStaysInSegment() {
+        val d = VersionPool.query("com.coloros.calculator", 15000000L)
+        assertEquals(MatchKind.Segment, d.match)
+        assertEquals(15, d.major)
+        assertSame(Profiles.APPGLASS_15, d.profile)
+    }
+
+    @Test
+    fun sidebarC15NeverFloorsAcrossToC16Point() {
+        val d = VersionPool.query("com.coloros.smartsidebar", 15006000L)
+        assertEquals(MatchKind.Nearest, d.match)
+        assertEquals(15005007L, d.point)
+        assertSame(Profiles.APPGLASS_15, d.profile)
+        val low = VersionPool.query("com.coloros.smartsidebar", 14000000L)
+        assertEquals(MatchKind.Nearest, low.match)
+        assertEquals(15005007L, low.point)
+        assertSame(Profiles.APPGLASS_15, low.profile)
+    }
+
+    @Test
+    fun assistantScreenC16SegmentResolves() {
+        val d = VersionPool.query("com.coloros.assistantscreen", 160050126L)
+        assertEquals(MatchKind.Segment, d.match)
+        assertEquals(16, d.major)
+        assertSame(Profiles.APPGLASS_16, d.profile)
+    }
+
+    @Test
+    fun calendarNoteWeatherExactPoints() {
+        val cases = listOf(
+            Triple("com.coloros.calendar", 16026020L, 1_000_000L),
+            Triple("com.coloros.note", 160070002L, 10_000_000L),
+            Triple("com.coloros.weather2", 16046002L, 1_000_000L),
+        )
+        for ((pkg, ver, divisor) in cases) {
+            val d = VersionPool.query(pkg, ver)
+            assertEquals("$pkg@$ver", MatchKind.Exact, d.match)
+            assertEquals("$pkg@$ver", (ver / divisor).toInt(), d.major)
+            assertEquals("$pkg@$ver", ver, d.point)
+            assertSame("$pkg@$ver", Profiles.APPGLASS_16, d.profile)
+        }
     }
 
     @Test

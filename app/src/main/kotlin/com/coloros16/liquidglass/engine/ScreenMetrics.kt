@@ -1,5 +1,8 @@
 package com.coloros16.liquidglass.engine
 
+/** 手机屏幕宽高比（宽 ÷ 高）：样机框与编辑画布共用，保证与真机整屏等比。 */
+const val SCREEN_ASPECT = 9f / 19.5f
+
 /** 屏幕尺寸（px）；遮挡半径与羽化都按它折算。 */
 data class ScreenMetrics(
     val widthPx: Float,

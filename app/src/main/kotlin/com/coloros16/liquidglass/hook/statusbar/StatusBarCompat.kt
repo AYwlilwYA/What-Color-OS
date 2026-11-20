@@ -29,6 +29,9 @@ object StatusBarCompat {
     /** 下拉大时钟与日期（分离式通知中心面板）。 */
     const val FQCN_QS_SIMPLE_HEADER = "com.oplus.systemui.separate.OplusQSSimpleHeader"
 
+    /** 合并式面板的 QS 页脚：大时钟与日期挂在这里，与分离式 header 是两套树。 */
+    const val FQCN_QS_FOOTER = "com.oplus.systemui.qs.OplusQSFooterImpl"
+
     /** 门禁用到的资源 id 名（缺一个只降级对应功能）。 */
     val ID_NAMES = listOf(
         "status_bar_contents",
@@ -41,6 +44,7 @@ object StatusBarCompat {
         "icons",
         "batteryRemainingIcon",
         "qs_clock_container",
+        "qs_footer",
         "qs_footer_clock",
         "oplus_date",
         "settings_button_container",

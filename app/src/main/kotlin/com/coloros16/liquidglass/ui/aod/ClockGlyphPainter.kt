@@ -63,8 +63,12 @@ object ClockGlyphPainter {
         datePaint: Paint,
         bounds: RectF,
         paddingPx: Float,
+        stretchX: Float = 1f,
+        stretchY: Float = 1f,
     ): Float {
         if (fontPx <= 0f) return 0f
+        val sx = if (stretchX > 0f) stretchX else 1f
+        val sy = if (stretchY > 0f) stretchY else 1f
         val main = Paint(timePaint).apply {
             textSize = fontPx
             typeface = timeTypeface
@@ -72,10 +76,8 @@ object ClockGlyphPainter {
             color = timeColor
             alpha = 255
             textAlign = Paint.Align.CENTER
+            textScaleX = sx
         }
-        val metrics = main.fontMetrics
-        canvas.drawText(time, cx, cy - (metrics.ascent + metrics.descent) / 2f, main)
-
         val sub = Paint(datePaint).apply {
             textSize = fontPx * DATE_SIZE_RATIO
             typeface = dateTypeface
@@ -83,15 +85,20 @@ object ClockGlyphPainter {
             color = dateColor
             alpha = (DATE_ALPHA * 255f).toInt()
             textAlign = Paint.Align.CENTER
+            textScaleX = sx
         }
+        val save = if (sy != 1f) canvas.save().also { canvas.scale(1f, sy, cx, cy) } else -1
+        val metrics = main.fontMetrics
+        canvas.drawText(time, cx, cy - (metrics.ascent + metrics.descent) / 2f, main)
         val dateBaseline = cy + fontPx * DATE_BASELINE_RATIO
         canvas.drawText(date, cx, dateBaseline, sub)
         infoText(info)?.let {
             canvas.drawText(it, cx, dateBaseline + sub.textSize * INFO_LINE_RATIO, sub)
         }
+        if (save >= 0) canvas.restoreToCount(save)
 
         val halfW = main.measureText(time) / 2f + paddingPx
-        val halfH = fontPx * BOUNDS_HALF_HEIGHT_RATIO
+        val halfH = fontPx * BOUNDS_HALF_HEIGHT_RATIO * sy
         bounds.set(cx - halfW, cy - halfH, cx + halfW, cy + halfH)
         return fontPx
     }

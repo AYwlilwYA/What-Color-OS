@@ -94,7 +94,8 @@ object StatusBarHook {
         hook += hookUpdateStatesGoneClear(api, cl)
         if (hook > 0) hook += hookBatteryVis(api, cl)
         val carrier = hookCarrierText(api, cl)
-        installed = hook > 0 || carrier > 0
+        val footer = hookQsFooter(api, cl)
+        installed = hook > 0 || carrier > 0 || footer > 0
         try {
             StatusBarEnforcer.attachOrderPrefs(Prefs.read(api))
         } catch (t: Throwable) {
@@ -102,7 +103,7 @@ object StatusBarHook {
         }
         val cfg = StatusBarSettings.snapshot(api)
         lastEnabled = cfg.enabled
-        val summary = "sb-install hook=$hook/6 carrier=$carrier/2 installed=$installed gate=${cfg.enabled} any=${cfg.anyFeature} " +
+        val summary = "sb-install hook=$hook/6 carrier=$carrier/2 footer=$footer/1 installed=$installed gate=${cfg.enabled} any=${cfg.anyFeature} " +
             "fragmentEntry=${profile.hasFragmentEntry} clockSec=${profile.hasClockSeconds} " +
             "gates=${gates.summary()}"
         Lg.i(TAG, summary)
@@ -119,12 +120,11 @@ object StatusBarHook {
         try {
             android.os.Handler(android.os.Looper.getMainLooper()).post {
                 try {
-                    val ctx = Lg.processContext()
-                    if (ctx == null) {
-                        Lg.i(TAG, "sb-receipt skip: context 未就绪")
-                        return@post
-                    }
-                    val f = java.io.File(ctx.filesDir, "sb-install-receipt.txt")
+                    // 宿主进程内 processContext 可能为 null（实测回执长期缺失），
+                    // 回退到宿主 dataDir 固定路径，保证判据一定落盘。
+                    val dir = Lg.processContext()?.filesDir
+                        ?: java.io.File("/data/data/${StatusBarCompat.PKG_SYSTEMUI}/files").apply { mkdirs() }
+                    val f = java.io.File(dir, "sb-install-receipt.txt")
                     f.appendText("$ts pid=$pid $summary\n")
                     if (f.length() > 32_768L) {
                         f.writeText(f.readLines().takeLast(40).joinToString("\n") + "\n")
@@ -239,6 +239,39 @@ object StatusBarHook {
         1
     } catch (t: Throwable) {
         Lg.i(TAG, "sb-carrier gen=anim 未命中 ${t.javaClass.simpleName}: ${t.message}")
+        0
+    }
+
+    /**
+     * QS 页脚布局观察点：合并式面板的大时钟挂在 OplusQSFooterImpl 下的
+     * settings_button_container，与状态栏图标容器不同树，需独立入口。
+     */
+    private fun hookQsFooter(api: XposedInterface, cl: ClassLoader): Int = try {
+        val cls = Class.forName(StatusBarCompat.FQCN_QS_FOOTER, false, cl)
+        // 该类继承 FrameLayout 但未声明 onLayout，getDeclaredMethod 取不到父类方法；
+        // onFinishInflate 是本类声明的，子 View 此时已齐备。
+        val method = cls.getDeclaredMethod("onFinishInflate")
+        api.hook(method)
+            .setExceptionMode(ExceptionMode.PROTECTIVE)
+            .intercept { chain ->
+                val result = chain.proceed()
+                try {
+                    val footer = chain.getThisObject() as? View
+                    if (footer != null) {
+                        footer.post {
+                            withConfig { cfg -> StatusBarEnforcer.onQsFooterLayout(footer, cfg) }
+                        }
+                    }
+                } catch (t: Throwable) {
+                    applyErrors.incrementAndGet()
+                    logThrottled("sb-qsfooter-inflate-err", "sb-skip qsfooter inflate ${t.javaClass.simpleName}")
+                }
+                result
+            }
+        Lg.i(TAG, "sb-qsfooter hooked onFinishInflate")
+        1
+    } catch (t: Throwable) {
+        Lg.i(TAG, "sb-qsfooter 未命中 ${t.javaClass.simpleName}: ${t.message}")
         0
     }
 

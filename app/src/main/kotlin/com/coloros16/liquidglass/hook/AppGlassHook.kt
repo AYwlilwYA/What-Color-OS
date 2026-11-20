@@ -54,6 +54,10 @@ object AppGlassHook {
     /** B 族挂载点：framework 窗口背景模糊 drawable（本体 draw 空实现，合成层处理）。 */
     private const val CLASS_BACKGROUND_BLUR_DRAWABLE = "com.android.internal.graphics.drawable.BackgroundBlurDrawable"
 
+    /** COUI 弹窗模糊判定：所有 COUI 弹窗/对话框共用 RoundFrameLayout→此 builder，强制开系统模糊即统一上玻璃。 */
+    private const val CLASS_COUI_BLUR_BUILDER = "com.coui.appcompat.uiutil.COUIBackgroundBlurBuilder"
+    private const val METHOD_USE_BACKGROUND_BLUR = "useBackgroundBlur"
+
     /** 相册按钮容器（图集页五类纯色钮共用类）：探针自调用挂载目标。 */
     private const val CLASS_BLUR_BUTTON_WRAPPER = "com.oplus.gallery.basebiz.widget.BlurButtonWrapperView"
 
@@ -64,6 +68,9 @@ object AppGlassHook {
         XposedEntry.PACKAGE_SMART_SIDEBAR to Prefs.KEY_SMART_SIDEBAR_GLASS,
         XposedEntry.PACKAGE_ASSISTANT_SCREEN to Prefs.KEY_ASSISTANT_SCREEN_GLASS,
         XposedEntry.PACKAGE_QUICK_SEARCH_BOX to Prefs.KEY_QUICK_SEARCH_GLASS,
+        XposedEntry.PACKAGE_CALENDAR to Prefs.KEY_CALENDAR_GLASS,
+        XposedEntry.PACKAGE_NOTE to Prefs.KEY_NOTE_GLASS,
+        XposedEntry.PACKAGE_WEATHER to Prefs.KEY_WEATHER_GLASS,
     )
 
     private val SWITCH_DEFAULTS = mapOf(
@@ -72,6 +79,9 @@ object AppGlassHook {
         Prefs.KEY_SMART_SIDEBAR_GLASS to Prefs.DEFAULT_SMART_SIDEBAR_GLASS,
         Prefs.KEY_ASSISTANT_SCREEN_GLASS to Prefs.DEFAULT_ASSISTANT_SCREEN_GLASS,
         Prefs.KEY_QUICK_SEARCH_GLASS to Prefs.DEFAULT_QUICK_SEARCH_GLASS,
+        Prefs.KEY_CALENDAR_GLASS to Prefs.DEFAULT_CALENDAR_GLASS,
+        Prefs.KEY_NOTE_GLASS to Prefs.DEFAULT_NOTE_GLASS,
+        Prefs.KEY_WEATHER_GLASS to Prefs.DEFAULT_WEATHER_GLASS,
     )
 
     private var api: XposedInterface? = null
@@ -103,6 +113,8 @@ object AppGlassHook {
     private var aFamilyMounted = false
 
     private var bFamilyMounted = false
+
+    private var couiPopupMounted = false
 
     private var selfProbeMounted = false
 
@@ -172,6 +184,7 @@ object AppGlassHook {
         Lg.i(TAG, "installing app glass hook into $packageName (switch=$key default=$switchDefault)")
         mountBackgroundRenderEffectHook(api, classLoader)
         mountViewSetBackgroundHook(api)
+        mountCouiPopupBlurHook(api, classLoader)
         if (switchKey == Prefs.KEY_GALLERY_GLASS) {
             mountSelfProbeHook(api, classLoader)
             Lg.i(TAG, "probe switch read=${probeEnabled()}")
@@ -221,6 +234,38 @@ object AppGlassHook {
             Lg.i(TAG, "mounted: android.view.View#setBackground(Drawable) (B-family $CLASS_BACKGROUND_BLUR_DRAWABLE)")
         } catch (t: Throwable) {
             Lg.e(TAG, "mount FAILED: android.view.View#setBackground", t)
+        }
+    }
+
+    /**
+     * COUI 弹窗统一玻璃：hook [CLASS_COUI_BLUR_BUILDER] 的模糊判定，玻璃开时强制返 true。
+     * RoundFrameLayout.onAttachedToWindow 据此自然 applyBlurBackground→设 BackgroundBlurDrawable，
+     * 由 B 族 View.setBackground 挂点接住加边缘光学装饰。一个挂点覆盖所有 app 的 COUI 弹窗/对话框。
+     */
+    private fun mountCouiPopupBlurHook(api: XposedInterface, classLoader: ClassLoader) {
+        if (couiPopupMounted) return
+        val clazz = try {
+            hostForName(CLASS_COUI_BLUR_BUILDER, classLoader)
+        } catch (t: Throwable) {
+            Lg.i(TAG, "$CLASS_COUI_BLUR_BUILDER unavailable in this process, COUI popup glass skipped")
+            return
+        }
+        try {
+            val method = clazz.getMethod(METHOD_USE_BACKGROUND_BLUR)
+            api.hook(method)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .intercept { chain ->
+                    if (glassEnabled()) {
+                        logOnce("coui-popup:force-blur", "COUI popup force background blur on (app glass enabled)")
+                        true
+                    } else {
+                        chain.proceed()
+                    }
+                }
+            couiPopupMounted = true
+            Lg.i(TAG, "mounted: $CLASS_COUI_BLUR_BUILDER#$METHOD_USE_BACKGROUND_BLUR (COUI popup glass)")
+        } catch (t: Throwable) {
+            Lg.e(TAG, "mount FAILED: $CLASS_COUI_BLUR_BUILDER#$METHOD_USE_BACKGROUND_BLUR", t)
         }
     }
 
@@ -721,6 +766,12 @@ object AppGlassHook {
             state.lastW = w
             state.lastH = h
             state.drawable.bounds = Rect(0, 0, w, h)
+            try {
+                val outline = Outline()
+                view.outlineProvider?.getOutline(view, outline)
+                if (outline.radius > 0f) state.drawable.setCornerRadiusPx(outline.radius)
+            } catch (_: Throwable) {
+            }
         }
         if (!state.overlayAdded) {
             try {

@@ -47,13 +47,17 @@ class ResolvedEffects(
  */
 object EffectResolver {
 
-    fun resolve(
-        settings: EffectSettings,
-        hasGyro: Boolean = false,
-        panoramaAodActive: Boolean = false,
-        photoSceneAvailable: Boolean = false,
-    ): ResolvedEffects {
+    /**
+     * 三态解析：能力参必传，漏传编译不过。
+     *
+     * 曾给三个能力参留 `= false` 默认值，hook 侧只传 settings 就编译过，
+     * 等于静默宣称「本机没陀螺仪、不是全景息屏」，与设置页真值判定矛盾。
+     */
+    fun resolve(settings: EffectSettings, capabilities: EffectCapabilities): ResolvedEffects {
         val dynamicAllowed = settings.allowAodDynamic
+        val panoramaAodActive = capabilities.panoramaAodActive
+        val hasGyro = capabilities.hasGyro
+        val photoSceneAvailable = capabilities.photoSceneAvailable
         val lockWallpaper = resolveOne(
             settings.lockWallpaperEffect,
             EffectKind.LOCK_WALLPAPER,

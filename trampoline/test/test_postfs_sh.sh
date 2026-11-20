@@ -189,5 +189,17 @@ else
 ' ' ')"
 fi
 
+# 符号表是可选加速件：必须有 bak 恢复，但不得进「三件在位」硬门（缺表要能走内置解码）
+if grep -q 'lg_symtab\.txt\.bak' "$SCRIPT"; then
+    ok "postfs-symtab-optional-restore"
+else
+    ng "postfs-symtab-optional-restore" "缺符号表 bak 恢复"
+fi
+if grep -q 'module\.prop.*TRAMP.*REAL.*WCALL' "$SCRIPT" && ! grep -q 'module\.prop.*lg_symtab' "$SCRIPT"; then
+    ok "postfs-symtab-not-in-gate"
+else
+    ng "postfs-symtab-not-in-gate" "符号表被写进在位硬门（缺表会拒载）"
+fi
+
 echo "POSTFS_RESULT: pass=$((total - fails)) fail=$fails"
 [ "$fails" -eq 0 ]

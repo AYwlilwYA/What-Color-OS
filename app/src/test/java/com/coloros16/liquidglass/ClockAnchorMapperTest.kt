@@ -4,7 +4,9 @@ import com.coloros16.liquidglass.engine.ClockAnchor
 import com.coloros16.liquidglass.engine.ClockAnchorMapper
 import com.coloros16.liquidglass.engine.WidgetRectPx
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ClockAnchorMapperTest {
@@ -88,7 +90,25 @@ class ClockAnchorMapperTest {
         assertEquals(status, ClockAnchorMapper.pickHomeAnchor(null, status))
 
         val hidden = ClockAnchorMapper.pickHomeAnchor(null, null)
-        assertEquals(0f, hidden.alpha, 0.0001f)
+        assertEquals("两路真机终点皆无则淡出", 0f, hidden.alpha, 0.0001f)
+        assertEquals(ClockAnchorMapper.HOME_FALLBACK, hidden)
+    }
+
+    /** 真机兜底与预览演示位必须是两个常量：真机淡出，预览飞顶栏。 */
+    @Test
+    fun deviceFallbackAndPreviewDemoAreDistinct() {
+        assertEquals("真机兜底不可见", 0f, ClockAnchorMapper.HOME_FALLBACK.alpha, 1e-6f)
+        assertEquals("预览演示位可见", 1f, ClockAnchorMapper.HOME_PREVIEW_DEMO.alpha, 1e-6f)
+        assertNotEquals(ClockAnchorMapper.HOME_FALLBACK, ClockAnchorMapper.HOME_PREVIEW_DEMO)
+    }
+
+    @Test
+    fun previewDemoSitsInStatusBarBandAndShrinks() {
+        val f = ClockAnchorMapper.HOME_PREVIEW_DEMO
+        assertTrue("顶栏带内", f.centerY <= 0.05f)
+        assertTrue("靠左", f.centerX < 0.25f)
+        assertTrue("必须明显缩小", f.scale < 0.3f)
+        assertTrue("缩放在安全区间内", f.scale >= ClockAnchorMapper.SCALE_MIN)
     }
 
     @Test

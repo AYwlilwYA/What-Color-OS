@@ -73,7 +73,13 @@ object ClockAnchorMapper {
         )
     }
 
-    /** HOME 锚点优先级：桌面时钟小部件 > 状态栏时钟 > 隐藏。 */
+    /** 两路真机终点都取不到时的兜底：原地淡出。 */
+    val HOME_FALLBACK = ClockAnchor(alpha = 0f)
+
+    /** 预览演示用的顶栏终点；真机不走这一路，只在预览无真机锚点时兜底。 */
+    val HOME_PREVIEW_DEMO = ClockAnchor(centerX = 0.13f, centerY = 0.021f, scale = 0.16f)
+
+    /** HOME 锚点优先级：桌面时钟小部件 > 状态栏时钟 > 淡出。 */
     fun pickHomeAnchor(widget: ClockAnchor?, statusBar: ClockAnchor?): ClockAnchor =
-        widget ?: statusBar ?: ClockAnchor(alpha = 0f)
+        widget ?: statusBar ?: HOME_FALLBACK
 }

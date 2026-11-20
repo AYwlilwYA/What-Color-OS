@@ -46,7 +46,12 @@ object SailLensMotion {
     /** 未指定通道的缺省曲线：平台先加速后减速。 */
     private val DEFAULT = Easing.ACCELERATE_DECELERATE
 
-    const val AOD_TO_LOCK_MS = 950f
+    /** 息屏→锁屏整组时长：装饰角轨走缺省 1000ms，比位移轨 950ms 更长。 */
+    const val AOD_TO_LOCK_MS = 1000f
+
+    /** 息屏→锁屏的位移/涟漪轨时长，短于整组。 */
+    const val AOD_TO_LOCK_MOVE_MS = 950f
+
     const val AOD_TO_HOME_MS = 1000f
     const val EXIT_MS = 650f
 
@@ -206,6 +211,19 @@ object SailLensMotion {
         return next
     }
 
+    /**
+     * 照片自转的绝对角：按单调时钟一次求值，符号与 [spin] 一致（负方向）。
+     *
+     * 供不能攒帧的调用方使用（注入系统进程禁轮询、热重载会丢累计状态）；
+     * 结果归一到 (-360, 0]，与逐帧积分等价。
+     */
+    fun spinAt(seconds: Float, speed: Float = 1f): Float {
+        if (speed <= 0f || seconds <= 0f) return 0f
+        val total = seconds * SPIN_DEG_PER_SEC * speed
+        val mod = total % 360f
+        return if (mod == 0f) 0f else -mod
+    }
+
     /** 官方入场角度：24ms 内转到与当前角最近的 -360 等价位。 */
     fun nearestRotation(current: Float, target: Float): Float {
         val distance = Math.floorMod((target - current).toInt(), 360)
@@ -272,7 +290,8 @@ object SailLensMotion {
         when (edge) {
             TransitionEdge.AOD_TO_LOCK -> {
                 val total = AOD_TO_LOCK_MS
-                val move = f(EXPAND, p, 1f, direct)
+                val moveFraction = AOD_TO_LOCK_MOVE_MS / total
+                val move = f(EXPAND, p, moveFraction, direct)
                 out.scale = lerp(RADIUS, expanded, move)
                 out.centerX = lerp(aodX, 0.5f, move)
                 out.centerY = lerp(aodY, 0.5f, move)
@@ -281,7 +300,7 @@ object SailLensMotion {
                 out.decorAlpha = lerp(DECOR_ALPHA, 0f, f(EASE, p, 33f / total, direct))
                 out.decorAngleDeg = lerp(0f, DECOR_ANGLE_DEG, f(DEFAULT, p, 1f, direct))
                 out.angleDeg = spinDeg
-                out.ripple = lerp(0f, 1.24f, f(EASE, p, 1f, direct))
+                out.ripple = lerp(0f, 1.24f, f(EASE, p, moveFraction, direct))
                 out.spinSpeed = 1f
             }
 

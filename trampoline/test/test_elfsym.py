@@ -68,7 +68,10 @@ static int host_xz(const unsigned char *src, size_t sn, unsigned char *dst,
 
 int main(int argc, char **argv) {
     if (argc < 3) return 2;
-    lg_elfsym_set_xz_decoder(host_xz);
+    const char *tbl = (argc > 3 && strcmp(argv[3], "-") != 0) ? argv[3] : NULL;
+    int no_stub = getenv("LG_XZ_BUILTIN") != NULL;
+    if (!no_stub) lg_elfsym_set_xz_decoder(host_xz);
+    if (tbl) lg_elfsym_set_table(tbl);
     unsigned long va = 0;
     int rc = lg_elfsym_find(argv[1], argv[2], &va);
     if (rc != 0) { printf("MISS\n"); return 1; }
@@ -77,13 +80,33 @@ int main(int argc, char **argv) {
 }
 """
 
+# 短子串（引擎实际用的形式）→ 真值；C16 Dual 有同名 lambda 干扰，选优须取最短名
+SUBSTR_TRUTH = {
+    "sf_bin_c15": {
+        "16KawaseBlurFilter8generateE": 0x418A70,
+        "18GaussianBlurFilter8generateE": 0x640B24,
+        "13IBlurUtilsExt8generateE": 0x8D2194,
+    },
+    "sf_bin": {
+        "16KawaseBlurFilter8generateE": 0x4DE8B0,
+        "18GaussianBlurFilter8generateE": 0x7150E0,
+        "20KawaseBlurDualFilter8generateE": 0x715AD8,
+        "13IBlurUtilsExt8generateE": 0x9C9678,
+    },
+}
+
 
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     hp = OUT / "elfsym_harness.c"
     hp.write_text(HARNESS, encoding="utf-8")
     exe = OUT / "elfsym_harness"
-    cmd = ["gcc", "-O1", "-DLG_HOST_TEST", "-I", str(T), str(hp), str(T / "elfsym.c"),
+    V = T / "vendor" / "xz-embedded"
+    cmd = ["gcc", "-O1", "-DLG_HOST_TEST",
+           "-include", str(V / "lg_xz_config.h"),
+           "-I", str(T), "-I", str(V), str(hp), str(T / "elfsym.c"), str(T / "xzdec.c"),
+           str(V / "xz_dec_stream.c"), str(V / "xz_dec_lzma2.c"),
+           str(V / "xz_crc32.c"), str(V / "xz_crc64.c"), str(V / "xz_sha256.c"),
            "-ldl", "-o", str(exe)]
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
@@ -143,6 +166,98 @@ def main():
                 fails += 1
             else:
                 print(f"PASS {name} 解压桩失败 → MISS（证明该符号确实只在 debugdata 内）")
+
+    # 短子串 + 预生成表路径（引擎实际用法）：表命中 src=4，且 lambda 干扰须被选优排除
+    table = T.parent / "app" / "src" / "main" / "assets" / "lg-sf" / "symtab.txt"
+    gen = T.parent / "tools" / "gen_symtab.py"
+    with tempfile.TemporaryDirectory(dir=str(OUT)) as td:
+        td = Path(td)
+        tbl = td / "symtab.txt"
+        bins = [str(OUT / n) for n in SUBSTR_TRUTH if (OUT / n).exists()]
+        if bins:
+            r = subprocess.run([sys.executable, str(gen), *bins, "-o", str(tbl)],
+                               capture_output=True, text=True)
+            if r.returncode != 0:
+                print("FAIL 表生成器\n" + r.stdout + r.stderr)
+                fails += 1
+            else:
+                print("PASS 表生成器")
+            total += 1
+            for name, tblmap in SUBSTR_TRUTH.items():
+                src = OUT / name
+                if not src.exists() or not tbl.exists():
+                    continue
+                mini = debugdata(src.read_bytes())
+                plain = td / f"{name}_mini2.elf"
+                plain.write_bytes(mini)
+                for sub, want in tblmap.items():
+                    # 路径 4：原二进制 + 表（无需解压）
+                    total += 1
+                    r = subprocess.run([str(exe), str(src), sub, str(tbl)],
+                                       capture_output=True, text=True)
+                    got = r.stdout.strip()
+                    if r.returncode != 0 or not got.startswith("0x"):
+                        print(f"FAIL {name} 表路径 {sub} -> {got}")
+                        fails += 1
+                    else:
+                        va, srcid = int(got.split()[0], 16), int(got.split()[1])
+                        if va != want or srcid != 4:
+                            print(f"FAIL {name} 表 {sub} got=0x{va:x} src={srcid} want=0x{want:x} src=4")
+                            fails += 1
+                        else:
+                            print(f"PASS {name} 0x{va:x} src=table {sub}")
+                    # 路径 1：短子串直读 symtab（选优须排除 lambda）
+                    total += 1
+                    r = subprocess.run([str(exe), str(plain), sub], capture_output=True, text=True)
+                    got = r.stdout.strip()
+                    if r.returncode != 0 or not got.startswith("0x"):
+                        print(f"FAIL {name} 子串 symtab {sub} -> {got}")
+                        fails += 1
+                    else:
+                        va = int(got.split()[0], 16)
+                        if va != want:
+                            print(f"FAIL {name} 子串选优 {sub} got=0x{va:x} want=0x{want:x}")
+                            fails += 1
+                        else:
+                            print(f"PASS {name} 0x{va:x} src=symtab-substr {sub}")
+                # 阴性：错 buildid 的表不得命中（改一行 buildid）
+                total += 1
+                bad = td / f"{name}_bad.txt"
+                lines = tbl.read_text(encoding="utf-8").splitlines()
+                bad.write_text("\n".join(
+                    ("deadbeef" + ln[8:]) if ln and not ln.startswith("#") else ln
+                    for ln in lines) + "\n", encoding="utf-8")
+                sub0 = next(iter(tblmap))
+                r = subprocess.run([str(exe), str(src), sub0, str(bad)],
+                                   capture_output=True, text=True)
+                if r.returncode == 0 and r.stdout.strip().endswith("4"):
+                    print(f"FAIL {name} buildid 不匹配却走表命中")
+                    fails += 1
+                else:
+                    print(f"PASS {name} buildid 隔离（错表不命中）")
+
+    # 路径 3：原件 + 无表 + 内置解码器（不装桩）→ 必须 src=3 且地址与真值一致
+    env = dict(os.environ, LG_XZ_BUILTIN="1")
+    for name, tblmap in SUBSTR_TRUTH.items():
+        src = OUT / name
+        if not src.exists():
+            print(f"SKIP {name} builtin（二进制不在）")
+            continue
+        for sub, want in tblmap.items():
+            total += 1
+            r = subprocess.run([str(exe), str(src), sub, "-"],
+                               capture_output=True, text=True, env=env)
+            got = r.stdout.strip()
+            if r.returncode != 0 or not got.startswith("0x"):
+                print(f"FAIL {name} 内置解码 {sub} -> {got}")
+                fails += 1
+                continue
+            va, srcid = int(got.split()[0], 16), int(got.split()[1])
+            if va != want or srcid != 3:
+                print(f"FAIL {name} 内置解码 {sub} got=0x{va:x} src={srcid} want=0x{want:x} src=3")
+                fails += 1
+            else:
+                print(f"PASS {name} 0x{va:x} src=debugdata-builtin {sub}")
 
     print(f"ELFSYM_RESULT: total={total} fail={fails}")
     return 1 if fails else 0

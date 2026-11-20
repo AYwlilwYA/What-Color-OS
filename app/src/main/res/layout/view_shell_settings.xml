@@ -13,23 +13,6 @@
             <TextView style="@style/ShellGroupTitle" android:text="@string/settings_group_config" />
             <View style="@style/ShellGroupRule" />
         </LinearLayout>
-        <com.google.android.material.card.MaterialCardView style="@style/ShellPlate" android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="14dp">
-            <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:divider="@drawable/bg_seam_line_inset" android:dividerHeight="1dp" android:showDividers="middle">
-                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
-                    <com.coloros16.liquidglass.ui.LgSwitch android:id="@+id/switchSettingsEnableLogs" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_enable_logs" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
-                    />
-                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_enable_logs_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
-                </LinearLayout>
-                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
-                    <com.coloros16.liquidglass.ui.LgSwitch android:id="@+id/switchTileOnBlueGlass" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_tile_on_blue_glass" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100" android:minHeight="0dp" />
-                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_tile_on_blue_glass_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
-                </LinearLayout>
-                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
-                    <com.coloros16.liquidglass.ui.LgSwitch android:id="@+id/switchDoubleLayerGlass" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_double_layer_glass" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100" android:minHeight="0dp" />
-                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_double_layer_glass_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
-                </LinearLayout>
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:background="@drawable/bg_plate" android:divider="@drawable/bg_seam_line_inset" android:dividerHeight="1dp" android:orientation="vertical" android:showDividers="middle">
             <include android:id="@+id/settingsConfigIoRow" layout="@layout/item_row" android:layout_width="match_parent" android:layout_height="wrap_content" />
         </LinearLayout>
@@ -40,6 +23,7 @@
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:background="@drawable/bg_plate" android:divider="@drawable/bg_seam_line_inset" android:dividerHeight="1dp" android:orientation="vertical" android:showDividers="middle">
             <include android:id="@+id/settingsLogPageRow" layout="@layout/item_row" android:layout_width="match_parent" android:layout_height="wrap_content" />
             <include android:id="@+id/settingsDiagPageRow" layout="@layout/item_row" android:layout_width="match_parent" android:layout_height="wrap_content" />
+            <include android:id="@+id/settingsInternalLogRow" layout="@layout/item_row" android:layout_width="match_parent" android:layout_height="wrap_content" />
         </LinearLayout>
         <LinearLayout style="@style/ShellGroupHead">
             <TextView style="@style/ShellGroupTitle" android:text="@string/settings_group_about" />

@@ -20,6 +20,12 @@ object WallpaperSettings {
     const val EFFECT_STARFIELD = "starfield"
     const val EFFECT_FLOW = "flow"
 
+    /** 三态场景 id：空串表示仍走相机曲线。 */
+    const val SCENE_NONE = ""
+    const val SCENE_SNOW_MOUNTAIN = "snowmountain"
+
+    fun validScene(id: String?): Boolean = id == SCENE_SNOW_MOUNTAIN
+
     data class Scene3D(
         val curveId: String,
         val customText: String?,
@@ -27,6 +33,7 @@ object WallpaperSettings {
         val cycleMs: Long,
         val speed: Float,
         val parallax: Float,
+        val sceneId: String = SCENE_NONE,
     )
 
     data class Scene2D(
@@ -58,7 +65,9 @@ object WallpaperSettings {
         } else {
             CameraPaths.byId(curveId)
         }
-        return Scene3D(curveId, customText, camera, cycle, speed, parallax)
+        val sceneRaw = prefs.getString(Prefs.KEY_WALLPAPER_3D_SCENE, Prefs.DEFAULT_WALLPAPER_3D_SCENE)
+        val sceneId = if (validScene(sceneRaw)) sceneRaw!! else SCENE_NONE
+        return Scene3D(curveId, customText, camera, cycle, speed, parallax, sceneId)
     }
 
     fun read2D(context: Context): Scene2D {
@@ -87,6 +96,7 @@ object WallpaperSettings {
         cycleMs = Prefs.DEFAULT_WALLPAPER_3D_CYCLE_MS.toLong(),
         speed = Prefs.DEFAULT_WALLPAPER_3D_SPEED,
         parallax = Prefs.DEFAULT_WALLPAPER_3D_PARALLAX,
+        sceneId = SCENE_NONE,
     )
 
     fun defaults2D(): Scene2D = Scene2D(

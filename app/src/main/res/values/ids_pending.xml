@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 主页一键抓取两行的 id 占位：布局位置待用户拍板，控件暂不上树 -->
+    <item name="homeCaptureStartRow" type="id" />
+    <item name="homeCaptureStopRow" type="id" />
+</resources>

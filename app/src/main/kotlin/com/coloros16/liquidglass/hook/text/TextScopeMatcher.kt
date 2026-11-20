@@ -42,7 +42,7 @@ object TextScopeMatcher {
      */
     fun glassRegionHostAt(screenX: Int, screenY: Int, textView: View?): String? {
         val sb = statusBarBottom()
-        if (sb > 0 && screenY < sb) {
+        if (sb > 0 && screenY < sb && !isQsPanelShowing(textView)) {
             logNoRegion(screenX, screenY, textView, "状态栏条带排除 sb=$sb")
             return null
         }
@@ -52,7 +52,7 @@ object TextScopeMatcher {
             if (screenX < r.left || screenX > r.right || screenY < r.top || screenY > r.bottom) continue
             rectHits++
             val host = entry.hostViewRef?.get()
-            if (textView != null && host != null && !isDescendantOf(textView, host)) {
+            if (textView != null && host != null && !belongsToHost(textView, host)) {
                 logMissOnce(entry.hostViewName, textView)
                 continue
             }
@@ -94,6 +94,50 @@ object TextScopeMatcher {
         Lg.i(TAG, sb.toString())
     }
 
+    /**
+     * 文字是否归属该玻璃宿主。
+     * 背景类宿主（NotificationBackgroundView 等）与文字是**兄弟**不是父子，
+     * 只认父子会把通知正文全拦掉；这类改判「同属一张卡片」（共同祖先在卡片容器内）。
+     */
+    private fun belongsToHost(textView: View, host: View): Boolean {
+        if (isDescendantOf(textView, host)) return true
+        if (!isBackgroundHost(host)) return false
+        return sharesCardAncestor(textView, host)
+    }
+
+    /** 背景/装饰类宿主：自身不承载文字，文字挂在它的兄弟分支上。 */
+    private fun isBackgroundHost(host: View): Boolean {
+        val n = host.javaClass.name
+        return n.contains("NotificationBackgroundView") ||
+            n.contains("CardBackgroundView") ||
+            n.endsWith(".BackgroundView")
+    }
+
+    /**
+     * 背景与文字是否同属一张卡片：从背景往上找到卡片容器，再看文字是否在该容器子树内。
+     * 卡片容器按类名认（ExpandableNotificationRow / NotificationContent 等），
+     * 找不到容器就返回 false —— 宁可放过也不误染无关文字。
+     */
+    private fun sharesCardAncestor(textView: View, host: View): Boolean {
+        var v: View? = host
+        var depth = 0
+        while (v != null && depth < 12) {
+            if (isCardContainer(v)) return isDescendantOf(textView, v)
+            v = v.parent as? View
+            depth++
+        }
+        return false
+    }
+
+    private fun isCardContainer(v: View): Boolean {
+        val n = v.javaClass.name
+        return n.contains("ExpandableNotificationRow") ||
+            n.contains("ExpandableOutlineView") ||
+            n.contains("NotificationContentView") ||
+            n.contains("OplusCustomRow") ||
+            n.contains("NotificationChildrenContainer")
+    }
+
     /** textView 是否在 host 子树内（含自身）；父链上溯，深度上限防病态树。 */
     private fun isDescendantOf(textView: View, host: View): Boolean {
         var v: View? = textView
@@ -120,6 +164,16 @@ object TextScopeMatcher {
 
     /** 状态栏区域底边（物理 px）：framework `status_bar_height` dimen（Resources.getSystem()，
      *  设备密度生效）。首次调用缓存到 [statusBarBottomPx]；解析失败返回 -1（不启用排除，回退现状）。 */
+    /**
+     * 面板展开期落在状态栏条带内的文字属于面板内容（QS 时钟 / 日期），不是状态栏本体。
+     * 判据沿用现成信号：面板快照存在（亮度 >= 0）且 textView 不在状态栏容器子树内。
+     */
+    private fun isQsPanelShowing(textView: View?): Boolean {
+        if (textView == null) return false
+        if (BlurDrawHook.qsPanelBrightness < 0) return false
+        return !isInStatusBarArea(textView)
+    }
+
     private fun statusBarBottom(): Int {
         var v = statusBarBottomPx
         if (v >= 0) return v
@@ -188,6 +242,17 @@ object TextScopeMatcher {
      *  开关关 → 恒 false → 守卫回退现状，保证与遮罩无关、可独立关闭。 */
     fun isHeadsUpTextFollowArea(textView: View): Boolean =
         BlurDrawHook.headsUpTextFollowEnabled && isInHeadsUpWindow(textView)
+
+    /**
+     * 面板头部时钟/日期：随面板整体背景取色，不依赖元素级玻璃区域
+     * （头部无独立玻璃元素，区域判定恒空）。面板快照存在即认为面板可见。
+     */
+    fun isQsPanelHeaderText(textView: View): Boolean {
+        if (BlurDrawHook.qsPanelBrightness < 0) return false
+        val n = textView.javaClass.name
+        if (!n.contains("QSClock") && !n.contains("QsClock") && !n.contains("QSDateView")) return false
+        return !isInStatusBarArea(textView)
+    }
 
     /** 近中性文字色判定：alpha ≥ 0x80 且 RGB 通道差 ≤24（系统灰度）；
      *  饱和 app 自定义色不匹配 → 不覆盖，尊重 app。 */

@@ -7,12 +7,15 @@
 #   真机实证**该注入会导致显示管线卡死**（屏幕 ON 但 SurfaceFlinger 合成全黑），已移除。
 #   **不要再加回来**，除非先证明卡死根因另有其因。详见 doc/spec/82 §九。
 # 注：com.oplus.blur 已于 2026-08-13 移除——玻璃背景完全走 SystemUI 端每元素抓屏，不再依赖 BlurService。
-# 第三方 App（组件登记 + 预设按组件命中；渲染腿未接通，见 AppGlassHook 头注）：
+# 第三方 App（组件登记 + 预设按组件命中；相册五钮背板玻璃已接、B 族装饰层，见 AppGlassHook 头注）：
 # - com.coloros.gallery3d：相册（A 族视图背景 RenderEffect）
 # - com.coloros.calculator：计算器（B 族窗口背景模糊 drawable）
 # - com.coloros.smartsidebar：智能侧边栏（B 族窗口背景模糊 drawable）
 # - com.coloros.assistantscreen：速览（负一屏）（B 族窗口背景模糊 drawable）
 # - com.heytap.quicksearchbox：全局搜索（B 族窗口背景模糊 drawable，只覆盖 COUI 长按菜单/弹窗，不含搜索条）
+# - com.coloros.calendar：日历（COUI 弹窗菜单/底栏）
+# - com.coloros.note：笔记（COUI 弹窗菜单）
+# - com.coloros.weather2：天气（COUI 弹窗菜单）
 com.android.systemui
 com.android.launcher
 com.coloros.gallery3d
@@ -20,4 +23,7 @@ com.coloros.calculator
 com.coloros.smartsidebar
 com.coloros.assistantscreen
 com.heytap.quicksearchbox
+com.coloros.calendar
+com.coloros.note
+com.coloros.weather2
 com.coloros16.liquidglass.demo

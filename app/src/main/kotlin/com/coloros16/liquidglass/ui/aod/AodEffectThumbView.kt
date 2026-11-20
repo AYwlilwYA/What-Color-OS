@@ -13,6 +13,7 @@ import android.util.AttributeSet
 import android.view.View
 import com.coloros16.liquidglass.engine.effect.EffectCatalog
 import com.coloros16.liquidglass.engine.effect.EffectTextureCatalog
+import com.coloros16.liquidglass.engine.effect.HomeMotion
 
 /** 效果卡片缩略图：按效果 id 画示意纹理。 */
 class AodEffectThumbView @JvmOverloads constructor(
@@ -311,15 +312,22 @@ class AodEffectThumbView @JvmOverloads constructor(
         canvas.drawRoundRect(r(w * 0.44f, h * 0.24f, w * 0.88f, h * 0.76f), dp(4f), dp(4f), fill)
     }
 
+    /** 图标入场缩略图：前景由大到小（前方向后推入），后景由小到大（后方向前浮出）。 */
     private fun iconFly(canvas: Canvas, w: Float, h: Float, mode: Int) {
         fill.color = 0xB38FB8E8.toInt()
-        val size = dp(9f)
+        val base = dp(9f)
         for (i in 0 until 3) {
             val fx = 0.24f + i * 0.24f
             val fy = when (mode) {
                 0 -> 0.62f - i * 0.12f
                 1 -> 0.3f + i * 0.12f
                 else -> 0.5f
+            }
+            val depth = i / 2f
+            val size = when (mode) {
+                0 -> base * (1f + HomeMotion.FOREGROUND_DEPTH * (1f - depth))
+                1 -> base * (1f - HomeMotion.BACKGROUND_DEPTH * (1f - depth))
+                else -> base
             }
             val cx = w * fx
             val cy = h * fy

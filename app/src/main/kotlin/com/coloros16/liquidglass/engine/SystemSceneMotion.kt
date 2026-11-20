@@ -24,6 +24,17 @@ object SystemSceneMotion {
     /** 息屏时钟进场起始缩放。 */
     const val AOD_CLOCK_IN_SCALE = 0.85f
 
+    /** 锁屏内容缩放区间：入场自下而上收到原样，灭屏反向退回。 */
+    const val LOCK_SCALE_IN = 0.90f
+    const val LOCK_SCALE_OUT = 1.0f
+
+    /** 全景款解锁：锁屏内容自放大态收回。 */
+    const val LOCK_SCALE_PANORAMIC_FROM = 1.1f
+    const val LOCK_SCALE_PANORAMIC_TO = 0.95f
+
+    /** 桌面内容入场缩放起点。 */
+    const val HOME_SCALE_IN = 0.96f
+
     const val WALLPAPER_SCALE_AOD = 1.0f
     const val WALLPAPER_SCALE_LOCK = 1.1f
     const val WALLPAPER_SCALE_HOME = 1.0f
@@ -110,7 +121,13 @@ object SystemSceneMotion {
         }
     }
 
-    fun sample(edge: TransitionEdge, t: Float, out: Layers, direct: Boolean = false) {
+    fun sample(
+        edge: TransitionEdge,
+        t: Float,
+        out: Layers,
+        direct: Boolean = false,
+        edgeMs: Long = durationOf(edge),
+    ) {
         out.reset()
         val p = t.coerceIn(0f, 1f)
         when (edge) {
@@ -120,41 +137,43 @@ object SystemSceneMotion {
                 val wallpaper = curve(WALLPAPER_MOVE, p, direct)
                 out.aodAlpha = 1f - mask
                 out.lockAlpha = spring
-                out.lockScale = 0.90f + 0.10f * spring
+                out.lockScale = lerp(LOCK_SCALE_IN, LOCK_SCALE_OUT, spring)
                 out.wallpaperScale = lerp(WALLPAPER_SCALE_AOD, WALLPAPER_SCALE_LOCK, wallpaper)
                 out.dim = lerp(DIM_AOD, DIM_LOCK, mask)
             }
 
             TransitionEdge.LOCK_TO_AOD -> {
                 val mask = curve(MASK, p, direct)
-                val exit = curve(MASK, exitProgress(p, LOCK_EXIT_MS, LOCK_TO_AOD_MS, direct), direct)
+                val exit = curve(MASK, exitProgress(p, LOCK_EXIT_MS, edgeMs, direct), direct)
                 val wallpaper = curve(WALLPAPER_MOVE, p, direct)
                 out.lockAlpha = 1f - exit
+                out.lockScale = lerp(LOCK_SCALE_OUT, LOCK_SCALE_IN, exit)
                 out.aodAlpha = mask
                 out.aodClockScale = AodClockEntry.scaleAt(
-                    if (direct) p else AodClockEntry.progress(p, LOCK_TO_AOD_MS),
+                    if (direct) p else AodClockEntry.progress(p, edgeMs),
                 )
                 out.wallpaperScale = lerp(WALLPAPER_SCALE_LOCK, WALLPAPER_SCALE_AOD, wallpaper)
                 out.dim = lerp(DIM_LOCK, DIM_AOD, mask)
             }
 
             TransitionEdge.LOCK_TO_HOME -> {
-                val exit = curve(MASK, exitProgress(p, LOCK_EXIT_MS, LOCK_TO_HOME_MS, direct), direct)
+                val exit = curve(MASK, exitProgress(p, LOCK_EXIT_MS, edgeMs, direct), direct)
                 val spring = curve(CONTENT_IN, p, direct).coerceIn(0f, 1f)
                 out.lockAlpha = 1f - exit
-                out.lockScale = 1f + 0.04f * exit
+                out.lockScale = lerp(LOCK_SCALE_PANORAMIC_FROM, LOCK_SCALE_PANORAMIC_TO, exit)
                 out.homeAlpha = spring
-                out.homeScale = 0.96f + 0.04f * spring
+                out.homeScale = lerp(HOME_SCALE_IN, 1f, spring)
                 out.wallpaperScale = WALLPAPER_SCALE_LOCK
                 out.dim = lerp(DIM_LOCK, DIM_HOME, spring)
             }
 
             TransitionEdge.HOME_TO_LOCK -> {
-                val exit = curve(MASK, exitProgress(p, LOCK_EXIT_MS, HOME_TO_LOCK_MS, direct), direct)
+                val exit = curve(MASK, exitProgress(p, LOCK_EXIT_MS, edgeMs, direct), direct)
                 val spring = curve(CONTENT_IN, p, direct).coerceIn(0f, 1f)
                 out.homeAlpha = 1f - exit
+                out.homeScale = lerp(1f, HOME_SCALE_IN, exit)
                 out.lockAlpha = spring
-                out.lockScale = 0.90f + 0.10f * spring
+                out.lockScale = lerp(LOCK_SCALE_IN, LOCK_SCALE_OUT, spring)
                 out.wallpaperScale = WALLPAPER_SCALE_LOCK
                 out.dim = lerp(DIM_HOME, DIM_LOCK, spring)
             }
@@ -164,7 +183,7 @@ object SystemSceneMotion {
                 val spring = curve(CONTENT_IN, p, direct).coerceIn(0f, 1f)
                 out.aodAlpha = 1f - mask
                 out.homeAlpha = spring
-                out.homeScale = 0.96f + 0.04f * spring
+                out.homeScale = lerp(HOME_SCALE_IN, 1f, spring)
                 out.wallpaperScale = WALLPAPER_SCALE_AOD
                 out.dim = lerp(DIM_AOD, DIM_HOME, mask)
             }
@@ -172,9 +191,10 @@ object SystemSceneMotion {
             TransitionEdge.HOME_TO_AOD -> {
                 val mask = curve(MASK, p, direct)
                 out.homeAlpha = 1f - mask
+                out.homeScale = lerp(1f, HOME_SCALE_IN, mask)
                 out.aodAlpha = mask
                 out.aodClockScale = AodClockEntry.scaleAt(
-                    if (direct) p else AodClockEntry.progress(p, HOME_TO_AOD_MS),
+                    if (direct) p else AodClockEntry.progress(p, edgeMs),
                 )
                 out.wallpaperScale = WALLPAPER_SCALE_AOD
                 out.dim = lerp(DIM_HOME, DIM_AOD, mask)
@@ -202,6 +222,9 @@ object SystemSceneMotion {
     /**
      * 内容元素错峰滑动：按层进度在时间窗内逐元素求值。
      * 入场自下而上、退场向上让位；进度 0=完全让位、1=落位，不做整层溶解。
+     *
+     * [index] 是元素序号，[count] 是该层元素总数；序号按比例折进六档窗口
+     * （`index * 6 / count`），元素少于六时按原序号。
      */
     fun contentStagger(
         layerProgress: Float,
@@ -210,9 +233,12 @@ object SystemSceneMotion {
         travel: Float,
         out: ContentPose,
         direct: Boolean = false,
+        count: Int = CONTENT_STAGGER_COUNT,
     ) {
         val n = CONTENT_STAGGER_COUNT
-        val i = index.coerceIn(0, n - 1)
+        val total = count.coerceAtLeast(1)
+        val slot = if (total <= n) index else index * n / total
+        val i = slot.coerceIn(0, n - 1)
         val span = 0.62f
         val step = (1f - span) / (n - 1).toFloat()
         val order = if (entering) i else n - 1 - i

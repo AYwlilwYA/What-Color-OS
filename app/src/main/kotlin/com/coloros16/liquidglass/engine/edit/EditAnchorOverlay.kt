@@ -17,17 +17,25 @@ object EditAnchorOverlay {
     /** 未编辑时的缺省缩放。 */
     fun isDefaultScale(settings: LockLayoutSettings): Boolean = nearly(settings.clockScale, 1f)
 
+    /** 两轴拉伸是否都是原样。 */
+    fun isDefaultStretch(settings: LockLayoutSettings): Boolean =
+        nearly(settings.clockStretchX, 1f) && nearly(settings.clockStretchY, 1f)
+
     /** 该配置是否会改变锚点（全默认则整条链可短路）。 */
     fun active(settings: LockLayoutSettings): Boolean =
-        !isDefaultPosition(settings) || !isDefaultScale(settings)
+        !isDefaultPosition(settings) || !isDefaultScale(settings) || !isDefaultStretch(settings)
 
-    /** 叠加后的锚点；[base] 为转场/静止态锚点，两轴位置都取用户值。 */
+    /** 叠加后的锚点；[base] 为转场/静止态锚点，两轴位置与两轴拉伸都取用户值。 */
     fun apply(base: ClockAnchor, settings: LockLayoutSettings): ClockAnchor {
         if (!active(settings)) return base
         val x = settings.clockX.coerceIn(0f, 1f)
         val y = settings.clockY.coerceIn(0f, 1f)
         val scale = base.scale * settings.clockScale
-        return base.copy(centerX = x, centerY = y, scale = scale)
+        return base.copy(
+            centerX = x, centerY = y, scale = scale,
+            stretchX = base.stretchX * settings.clockStretchX,
+            stretchY = base.stretchY * settings.clockStretchY,
+        )
     }
 
     private fun defaultY(surface: EditSurface): Float =
@@ -36,6 +44,14 @@ object EditAnchorOverlay {
         } else {
             LockLayoutSettings.LOCK_DEFAULT_CLOCK_Y
         }
+
+    /** 两轴位置各自的缺省值，供调用方判「这一轴有没有被编辑过」。 */
+    fun defaultX(): Float = 0.5f
+
+    fun defaultYOf(surface: EditSurface): Float = defaultY(surface)
+
+    /** 单轴是否仍是缺省值。 */
+    fun isDefaultAxis(value: Float, default: Float): Boolean = nearly(value, default)
 
     private fun nearly(a: Float, b: Float): Boolean = kotlin.math.abs(a - b) < 0.0005f
 }

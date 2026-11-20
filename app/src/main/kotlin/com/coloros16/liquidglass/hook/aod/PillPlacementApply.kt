@@ -22,6 +22,7 @@ object PillPlacementApply {
     private const val TAG = "LgPillApply"
     private const val THROTTLE_MS = 2000L
     private const val EPS = 0.0005f
+    private const val LONG_THROTTLE_MS = 30_000L
     private const val PX_EPS = 0.25f
 
     private const val ID_BOTTOM_AREA = AodStageAnchors.ID_BOTTOM_AREA
@@ -45,10 +46,10 @@ object PillPlacementApply {
     private val last = HashMap<Int, FloatArray>()
     private val rect = EditLayoutSolver.Rect()
 
-    private fun logThrottled(key: String, msg: String) {
+    private fun logThrottled(key: String, msg: String, intervalMs: Long = THROTTLE_MS) {
         val now = SystemClock.uptimeMillis()
         val prev = throttleAt[key]
-        if (prev != null && now - prev < THROTTLE_MS) return
+        if (prev != null && now - prev < intervalMs) return
         throttleAt[key] = now
         if (throttleAt.size > 64) throttleAt.clear()
         Lg.i(TAG, "$key: $msg")
@@ -84,8 +85,29 @@ object PillPlacementApply {
         val pills = EditLayoutSolver.enabledPills(settings)
         val left = pills.filter { it.x < 0.5f }.minByOrNull { it.x }
         val right = pills.filter { it.x >= 0.5f }.maxByOrNull { it.x }
+        reportOverflow(pills, left, right)
         place(start, left, w, h, "start")
         place(end, right, w, h, "end")
+    }
+
+    /**
+     * 系统底部只有 start/end 两个宿主，超出的槽位不落地：必须留痕，
+     * 否则「用户只配了 2 个」与「配了 8 个只生效 2 个」在日志里同形。
+     */
+    private fun reportOverflow(
+        pills: List<PillPlacement>,
+        left: PillPlacement?,
+        right: PillPlacement?,
+    ) {
+        if (pills.size <= 2) return
+        val dropped = pills.filter { it !== left && it !== right }
+        if (dropped.isEmpty()) return
+        logThrottled(
+            "pill-overflow",
+            "配置 ${pills.size} 个，宿主仅 start/end 两槽，未落地 ${dropped.size} 个：" +
+                dropped.joinToString(",") { it.typeId },
+            LONG_THROTTLE_MS,
+        )
     }
 
     private fun place(

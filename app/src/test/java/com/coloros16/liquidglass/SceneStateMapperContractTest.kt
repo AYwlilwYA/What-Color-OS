@@ -7,7 +7,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
-/** 宿主转场状态名映射契约：GONE 必须归 HOME，否则息屏↔桌面边恒不识别。 */
+/** 宿主转场状态名映射契约：GONE 作为**终点**归 HOME；作为**起点**歧义，需真实态兜底。 */
 class SceneStateMapperContractTest {
 
     @Test
@@ -30,16 +30,27 @@ class SceneStateMapperContractTest {
         assertEquals(SceneState.LOCK, SceneStateMapper.fromTransitionStateName("PRIMARY_BOUNCER"))
     }
 
-    /** 真机实测的两条边：GONE↔DOZING 必须解析成 AOD↔HOME。 */
+    /** 真机实测：GONE→DOZING 在桌面熄屏与锁屏熄屏两种情形都会出现，起点靠真实态兜底。 */
     @Test
     fun realDeviceGoneDozingEdgesResolve() {
         assertEquals(
-            TransitionEdge.HOME_TO_AOD,
+            "终点 GONE 仍是桌面",
+            TransitionEdge.AOD_TO_HOME,
+            SceneStateMapper.resolveEdge("DOZING", "GONE"),
+        )
+        assertNull(
+            "起点 GONE 无兜底时不得猜成桌面",
             SceneStateMapper.resolveEdge("GONE", "DOZING"),
         )
         assertEquals(
-            TransitionEdge.AOD_TO_HOME,
-            SceneStateMapper.resolveEdge("DOZING", "GONE"),
+            "从锁屏熄屏",
+            TransitionEdge.LOCK_TO_AOD,
+            SceneStateMapper.resolveEdge("GONE", "DOZING", SceneState.LOCK),
+        )
+        assertEquals(
+            "从桌面熄屏",
+            TransitionEdge.HOME_TO_AOD,
+            SceneStateMapper.resolveEdge("GONE", "DOZING", SceneState.HOME),
         )
     }
 
@@ -63,7 +74,7 @@ class SceneStateMapperContractTest {
         )
         assertEquals(
             TransitionEdge.HOME_TO_LOCK,
-            SceneStateMapper.resolveEdge("GONE", "LOCKSCREEN"),
+            SceneStateMapper.resolveEdge("GONE", "LOCKSCREEN", SceneState.HOME),
         )
     }
 

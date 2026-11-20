@@ -102,7 +102,8 @@ class PreviewClockTailStyleContractTest {
     fun renderUsesStyleDurationForTail() {
         val b = body(previewSource(), "render")
         assertTrue("render 函数体抽取为空，判据失效", b.isNotEmpty())
-        assertTrue("补尾时长必须按样式取", b.contains("AodSceneCatalog.durationOf(styleId, prevEdge)"))
+        // 钉取值路径不钉字面调用：四处边长已归一到 edgeMsFor，再钉两参 durationOf 会把「已修好」判成红
+        assertTrue("补尾时长必须按样式取（经单点 edgeMsFor）", b.contains("edgeMsFor(prevEdge)"))
         assertTrue("补尾时长必须钉进字段", b.contains("clockTailEdgeMs = edgeMs"))
     }
 

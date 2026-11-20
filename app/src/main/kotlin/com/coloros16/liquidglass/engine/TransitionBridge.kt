@@ -38,8 +38,13 @@ class TransitionBridge(
     private var lastAdvanceAtMs: Long = 0L
 
     /** 无原生进度的边：起播内部时间轴，由调用方按帧 [advance]。 */
-    fun startSelfTimed(edge: TransitionEdge, durationMs: Long, nowMs: Long = nowMs()) {
-        clock.play(edge, durationMs, 0f, ClockSource.INTERNAL_TIMELINE)
+    fun startSelfTimed(
+        edge: TransitionEdge,
+        durationMs: Long,
+        nowMs: Long = nowMs(),
+        startDelayMs: Long = 0L,
+    ) {
+        clock.play(edge, durationMs, 0f, ClockSource.INTERNAL_TIMELINE, startDelayMs)
         lastAdvanceAtMs = nowMs
     }
 
@@ -54,13 +59,24 @@ class TransitionBridge(
      *
      * 起播时刻由时钟自己的时间源决定，调用方推进时必须用同一时间源。
      * 返回 true 表示本次调用起了播（调用方据此武装帧回调）。
+     * 从息屏出发的边自带起手停顿；打断上一条边换目标时不停顿。
      */
     fun ensurePlaying(edge: TransitionEdge, durationMs: Long): Boolean {
         val state = clock.state()
-        if (state.source == ClockSource.SYSTEM_PUMP && state.edge == edge) return false
-        if (state.playing && state.edge == edge) return false
-        if (state.edge == edge && state.t >= 1f) return false
-        startSelfTimed(edge, durationMs, nowMs())
+        val sameEdge = state.edge == edge
+        if (sameEdge && state.playing) return false
+        if (sameEdge && state.source == ClockSource.SYSTEM_PUMP &&
+            !PumpTakeoverPolicy.shouldSelfTime(edge, true, clock.pumpSawMovement())
+        ) {
+            return false
+        }
+        if (sameEdge && !state.playing && state.t >= 1f &&
+            state.source != ClockSource.SYSTEM_PUMP
+        ) {
+            return false
+        }
+        val interrupted = state.playing && state.edge != null && state.edge != edge
+        startSelfTimed(edge, durationMs, nowMs(), TransitionStartDelay.forRestart(edge, interrupted))
         return true
     }
 
@@ -86,6 +102,7 @@ class TransitionBridge(
             out = params,
             sceneOut = if (sceneSamplingEnabled) sceneSample else null,
         )
+        SeamProfilePolicy.opaqueSlide(evaluator.profileOf(edge).content, params)
         return params
     }
 

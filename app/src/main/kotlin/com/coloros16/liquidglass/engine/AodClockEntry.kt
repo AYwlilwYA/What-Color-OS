@@ -64,4 +64,21 @@ object AodClockEntry {
         val w = SystemSceneMotion.AOD_CLOCK.map(aodWeight.coerceIn(0f, 1f)).coerceIn(0f, 1f)
         return 1f + (entryScale - 1f) * w
     }
+
+    /** 姿态里息屏端的占比：两端是否息屏决定端值，按边进度线性插值。 */
+    fun weightOf(edge: TransitionEdge?, t: Float, staticState: SceneState): Float {
+        if (edge == null) return if (staticState == SceneState.AOD) 1f else 0f
+        val from = if (edge.from == SceneState.AOD) 1f else 0f
+        val to = if (edge.to == SceneState.AOD) 1f else 0f
+        return from + (to - from) * t.coerceIn(0f, 1f)
+    }
+
+    /**
+     * 进场系数的施加规则：只有承载息屏时钟的那一面乘，别的面恒原样。
+     *
+     * 预览全场景只画一颗钟，故按息屏权重连续混合；
+     * 真机息屏与锁屏是两棵子树各一颗钟，锁屏那颗没有息屏进场动画，乘上去会凭空缩小。
+     */
+    fun entryFor(hostIsAod: Boolean, entryScale: Float, aodWeight: Float): Float =
+        if (hostIsAod) blend(entryScale, aodWeight) else 1f
 }

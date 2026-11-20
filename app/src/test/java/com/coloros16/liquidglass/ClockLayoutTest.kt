@@ -33,14 +33,6 @@ class ClockLayoutTest {
         assertEquals(0f, ClockLayout.fontPx(1000f, 1000f, -1f), 0f)
     }
 
-    /** 用户可拖范围只在写回配置时钳。 */
-    @Test
-    fun userScaleClampedSeparately() {
-        assertEquals(1.6f, ClockLayout.clampUserScale(99f), 1e-4f)
-        assertEquals(0.6f, ClockLayout.clampUserScale(0.01f), 1e-4f)
-        assertEquals(1.1f, ClockLayout.clampUserScale(1.1f), 1e-4f)
-    }
-
     /** 阳性对照：旧口径会把 0.46 顶到 0.6，与新口径必须不同。 */
     @Test
     fun oldClampWouldDifferFromNewOnHomePose() {

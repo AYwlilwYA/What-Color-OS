@@ -42,6 +42,7 @@ class TransitionBridgeEnsurePlayingTest {
     fun systemPumpOwnershipIsNotStolen() {
         fakeNow = 1000L
         val b = bridge()
+        b.onSystemProgress(TransitionEdge.AOD_TO_LOCK, 0.2f)
         b.onSystemProgress(TransitionEdge.AOD_TO_LOCK, 0.4f)
         assertFalse(b.ensurePlaying(TransitionEdge.AOD_TO_LOCK, 600L))
         assertEquals(ClockSource.SYSTEM_PUMP, b.clock.state().source)

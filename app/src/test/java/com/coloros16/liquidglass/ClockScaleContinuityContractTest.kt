@@ -152,10 +152,13 @@ class ClockScaleContinuityContractTest {
 
     @Test
     fun delegateExposesAodWeightForBothModes() {
-        val fn = body(delegate(), "aodWeight")
-        assertTrue("静止态按当前态取端值", fn.contains("if (edge == null)"))
-        assertTrue(fn.contains("SceneState.AOD"))
-        assertTrue("转场期线性插值", fn.contains("from + (to - from) * p"))
+        assertTrue(
+            "权重求值只留引擎一份",
+            delegate().contains("AodClockEntry.weightOf(edge, t, state)"),
+        )
+        val engine = File("src/main/kotlin/com/coloros16/liquidglass/engine/AodClockEntry.kt").readText()
+        assertTrue("静止态按当前态取端值", engine.contains("if (edge == null) return if (staticState == SceneState.AOD)"))
+        assertTrue("转场期线性插值", engine.contains("from + (to - from) * t"))
     }
 
     /** 阳性对照：旧的 override 门（只判 edge/scrub）会让场景样式静止态走错路径。 */

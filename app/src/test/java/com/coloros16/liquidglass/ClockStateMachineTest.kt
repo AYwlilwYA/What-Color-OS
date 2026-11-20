@@ -1,6 +1,7 @@
 package com.coloros16.liquidglass
 
 import com.coloros16.liquidglass.engine.ClockAnchor
+import com.coloros16.liquidglass.engine.ClockAnchorMapper
 import com.coloros16.liquidglass.engine.ClockStateMachine
 import com.coloros16.liquidglass.engine.Easing
 import com.coloros16.liquidglass.engine.SceneState
@@ -130,9 +131,10 @@ class ClockStateMachineTest {
     }
 
     @Test
-    fun homeAnchorCanHideClock() {
+    fun homeAnchorCanHideClockWhenExplicitlyGiven() {
         val m = machine()
         m.setAnchor(SceneState.LOCK, ClockAnchor(alpha = 1f), 0L, follow = false)
+        m.setAnchor(SceneState.HOME, ClockAnchor(alpha = 0f), 0L, follow = false)
         m.snapTo(SceneState.LOCK, 0L)
         assertTrue(m.pose.visible)
 
@@ -140,6 +142,19 @@ class ClockStateMachineTest {
         m.tick(320L)
         assertEquals(0f, m.pose.alpha, 0.001f)
         assertFalse(m.pose.visible)
+    }
+
+    /** 桌面缺省即隐藏：真机两路终点都取不到时淡出，与引擎兜底同源。 */
+    @Test
+    fun homeDefaultIsHiddenFallback() {
+        val m = machine()
+        m.setAnchor(SceneState.LOCK, ClockAnchor(alpha = 1f), 0L, follow = false)
+        m.snapTo(SceneState.LOCK, 0L)
+
+        m.setState(SceneState.HOME, 0L)
+        m.tick(320L)
+        assertEquals(ClockAnchorMapper.HOME_FALLBACK.alpha, m.pose.alpha, 0.001f)
+        assertFalse("缺省桌面态时钟淡出", m.pose.visible)
     }
 
     @Test

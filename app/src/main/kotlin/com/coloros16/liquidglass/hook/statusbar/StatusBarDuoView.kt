@@ -124,6 +124,7 @@ class StatusBarDuoView(context: Context) : View(context) {
         super.onAttachedToWindow()
         sampleSafely()
         onViewAttached(this)
+        StatusBarDuoHost.allowTintCorrect(this)
     }
 
     /** 共享状态源事件入口（电池/插拔/省电/网络）。 */
@@ -166,8 +167,14 @@ class StatusBarDuoView(context: Context) : View(context) {
         if (visibility == VISIBLE) {
             powerSaveReadAt = 0L
             sampleSafely()
+            StatusBarDuoHost.allowTintCorrect(this)
             invalidate()
         }
+    }
+
+    override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
+        super.onWindowFocusChanged(hasWindowFocus)
+        if (hasWindowFocus) StatusBarDuoHost.allowTintCorrect(this)
     }
 
     /**
@@ -193,6 +200,16 @@ class StatusBarDuoView(context: Context) : View(context) {
 
     fun preferredSizePx(): Int = sizePx
 
+    /** 当前实际染色值，供宿主侧绘制期纠正比对。 */
+    fun currentTint(): Int = tint
+
+    /**
+     * 轨道不透明度：深色 tint 说明背景浅，低 alpha 叠上去几乎看不见，需加深；
+     * 浅色 tint 说明背景深，保持原柔和轨道。
+     */
+    private fun trackAlphaFor(tintColor: Int): Int =
+        if (StatusBarDuoHost.isDarkTint(tintColor)) TRACK_ALPHA_ON_LIGHT else TRACK_ALPHA
+
     /** 系统暗色分发入口：目标色变化走过渡，不硬切。 */
     fun setTint(color: Int) {
         if (tintTarget == color) return
@@ -215,6 +232,12 @@ class StatusBarDuoView(context: Context) : View(context) {
         displayedTint = fallback
     }
 
+    /** 已在位时纠正取色：首帧取白后 dispatcher 才就绪，需按系统当前色重设。 */
+    fun refreshTintFrom(color: Int) {
+        if (tint == color) return
+        setTint(color)
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         if (tint < 0) {
@@ -222,6 +245,7 @@ class StatusBarDuoView(context: Context) : View(context) {
             tintTarget = Color.WHITE
             displayedTint = Color.WHITE
         }
+        StatusBarDuoHost.correctTintOnDraw(this)
         val cx = width / 2f
         val cy = height / 2f
         val radius = (minOf(width, height) / 2f) - ringPaint.strokeWidth
@@ -232,7 +256,8 @@ class StatusBarDuoView(context: Context) : View(context) {
         val arcColorNow = if (displayedArcColor >= 0) displayedArcColor else arcColor(level)
 
         ringPaint.color = tint
-        ringPaint.alpha = TRACK_ALPHA
+        ringPaint.alpha = trackAlphaFor(tint)
+        StatusBarDuoHost.diagTrack(tint, ringPaint.alpha)
         canvas.drawArc(arcRect, TRACK_START_DEG, TRACK_SPAN_DEG, false, ringPaint)
 
         ringPaint.color = arcColorNow
@@ -549,6 +574,9 @@ class StatusBarDuoView(context: Context) : View(context) {
         private const val POWER_SAVE_ON_RECHECK_MS = 10_000L
         private const val NETTYPE_TTL_MS = 10_000L
         private const val TRACK_ALPHA = 55
+
+        /** 浅底轨道不透明度：深色描边在浅底要足够实才看得见。 */
+        private const val TRACK_ALPHA_ON_LIGHT = 140
         private const val TRACK_START_DEG = 150f
         private const val TRACK_SPAN_DEG = 240f
         private const val MIN_SWEEP_DEG = 60f
@@ -735,7 +763,21 @@ object StatusBarDuoHost {
             detach()
             return
         }
-        if (selfInHost) return
+        if (selfInHost) {
+            // 已在位也要补取色：挂载早于 dispatcher 就绪时首帧取白，之后必须有机会纠正
+            if (dispatcher == null) adoptDispatcherFrom(root)
+            val scope = statusBarRoot(host) ?: host
+            for (ref in mountedViews) {
+                val v = ref.get() ?: continue
+                if (v.parent !== host) continue
+                if (dispatcher != null && !tintProxies.containsKey(v)) registerTint(v)
+                val c = readSystemIconTint(scope)
+                v.syncInitialTint(c)
+                v.refreshTintFrom(c)
+                allowTintCorrect(v)
+            }
+            return
+        }
         try {
             val view = StatusBarDuoView(root.context)
             val size = view.preferredSizePx()
@@ -743,12 +785,49 @@ object StatusBarDuoHost {
             lp.gravity = Gravity.CENTER_VERTICAL
             host.addView(view, host.childCount, lp)
             mountedViews.add(WeakReference(view))
-            view.syncInitialTint(readSystemIconTint(host))
+            if (dispatcher == null) adoptDispatcherFrom(root)
+            view.syncInitialTint(readSystemIconTint(statusBarRoot(host) ?: host))
             registerTint(view)
-            Lg.i(TAG, "sb-duo-mount host=${host.javaClass.simpleName} size=$size")
+            allowTintCorrect(view)
+            Lg.i(TAG, "sb-duo-mount host=${host.javaClass.simpleName} size=$size dispatcher=${dispatcher != null}")
         } catch (t: Throwable) {
             Lg.i(TAG, "sb-skip duo mount ${t.javaClass.simpleName}")
         }
+    }
+
+    /**
+     * 挂载时构造 hook 尚未命中（dispatcher=null）会导致取色恒白：
+     * 从状态栏根沿父链找持有 DarkIconDispatcher 的字段就地认领一次。
+     * 只在挂载这一刻做，不轮询。
+     */
+    private fun adoptDispatcherFrom(root: View) {
+        var node: View? = root
+        var depth = 0
+        while (node != null && depth < 8) {
+            var c: Class<*>? = node.javaClass
+            while (c != null && c.name != "android.view.View") {
+                for (f in c.declaredFields) {
+                    val tn = f.type.name
+                    if (!tn.contains("DarkIconDispatcher") && !tn.contains("StatusBarIconController")) continue
+                    try {
+                        f.isAccessible = true
+                        val inst = f.get(node) ?: continue
+                        if (!hasDispatcherApi(inst)) {
+                            Lg.i(TAG, "sb-duo-dispatcher 跳过非分发器 field=${f.name} type=${inst.javaClass.simpleName}")
+                            continue
+                        }
+                        dispatcher = inst
+                        Lg.i(TAG, "sb-duo-dispatcher adopted field=${f.name} owner=${c.simpleName} inst=${inst.javaClass.simpleName}")
+                        return
+                    } catch (_: Throwable) {
+                    }
+                }
+                c = c.superclass
+            }
+            node = node.parent as? View
+            depth++
+        }
+        Lg.i(TAG, "sb-duo-dispatcher 未认领到，取色暂回退白")
     }
 
     /** 宿主查找：普通树 end_side_content；锁屏树回退 status_icon_area；下拉顶栏回退 icons（三树 id 互斥）。 */
@@ -837,31 +916,257 @@ object StatusBarDuoHost {
         }
     }
 
-    /** 挂载即时色：读 dispatcher 当前暗色态，失败回退白（后续 onDarkChanged 会纠正）。 */
+    /** 挂载即时色：dispatcher → 整棵状态栏树已染色的系统图标 → 白。 */
     private fun readSystemIconTint(host: ViewGroup): Int {
-        val d = dispatcher ?: return android.graphics.Color.WHITE
+        val d = dispatcher
+        if (d == null || !hasDispatcherApi(d)) {
+            val sibling = siblingIconTint(statusBarRoot(host) ?: host)
+            if (sibling != null) return sibling
+            tintDiag("无 dispatcher 且整树无系统图标色 → WHITE host=${host.javaClass.simpleName}")
+            return android.graphics.Color.WHITE
+        }
         return try {
             val m = d.javaClass.methods.firstOrNull {
                 it.name == "getTint" && it.parameterCount == 2
             }
+            if (m == null) {
+                tintDiag("getTint(2args) 未解析 cls=${d.javaClass.simpleName} → WHITE")
+                return android.graphics.Color.WHITE
+            }
             val area = host.getChildAt(0) ?: host
-            val v = m?.invoke(d, area, null) as? Int
-            if (v != null && v != 0) v else android.graphics.Color.WHITE
-        } catch (_: Throwable) {
+            val v = m.invoke(d, area, null) as? Int
+            if (v != null && v != 0) {
+                tintDiag("getTint=0x${Integer.toHexString(v)} area=${area.javaClass.simpleName}")
+                v
+            } else {
+                tintDiag("getTint 返回 $v area=${area.javaClass.simpleName} → WHITE")
+                android.graphics.Color.WHITE
+            }
+        } catch (t: Throwable) {
+            tintDiag("getTint 抛 ${t.javaClass.simpleName} → WHITE")
             android.graphics.Color.WHITE
         }
+    }
+
+    /**
+     * dispatcher 未就绪时的兜底：读同宿主里系统图标当前的颜色。
+     * 优先级 = 图标 imageTintList > 电量 mTextColor > colorFilter > 文字色。
+     */
+    private fun siblingIconTint(host: ViewGroup, quiet: Boolean = false): Int? {
+        val stack = ArrayDeque<View>()
+        stack.add(host)
+        var visited = 0
+        var batteryColor: Int? = null
+        var filterColor: Int? = null
+        var textColor: Int? = null
+        var srcTag = ""
+        while (stack.isNotEmpty() && visited < 200) {
+            val v = stack.removeFirst()
+            visited++
+            if (v.javaClass.name == DUO_CLASS_NAME) continue
+            if (v is android.widget.ImageView && isSystemStatusIcon(v)) {
+                val t = v.imageTintList?.defaultColor
+                if (t != null && opaque(t)) {
+                    if (!quiet) tintDiag("兄弟图标 tintList=0x${Integer.toHexString(t)} from=${v.javaClass.simpleName} visited=$visited")
+                    return t
+                }
+                if (filterColor == null) {
+                    val cf = v.colorFilter
+                    if (cf is android.graphics.PorterDuffColorFilter) {
+                        val c = runCatching {
+                            android.graphics.PorterDuffColorFilter::class.java
+                                .getDeclaredField("mColor").apply { isAccessible = true }.getInt(cf)
+                        }.getOrNull()
+                        if (c != null && opaque(c)) { filterColor = c; srcTag = "filter:${v.javaClass.simpleName}" }
+                    }
+                }
+            }
+            if (batteryColor == null && v.javaClass.name.contains("BatteryMeter")) {
+                val c = runCatching { v.javaClass.getField("mTextColor").getInt(v) }.getOrNull()
+                if (c != null && opaque(c)) { batteryColor = c; srcTag = "battery" }
+            }
+            if (textColor == null && v is android.widget.TextView && isStatusText(v)) {
+                val c = v.currentTextColor
+                if (opaque(c)) { textColor = c; srcTag = "text:${v.javaClass.simpleName}" }
+            }
+            if (v is ViewGroup) {
+                for (i in 0 until v.childCount) v.getChildAt(i)?.let { stack.add(it) }
+            }
+        }
+        val pick = batteryColor ?: filterColor ?: textColor
+        if (!quiet) {
+            if (pick != null) {
+                tintDiag("兄弟取色=0x${Integer.toHexString(pick)} src=$srcTag visited=$visited（无 tintList）")
+            } else {
+                tintDiag("兄弟取色全空 visited=$visited")
+            }
+        }
+        return pick
+    }
+
+    /**
+     * 未注册到分发器时按系统图标当前色纠正。扫描只由事件触发：
+     * 挂载、可见性转 VISIBLE、窗口焦点变化各放行一次，绘制期只消费放行额度，
+     * 避免充电弧逐帧重绘把纠正变成周期重扫。
+     */
+    private val tintCorrectTokens = WeakHashMap<StatusBarDuoView, Int>()
+
+    /** 事件侧放行一次纠正额度。 */
+    fun allowTintCorrect(view: StatusBarDuoView) {
+        tintCorrectTokens[view] = 1
+    }
+
+    fun correctTintOnDraw(view: StatusBarDuoView) {
+        val registered = tintProxies.containsKey(view)
+        val h = view.parent as? ViewGroup ?: return
+        // 亮度是 O(1) 查表，每帧对账：任何一次重同步写回错色都会被下一帧纠回，
+        // 不依赖一次性额度（额度用尽后旧值会一直挂着）
+        val loc = IntArray(2)
+        val bright = try {
+            view.getLocationOnScreen(loc)
+            com.coloros16.liquidglass.hook.BlurDrawHook.localBrightnessAt(
+                loc[0] + view.width / 2, loc[1] + view.height / 2,
+            )
+        } catch (t: Throwable) {
+            -1
+        }
+        // 面板展开时系统色按它自己的模糊底算，与我们玻璃底不一致 ⇒ 以自采亮度为准
+        val panelOpen = try {
+            com.coloros16.liquidglass.hook.BlurDrawHook.isPanelExpanded()
+        } catch (t: Throwable) {
+            false
+        }
+        if (registered && !panelOpen) return
+        if (bright >= 0) {
+            val wantDark = bright > com.coloros16.liquidglass.hook.BlurDrawHook.TEXT_CONTRAST_BRIGHTNESS_THRESHOLD
+            if (isDarkTint(view.currentTint()) == wantDark) return
+            val c = if (wantDark) 0xFF000000.toInt() else 0xFFFFFFFF.toInt()
+            tintDiag("绘制期按亮度纠正 brightness=$bright 0x${Integer.toHexString(view.currentTint())} → 0x${Integer.toHexString(c)}")
+            view.setTint(c)
+            return
+        }
+        // 无亮度网格时才退回整树扫描，且只由事件额度放行（避免逐帧重扫）
+        if ((tintCorrectTokens[view] ?: 0) <= 0) return
+        tintCorrectTokens[view] = 0
+        val c = siblingIconTint(statusBarRoot(h) ?: h, quiet = true) ?: return
+        if (c == view.currentTint()) return
+        tintDiag("绘制期纠正 0x${Integer.toHexString(view.currentTint())} → 0x${Integer.toHexString(c)}")
+        view.setTint(c)
+    }
+
+    /**
+     * 球该用的色：优先按球所在位置的背景亮度判黑白（与文字链同源，已实证双向判对），
+     * 拿不到亮度再读兄弟系统图标当前色。
+     */
+    /** 分发器身份校验：必须同时具备 addDarkReceiver 与 getTint，排除只实现 DarkReceiver 的图标 View。 */
+    private fun hasDispatcherApi(inst: Any): Boolean {
+        var add = false
+        var get = false
+        for (m in inst.javaClass.methods) {
+            when (m.name) {
+                "addDarkReceiver" -> if (m.parameterCount == 1) add = true
+                "getTint" -> if (m.parameterCount == 2) get = true
+            }
+        }
+        return add && get
+    }
+
+    /** 上溯到状态栏根容器，使图标色扫描覆盖整条状态栏而非仅 duo 宿主。 */
+    private fun statusBarRoot(v: View): ViewGroup? {
+        var node: View = v
+        var top: ViewGroup? = null
+        var depth = 0
+        while (depth < 16) {
+            val p = node.parent as? ViewGroup ?: break
+            top = p
+            node = p
+            depth++
+        }
+        return top
+    }
+
+    /**
+     * 是否系统状态图标：只有它们由 DarkIconDispatcher 按暗色态染色。
+     * 动画图标 tintList 恒白，取它会误判。
+     */
+    private fun isSystemStatusIcon(v: android.widget.ImageView): Boolean {
+        val chain = ArrayList<String>(com.coloros16.liquidglass.engine.StatusTintSource.MAX_DEPTH)
+        var c: Class<*>? = v.javaClass
+        var depth = 0
+        while (c != null && depth < com.coloros16.liquidglass.engine.StatusTintSource.MAX_DEPTH) {
+            chain.add(c.name)
+            c = c.superclass
+            depth++
+        }
+        return com.coloros16.liquidglass.engine.StatusTintSource.isSystemStatusIconChain(chain)
+    }
+
+    /**
+     * 是否状态栏自身文字（时钟/运营商/电量百分比）：它们与图标同受暗色分发。
+     * 面板内容文字（通知标题等）不随图标色，取它会误判。
+     */
+    private fun isStatusText(v: android.widget.TextView): Boolean {
+        val src = com.coloros16.liquidglass.engine.StatusTintSource
+        if (src.isStatusTextClassName(v.javaClass.name)) return true
+        val id = v.id
+        if (id <= 0) return false
+        val entry = runCatching { v.resources.getResourceEntryName(id) }.getOrNull()
+        return src.isStatusTextResName(entry)
+    }
+
+    /** 颜色可用性：非零且不透明才作图标色候选。 */
+    private fun opaque(c: Int): Boolean = c != 0 && (c ushr 24) > 0
+
+    private var trackDiagAt = 0L
+    private var trackDiagLast = -1
+
+    /** 轨道实际染色与不透明度（值变才打）：判断白底看不见是色不对还是 alpha 不够。 */
+    fun diagTrack(tint: Int, alpha: Int) {
+        val key = (tint.toLong() shl 32) or alpha.toLong()
+        if (key == trackDiagLast.toLong()) return
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - trackDiagAt < 2_000L) return
+        trackDiagAt = now
+        trackDiagLast = key.toInt()
+        Lg.i(TAG, "sb-duo-track tint=0x${Integer.toHexString(tint)} alpha=$alpha dark=${isDarkTint(tint)}")
+    }
+
+    /** tint 是否深色（深色 tint ⇒ 背景浅）。 */
+    fun isDarkTint(c: Int): Boolean {
+        val r = (c ushr 16) and 0xFF
+        val g = (c ushr 8) and 0xFF
+        val b = c and 0xFF
+        return (r * 299 + g * 587 + b * 114) / 1000 <= 128
+    }
+
+    private var tintDiagAt = 0L
+
+    /** tint 取色诊断（5s 节流）：白底看不见白图标时据此判断是取不到系统色还是没收到回调。 */
+    private fun tintDiag(msg: String) {
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - tintDiagAt < 5_000L) return
+        tintDiagAt = now
+        Lg.i(TAG, "sb-duo-tint-src $msg")
     }
 
     private fun registerTint(view: StatusBarDuoView) {
         val d = dispatcher ?: return
         unregisterTint(view)
+        if (!hasDispatcherApi(d)) {
+            tintDiag("注册跳过：非分发器 d=${d.javaClass.simpleName}")
+            return
+        }
         try {
-            val cl = view.javaClass.classLoader ?: return
-            val iface = Class.forName("com.android.systemui.plugins.DarkIconDispatcher\$DarkReceiver", false, cl)
+            val iface = receiverInterface(d) ?: return
+            val cl = iface.classLoader ?: return
             val proxy = Proxy.newProxyInstance(cl, arrayOf(iface)) { _, method, args ->
-                if (method.name.startsWith("onDarkChanged")) {
-                    val color = args?.lastOrNull() as? Int
-                    if (color != null) view.post { view.setTint(color) }
+                // 两个回调的入参位置不同：onDarkChanged(areas, intensity, iconTint)
+                // 与 onDarkChangedWithContrast(areas, iconTint, contrastTint) 末位是「对比色」，
+                // 照末位取色会让图标恒取对比色（与系统图标相反）。
+                val color = pickIconTint(method.name, args)
+                if (color != null) {
+                    tintDiag("${method.name} color=0x${Integer.toHexString(color)} args=${args?.size}")
+                    view.post { view.setTint(color) }
                 }
                 null
             }
@@ -869,7 +1174,7 @@ object StatusBarDuoHost {
             tintProxies[view] = proxy
             Lg.i(TAG, "sb-duo-tint registered")
         } catch (t: Throwable) {
-            Lg.i(TAG, "sb-duo-tint 注册失败 ${t.javaClass.simpleName}")
+            Lg.i(TAG, "sb-duo-tint 注册失败 ${t.javaClass.simpleName}: ${t.message} d=${d.javaClass.name}")
         }
     }
 
@@ -881,16 +1186,33 @@ object StatusBarDuoHost {
 
     private fun removeDarkReceiver(d: Any, view: StatusBarDuoView, proxy: Any) {
         try {
-            val cl = view.javaClass.classLoader ?: return
-            val iface = Class.forName("com.android.systemui.plugins.DarkIconDispatcher\$DarkReceiver", false, cl)
+            val iface = receiverInterface(d) ?: return
             d.javaClass.getMethod("removeDarkReceiver", iface).invoke(d, proxy)
         } catch (_: Throwable) {
         }
     }
+
+    /** 从 addDarkReceiver 的形参类型直接取 DarkReceiver 接口，避免按名 forName 撞 loader 可见性。 */
+    private fun receiverInterface(d: Any): Class<*>? =
+        d.javaClass.methods.firstOrNull { it.name == "addDarkReceiver" && it.parameterCount == 1 }
+            ?.parameterTypes?.get(0)
 
     private val logged = HashSet<String>()
 
     private fun logOnce(key: String, msg: String) {
         if (logged.add(key)) Lg.i(TAG, msg)
     }
+}
+
+/**
+ * 从暗色分发回调里取「图标色」。
+ *
+ * 分发器会连着发两个回调：`onDarkChanged(areas, intensity, iconTint)` 与
+ * `onDarkChangedWithContrast(areas, iconTint, contrastTint)`。两者的图标色位置不同，
+ * 若都按末位取，拿到的是对比色（默认纯黑），图标会与系统相反。
+ */
+internal fun pickIconTint(methodName: String, args: Array<Any?>?): Int? = when (methodName) {
+    "onDarkChanged" -> args?.getOrNull(2) as? Int
+    "onDarkChangedWithContrast" -> args?.getOrNull(1) as? Int
+    else -> null
 }

@@ -18,7 +18,15 @@ import android.graphics.drawable.Drawable
  */
 internal class AppGlassDecorDrawable(density: Float) : Drawable() {
 
-    private val radiusPx = RADIUS_DP * density
+    private var radiusPx = RADIUS_DP * density
+
+    /** 跟随宿主真实圆角（弹窗/卡片各不同）；传 ≤0 保持默认。 */
+    fun setCornerRadiusPx(px: Float) {
+        if (px > 0f && px != radiusPx) {
+            radiusPx = px
+            invalidateSelf()
+        }
+    }
 
     private val rimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE

@@ -2,8 +2,10 @@ package com.coloros16.liquidglass.hook.aod
 
 import android.os.SystemClock
 import android.view.View
+import com.coloros16.liquidglass.engine.AodDrift
 import com.coloros16.liquidglass.engine.ClockAnchor
 import com.coloros16.liquidglass.engine.ClockAnchorMapper
+import com.coloros16.liquidglass.engine.ClockPlacementMath
 import com.coloros16.liquidglass.engine.OriginLedger
 import com.coloros16.liquidglass.engine.SceneState
 import com.coloros16.liquidglass.engine.WidgetRectPx
@@ -37,6 +39,7 @@ object ClockAnchorApply {
         val alpha: Float,
         val pivotX: Float,
         val pivotY: Float,
+        val rotation: Float,
     )
 
     private val origins = OriginLedger<Origin>()
@@ -81,37 +84,82 @@ object ClockAnchorApply {
         val dx = targetCx - (view.left + w * 0.5f)
         val dy = targetCy - (view.top + h * 0.5f)
         val scale = anchor.scale.coerceIn(ClockAnchorMapper.SCALE_MIN, ClockAnchorMapper.SCALE_MAX)
+        val sx = scale * anchor.stretchX
+        val sy = scale * anchor.stretchY
 
+        val rot = anchor.rotationDeg
         val key = keyOf(view, state)
         val prev = applied[key]
         if (prev != null &&
             kotlin.math.abs(prev[0] - dx) < EPS &&
             kotlin.math.abs(prev[1] - dy) < EPS &&
-            kotlin.math.abs(prev[2] - scale) < EPS &&
-            kotlin.math.abs(prev[3] - anchor.alpha) < EPS
+            kotlin.math.abs(prev[2] - sx) < EPS &&
+            kotlin.math.abs(prev[3] - anchor.alpha) < EPS &&
+            kotlin.math.abs(prev[4] - sy) < EPS &&
+            kotlin.math.abs(prev[5] - rot) < EPS
         ) return
 
         origins.record(
             key,
             Origin(
                 view.translationX, view.translationY, view.scaleX, view.scaleY,
-                view.alpha, view.pivotX, view.pivotY,
+                view.alpha, view.pivotX, view.pivotY, view.rotation,
             ),
         )
         view.pivotX = w * 0.5f
         view.pivotY = h * 0.5f
         view.translationX = dx
         view.translationY = dy
-        view.scaleX = scale
-        view.scaleY = scale
+        view.scaleX = sx
+        view.scaleY = sy
         view.alpha = anchor.alpha.coerceIn(0f, 1f)
-        applied[key] = floatArrayOf(dx, dy, scale, anchor.alpha)
+        view.rotation = rot
+        applied[key] = floatArrayOf(dx, dy, sx, anchor.alpha, sy, rot)
         logThrottled(
             "apply-set",
             String.format(
                 Locale.US,
-                "state=%s d=(%.1f,%.1f) s=%.3f a=%.2f reason=%s",
-                state, dx, dy, scale, anchor.alpha, reason,
+                "state=%s d=(%.1f,%.1f) sx=%.3f sy=%.3f a=%.2f rot=%.2f reason=%s",
+                state, dx, dy, sx, sy, anchor.alpha, rot, reason,
+            ),
+        )
+        logGeometry(view, state, anchor, w, h, parentLoc, dx, dy, screenW, screenH, reason)
+    }
+
+    /**
+     * 落位几何五值：视图左上/尺寸、父容器屏幕偏移、锚点与漂移分量。
+     *
+     * 有了这五项就能把「屏幕上实际中心」反算出来，与截屏亮像素包围盒对账，
+     * 分辨差值来自锚点、父容器偏移还是字形在视图内偏心。
+     */
+    private fun logGeometry(
+        view: View,
+        state: SceneState,
+        anchor: ClockAnchor,
+        w: Int,
+        h: Int,
+        parentLoc: IntArray,
+        dx: Float,
+        dy: Float,
+        screenW: Int,
+        screenH: Int,
+        reason: String,
+    ) {
+        val center = ClockPlacementMath.screenCenter(
+            view.left.toFloat(), view.top.toFloat(), w.toFloat(), h.toFloat(),
+            parentLoc[0].toFloat(), parentLoc[1].toFloat(), dx, dy,
+        )
+        val drift = if (state == SceneState.AOD) AodDrift.offsetY(SystemClock.uptimeMillis()) else 0f
+        logThrottled(
+            "apply-geo",
+            String.format(
+                Locale.US,
+                "state=%s reason=%s lt=(%d,%d) wh=(%dx%d) parent=(%d,%d) anchor=(%.4f,%.4f) " +
+                    "drift=%.5f screen=%dx%d center=(%.1f,%.1f) impliedY=%.4f",
+                state, reason, view.left, view.top, w, h, parentLoc[0], parentLoc[1],
+                anchor.centerX, anchor.centerY, drift, screenW, screenH,
+                center[0], center[1],
+                ClockPlacementMath.impliedAnchorY(center[1], screenH.toFloat()),
             ),
         )
     }
@@ -129,6 +177,7 @@ object ClockAnchorApply {
         view.alpha = origin.alpha
         view.pivotX = origin.pivotX
         view.pivotY = origin.pivotY
+        view.rotation = origin.rotation
         logThrottled("apply-restore", "已还原 state=$state ${view.javaClass.simpleName}")
     }
 
@@ -144,7 +193,7 @@ object ClockAnchorApply {
     private fun keyOf(view: View, state: SceneState): String =
         OriginLedger.keyOf(System.identityHashCode(view), state)
 
-    /** 桌面态锚点：桌面大时钟小部件优先，其次状态栏时钟，皆无则隐藏。 */
+    /** 桌面态锚点：桌面大时钟小部件优先，其次状态栏时钟，皆无则淡出。 */
     fun homeAnchor(): ClockAnchor =
         DesktopClockAnchorBridge.anchorOrNull() ?: ClockAnchor(alpha = 0f)
 

@@ -48,9 +48,9 @@ object BuiltinGlassPresets {
         Prefs.KEY_QUICK_SEARCH_GLASS,
     )
 
-    /** 出厂五档（顺序即 UI 展示顺序）。 */
+    /** 出厂四档（顺序即 UI 展示顺序）。 */
     fun all(): List<GlassRegistry.Preset> = listOf(
-        preset("ios_clear", "iOS 通透", mapOf(
+        preset("ios", "iOS", mapOf(
             Prefs.KEY_BLUR_RADIUS to 0f,
             Prefs.KEY_REFRACTION_AMOUNT to 48f,
             Prefs.KEY_REFRACTION_HEIGHT_RATIO to 0.12f,
@@ -66,29 +66,6 @@ object BuiltinGlassPresets {
             Prefs.KEY_VIBRANCY to 1.55f,
             Prefs.KEY_LIGHT_ANGLE to 51f,
             Prefs.KEY_MASK_GLASS_DIM to 0.05f,
-            Prefs.KEY_EDGE_STROKE to 0f,
-            Prefs.KEY_MASK_ENABLE to 1f,
-            Prefs.KEY_MASK_ALPHA to 0.45f,
-            Prefs.KEY_MASK_DIM_FOLLOW_MASK to 1f,
-            Prefs.KEY_TEXT_CONTRAST_ENABLE to 1f,
-            Prefs.KEY_TEXT_FORCE_WHITE_ENABLE to 1f,
-        )),
-        preset("ios_frost", "iOS 磨砂", mapOf(
-            Prefs.KEY_BLUR_RADIUS to 14f,
-            Prefs.KEY_REFRACTION_AMOUNT to 56f,
-            Prefs.KEY_REFRACTION_HEIGHT_RATIO to 0.2f,
-            Prefs.KEY_DEPTH to 0.45f,
-            Prefs.KEY_DISPERSION to 0f,
-            Prefs.KEY_HIGHLIGHT to 0.42f,
-            Prefs.KEY_HIGHLIGHT_WIDTH to 6f,
-            Prefs.KEY_HIGHLIGHT_FALLOFF to 2f,
-            Prefs.KEY_HIGHLIGHT_FLOOR to 0.3f,
-            Prefs.KEY_HIGHLIGHT_INNER_ATT to 0.35f,
-            Prefs.KEY_HIGHLIGHT_ENHANCE to 1f,
-            Prefs.KEY_INNER_GLOW to 0.12f,
-            Prefs.KEY_VIBRANCY to 1.5f,
-            Prefs.KEY_LIGHT_ANGLE to 51f,
-            Prefs.KEY_MASK_GLASS_DIM to 0.03f,
             Prefs.KEY_EDGE_STROKE to 0f,
             Prefs.KEY_MASK_ENABLE to 1f,
             Prefs.KEY_MASK_ALPHA to 0.45f,
@@ -204,44 +181,28 @@ object BuiltinGlassPresets {
         return out
     }
 
+    /**
+     * 性能与稳定性键：抓屏帧率/采样/间隔、倾斜强度与透视等一律**不由风格改动**。
+     * 这些默认值调坏会让本来正常的场景失效，风格只管观感。
+     */
+    val PERFORMANCE_KEYS = setOf(
+        Prefs.KEY_PANEL_CAPTURE_HZ,
+        Prefs.KEY_BG_CAPTURE_SCALE,
+        Prefs.KEY_BG_PERIODIC_CAPTURE_INTERVAL_MS,
+        Prefs.KEY_BG_PERIODIC_CAPTURE_ENABLE,
+        Prefs.KEY_ANIM_TILT_STRENGTH,
+        Prefs.KEY_ANIM_TILT_PERSPECTIVE,
+    )
+
     fun companionOf(id: String): Companion = when (id.removePrefix(ID_PREFIX)) {
-        "ios_clear", "crystal" -> Companion(
-            ints = mapOf(
-                Prefs.KEY_PANEL_CAPTURE_HZ to Prefs.PANEL_CAPTURE_HZ_MAX,
-                Prefs.KEY_BG_PERIODIC_CAPTURE_INTERVAL_MS to 500,
-                Prefs.KEY_ANIM_TILT_STRENGTH to 100,
-                Prefs.KEY_ANIM_TILT_PERSPECTIVE to 100,
-            ),
-            floats = mapOf(Prefs.KEY_BG_CAPTURE_SCALE to 1.0f),
-            bools = mapOf(Prefs.KEY_ANIM_TILT_ENABLED to true),
-        )
-        "ios_frost" -> Companion(
-            ints = mapOf(
-                Prefs.KEY_PANEL_CAPTURE_HZ to Prefs.DEFAULT_PANEL_CAPTURE_HZ,
-                Prefs.KEY_BG_PERIODIC_CAPTURE_INTERVAL_MS to 750,
-                Prefs.KEY_ANIM_TILT_STRENGTH to 100,
-                Prefs.KEY_ANIM_TILT_PERSPECTIVE to 100,
-            ),
-            floats = mapOf(Prefs.KEY_BG_CAPTURE_SCALE to 0.5f),
+        "ios", "crystal" -> Companion(
             bools = mapOf(Prefs.KEY_ANIM_TILT_ENABLED to true),
         )
         "harmony_soft" -> Companion(
-            ints = mapOf(
-                Prefs.KEY_PANEL_CAPTURE_HZ to Prefs.DEFAULT_PANEL_CAPTURE_HZ,
-                Prefs.KEY_BG_PERIODIC_CAPTURE_INTERVAL_MS to 750,
-            ) + harmonySpringInts(),
-            floats = mapOf(Prefs.KEY_BG_CAPTURE_SCALE to 0.5f),
-            bools = mapOf(Prefs.KEY_ANIM_TILT_ENABLED to false) +
-                Prefs.ANIM_GROUPS.associate { Prefs.animEnabledKey(it) to true },
+            ints = harmonySpringInts(),
+            bools = Prefs.ANIM_GROUPS.associate { Prefs.animEnabledKey(it) to true },
         )
-        else -> Companion(
-            ints = mapOf(
-                Prefs.KEY_PANEL_CAPTURE_HZ to Prefs.DEFAULT_PANEL_CAPTURE_HZ,
-                Prefs.KEY_BG_PERIODIC_CAPTURE_INTERVAL_MS to 750,
-            ),
-            floats = mapOf(Prefs.KEY_BG_CAPTURE_SCALE to 0.5f),
-            bools = mapOf(Prefs.KEY_ANIM_TILT_ENABLED to false),
-        )
+        else -> Companion()
     }
 
     /**
@@ -260,11 +221,15 @@ object BuiltinGlassPresets {
         return null
     }
 
-    /** 缺失的内置条目补进现有列表（按 id 判重；用户改过的同名条目不覆盖）。 */
+    /** 已下线的内置 id：存量条目直接丢弃，避免列表里留死档。 */
+    private val RETIRED_IDS = setOf(ID_PREFIX + "ios_clear", ID_PREFIX + "ios_frost")
+
+    /** 清掉已下线内置条目 + 补齐缺失内置条目（按 id 判重；用户改过的同名条目不覆盖）。 */
     fun seedInto(existing: List<GlassRegistry.Preset>): List<GlassRegistry.Preset> {
-        val ids = existing.mapTo(HashSet()) { it.id }
+        val kept = existing.filterNot { it.id in RETIRED_IDS }
+        val ids = kept.mapTo(HashSet()) { it.id }
         val missing = all().filter { it.id !in ids }
-        return if (missing.isEmpty()) existing else existing + missing
+        return kept + missing
     }
 
     private fun preset(slug: String, name: String, params: Map<String, Float>) =

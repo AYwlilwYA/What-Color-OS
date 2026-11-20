@@ -162,6 +162,39 @@ class AodInlineEditPanel(
         )
         content.addView(weightRow)
 
+        content.addView(groupLabel(R.string.settings_aod_edit_layout_group))
+        content.addView(
+            TextView(context).apply {
+                text = context.getString(R.string.settings_aod_edit_reset)
+                textSize = 13f
+                setTextColor(ink100)
+                setPadding(dpi(12f), dpi(6f), dpi(12f), dpi(6f))
+                background = chipBackground(false)
+                setOnClickListener {
+                    val fresh = LockLayoutSettings.defaults(layout.surface)
+                    layout.clockX = fresh.clockX
+                    layout.clockY = fresh.clockY
+                    layout.clockScale = fresh.clockScale
+                    layout.clockStretchX = fresh.clockStretchX
+                    layout.clockStretchY = fresh.clockStretchY
+                    onChanged()
+                    Lg.i(
+                        TAG,
+                        "inline clock layout reset x=${layout.clockX} y=${layout.clockY} " +
+                            "sx=${layout.clockStretchX} sy=${layout.clockStretchY}",
+                    )
+                }
+            },
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT),
+        )
+        content.addView(
+            TextView(context).apply {
+                text = context.getString(R.string.settings_aod_edit_reset_desc)
+                textSize = 12f
+                setTextColor(ink400)
+            },
+        )
+
         sheet.show()
         syncChips()
         Lg.i(TAG, "inline clock panel open")
@@ -281,6 +314,84 @@ class AodInlineEditPanel(
     }
 
     /** 大丸调整：大小滑杆 + 显示开关。 */
+    /**
+     * 大丸横带空白处点击：在该位置新增一个快捷入口。
+     *
+     * 只列还没放的类型；位置用点击落点，不预设网格，位置由用户点决定。
+     */
+    fun showPillSlotPanel(xFrac: Float, yFrac: Float, layout: LockLayoutSettings) {
+        settings = layout
+        val taken = layout.pills().map { it.typeId }.toSet()
+        val free = PillType.choices().filter { it.id !in taken }
+        val (sheet, content) = buildSheet(context.getString(R.string.settings_aod_edit_pill_add))
+        if (free.isEmpty()) {
+            content.addView(
+                TextView(context).apply {
+                    text = context.getString(R.string.settings_aod_edit_pill_add_empty)
+                    setTextColor(ink100)
+                    textSize = 13f
+                },
+            )
+            sheet.show()
+            return
+        }
+        content.addView(groupLabel(R.string.settings_aod_edit_pill_content))
+        // 系统锁屏底部只有 start/end 两个槽，配置里第 3 个起真机不显示：先把这件事说清楚
+        if (taken.size >= 2) {
+            content.addView(
+                TextView(context).apply {
+                    text = context.getString(R.string.settings_aod_edit_pill_add_limit)
+                    setTextColor(ink400)
+                    textSize = 11.5f
+                    setPadding(0, dpi(6f), 0, dpi(6f))
+                },
+            )
+        }
+        var row: LinearLayout? = null
+        for ((i, type) in free.withIndex()) {
+            if (i % 4 == 0) {
+                row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+                content.addView(
+                    row,
+                    LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                        .apply { topMargin = if (i == 0) 0 else dpi(8f) },
+                )
+            }
+            val labelRes = context.resources.getIdentifier(type.nameKey, "string", context.packageName)
+            val cell = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_HORIZONTAL
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                isClickable = true
+                isFocusable = true
+                setOnClickListener {
+                    layout.setPill(PillPlacement(type.id, x = xFrac, y = yFrac))
+                    onChanged()
+                    dismiss()
+                }
+            }
+            cell.addView(
+                TextView(context).apply {
+                    text = if (labelRes != 0) context.getString(labelRes) else type.id
+                    textSize = 10.5f
+                    gravity = Gravity.CENTER
+                    setTextColor(ink100)
+                    maxLines = 1
+                    background = GradientDrawable().apply {
+                        cornerRadius = dp(28f)
+                        setColor(0x14FFFFFF)
+                        setStroke(dpi(1f), 0x1FFFFFFF)
+                    }
+                    setPadding(dpi(4f), dpi(16f), dpi(4f), dpi(16f))
+                },
+                LinearLayout.LayoutParams(dpi(56f), dpi(56f)),
+            )
+            row!!.addView(cell)
+        }
+        sheet.show()
+        Lg.i(TAG, "inline pill slot add at $xFrac,$yFrac free=${free.map { it.id }}")
+    }
+
     fun showPillPanel(typeId: String, layout: LockLayoutSettings) {
         settings = layout
         val pill = layout.pill(typeId) ?: return

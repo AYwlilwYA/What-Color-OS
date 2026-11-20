@@ -157,6 +157,23 @@ object PhotoStyleMotion {
 
     private val byId: Map<Int, PhotoStyle> = styles.associateBy { it.id }
 
+    /** 双图配对只在留光款成立，其余款式即使开了开关也不配对。 */
+    fun pairedEnabled(styleId: Int, framePair: Boolean): Boolean = framePair && styleId == 1
+
+    /** 配对是否真的生效：款式支持、开关开、且第二张照片已解出。 */
+    fun pairedActive(styleId: Int, framePair: Boolean, hasFramePhoto: Boolean): Boolean =
+        pairedEnabled(styleId, framePair) && hasFramePhoto
+
+    /**
+     * 该态的照片不透明度：息屏恒 1；桌面恒 0；
+     * 锁屏在配对时与桌面同端点（都是 0），未配对时为 1。
+     */
+    fun photoAlphaOf(state: SceneState, paired: Boolean): Float = when (state) {
+        SceneState.AOD -> 1f
+        SceneState.LOCK -> if (paired) 0f else 1f
+        SceneState.HOME -> 0f
+    }
+
     fun byId(id: Int): PhotoStyle? = byId[id]
 
     fun transitionOf(edge: TransitionEdge): Int = when (edge) {
@@ -185,16 +202,29 @@ object PhotoStyleMotion {
     fun durationMs(style: PhotoStyle, edge: TransitionEdge): Long {
         val tr = transitionOf(edge)
         var end = style.blendDuration(tr)
+        val videoSpan = videoSpanMs(style, edge)
         for (slot in 0 until 8) {
             val spec = style.track(tr, slot)
             var duration = spec?.durationMs ?: 400L
             val delay = spec?.delayMs ?: 0L
-            if (slot == PhotoStyle.SLOT_VIDEO) duration = style.endMicros / 1000L
+            if (slot == PhotoStyle.SLOT_VIDEO) duration = videoSpan
             if (slot == PhotoStyle.SLOT_PHOTO_ALPHA && tr == 4) duration = 800L
             end = maxOf(end, delay + duration)
         }
         return (if (fromOf(edge) == SceneState.AOD) PhotoStyle.OPEN_DELAY_MS else 0L) + end
     }
+
+    /**
+     * 视频轨时长：两端视频时间之差的绝对值，与 [sample] 内同一口径。
+     *
+     * 锁屏↔桌面两端视频都在末帧，差为零该轨瞬时；只有含息屏的四条边才走全长。
+     */
+    fun videoSpanMs(style: PhotoStyle, edge: TransitionEdge): Long =
+        abs(videoMicrosOf(style, fromOf(edge)) - videoMicrosOf(style, toOf(edge))) / 1000L
+
+    /** 该态的视频时间：息屏在起始帧，锁屏与桌面都在末帧。 */
+    private fun videoMicrosOf(style: PhotoStyle, state: SceneState): Long =
+        if (state == SceneState.AOD) 0L else style.endMicros.toLong()
 
     /** 静态三态：息屏跟随时钟锚点，锁屏/桌面铺满整屏。 */
     fun sampleStatic(
@@ -204,8 +234,9 @@ object PhotoStyleMotion {
         anchorX: Float,
         anchorY: Float,
         out: Values,
+        paired: Boolean = false,
     ) {
-        fillStatic(style, state, aspect, anchorX, anchorY, out.v)
+        fillStatic(style, state, aspect, anchorX, anchorY, out.v, paired)
         out.ratios.fill(0f)
         out.ratios[state.ordinal.coerceIn(0, 2)] = 1f
     }
@@ -218,14 +249,15 @@ object PhotoStyleMotion {
         anchorX: Float,
         anchorY: Float,
         out: Values,
+        paired: Boolean = false,
     ) {
         val tr = transitionOf(edge)
         val fromState = fromOf(edge)
         val toState = toOf(edge)
         val from = FloatArray(8)
         val to = FloatArray(8)
-        fillStatic(style, fromState, aspect, anchorX, anchorY, from)
-        fillStatic(style, toState, aspect, anchorX, anchorY, to)
+        fillStatic(style, fromState, aspect, anchorX, anchorY, from, paired)
+        fillStatic(style, toState, aspect, anchorX, anchorY, to, paired)
 
         val elapsed = (
             t.coerceIn(0f, 1f) * durationMs(style, edge).toFloat() -
@@ -266,6 +298,7 @@ object PhotoStyleMotion {
         anchorX: Float,
         anchorY: Float,
         out: FloatArray,
+        paired: Boolean,
     ) {
         when (state) {
             SceneState.AOD -> {
@@ -276,7 +309,7 @@ object PhotoStyleMotion {
                 out[PhotoStyle.SLOT_X] = anchorX
                 out[PhotoStyle.SLOT_Y] = anchorY
                 out[PhotoStyle.SLOT_VIDEO] = 0f
-                out[PhotoStyle.SLOT_PHOTO_ALPHA] = 1f
+                out[PhotoStyle.SLOT_PHOTO_ALPHA] = photoAlphaOf(SceneState.AOD, paired)
             }
 
             SceneState.LOCK, SceneState.HOME -> {
@@ -287,7 +320,7 @@ object PhotoStyleMotion {
                 out[PhotoStyle.SLOT_X] = 0f
                 out[PhotoStyle.SLOT_Y] = 0f
                 out[PhotoStyle.SLOT_VIDEO] = style.endMicros.toFloat()
-                out[PhotoStyle.SLOT_PHOTO_ALPHA] = if (state == SceneState.LOCK) 1f else 0f
+                out[PhotoStyle.SLOT_PHOTO_ALPHA] = photoAlphaOf(state, paired)
             }
         }
     }

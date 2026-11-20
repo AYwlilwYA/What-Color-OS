@@ -61,12 +61,25 @@ __pycache__/
 # 本机取证脚本（含设备序列号/个人工具路径）
 /scripts/capture-coldstart-log.ps1
 /scripts/aod-cycle.ps1
+/scripts/aod_*.py
+/scripts/seedling_*.py
+/scripts/sb_*.py
+/scripts/glass_*.py
+/scripts/*_e2.py
+
+# 误重定向产生的空文件
+/0
+/0}
+/1f
+/=
+/nul
 # 会话临时产物
 /.impeccable/
 /.tmp/
 /.tmp-gradle-home/
 /.tmp-gradle-sfline/
 /.tmp-handle/
+/.tmp-e2/
 /app-build-sfline/
 /.kotlin/
 /_tmp_cap.sh

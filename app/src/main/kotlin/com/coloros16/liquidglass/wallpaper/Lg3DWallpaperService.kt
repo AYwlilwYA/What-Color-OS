@@ -1,5 +1,10 @@
 package com.coloros16.liquidglass.wallpaper
 
+import android.app.KeyguardManager
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.opengl.EGL14
 import android.opengl.EGLConfig
@@ -7,6 +12,7 @@ import android.opengl.EGLContext
 import android.opengl.EGLDisplay
 import android.opengl.EGLSurface
 import android.opengl.GLES20
+import android.os.Bundle
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.SystemClock
@@ -15,6 +21,9 @@ import android.view.Choreographer
 import android.view.SurfaceHolder
 import com.coloros16.liquidglass.config.Prefs
 import com.coloros16.liquidglass.engine.CameraOrientation
+import com.coloros16.liquidglass.engine.SceneCameraDriver
+import com.coloros16.liquidglass.engine.SceneModeResolver
+import com.coloros16.liquidglass.engine.SceneState
 import com.coloros16.liquidglass.log.Lg
 
 /**
@@ -23,6 +32,15 @@ import com.coloros16.liquidglass.log.Lg
 class Lg3DWallpaperService : WallpaperService() {
 
     override fun onCreateEngine(): Engine = SceneEngine()
+
+    private companion object {
+        /** 场景模式帧间隔（毫秒）：过渡期约 30fps，收敛后停帧。 */
+        const val SCENE_FRAME_MS = 33L
+
+        const val COMMAND_GOING_TO_SLEEP = "android.wallpaper.goingtosleep"
+        const val COMMAND_WAKING_UP = "android.wallpaper.wakingup"
+        const val COMMAND_KEYGUARD_GOING_AWAY = "android.wallpaper.keyguardgoingaway"
+    }
 
     private inner class SceneEngine : Engine() {
 
@@ -49,6 +67,21 @@ class Lg3DWallpaperService : WallpaperService() {
         private var lastCustom: String? = null
         private var firstFrameLogged = false
 
+        private val driver = SceneCameraDriver()
+        private var sceneActive = false
+        private var ambient = false
+        private var lastSceneFrameMs = 0L
+        private var lockSettlePending = false
+        private var sceneStateLogged: SceneState? = null
+        private var screenReceiver: BroadcastReceiver? = null
+
+        private val lockSettle = Runnable {
+            lockSettlePending = false
+            if (!sceneActive) return@Runnable
+            if (!SceneModeResolver.lockStillHolds(keyguardLocked())) return@Runnable
+            applySceneState(SceneState.LOCK, snap = false)
+        }
+
         private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
             if (key == null || key.startsWith("wallpaper_")) {
                 handler.post { configAtMs = 0L }
@@ -59,10 +92,15 @@ class Lg3DWallpaperService : WallpaperService() {
             override fun doFrame(frameTimeNanos: Long) {
                 if (!loopRunning) return
                 val now = SystemClock.elapsedRealtime()
-                val interval = if (lastCurveId == "still") 90L else 33L
+                val interval = if (sceneActive) SCENE_FRAME_MS else if (lastCurveId == "still") 90L else 33L
                 if (now - lastRenderMs >= interval) {
                     lastRenderMs = now
                     renderFrame(now)
+                }
+                if (sceneActive && !driver.needsFrame() && !lockSettlePending) {
+                    loopRunning = false
+                    Lg.i(WallpaperSettings.TAG, "3d scene settled, frames parked state=${driver.state}")
+                    return
                 }
                 choreographer?.postFrameCallback(this)
             }
@@ -73,11 +111,14 @@ class Lg3DWallpaperService : WallpaperService() {
             thread.start()
             handler = Handler(thread.looper)
             Prefs.read(this@Lg3DWallpaperService).registerOnSharedPreferenceChangeListener(prefsListener)
+            registerScreenState()
             Lg.i(WallpaperSettings.TAG, "3d wallpaper engine created")
         }
 
         override fun onDestroy() {
+            unregisterScreenState()
             Prefs.read(this@Lg3DWallpaperService).unregisterOnSharedPreferenceChangeListener(prefsListener)
+            handler.removeCallbacks(lockSettle)
             handler.post {
                 stopLoopOnThread()
                 destroyEgl()
@@ -90,6 +131,110 @@ class Lg3DWallpaperService : WallpaperService() {
             thread.quitSafely()
             super.onDestroy()
             Lg.i(WallpaperSettings.TAG, "3d wallpaper engine destroyed")
+        }
+
+        /**
+         * 屏幕与解锁事件：只作为三态判定的输入，不排任何周期任务。
+         *
+         * 注册前先摘掉本引擎上一次的接收器，避免同一引擎重建时堆叠。
+         */
+        private fun registerScreenState() {
+            unregisterScreenState()
+            val receiver = object : BroadcastReceiver() {
+                override fun onReceive(context: Context?, intent: Intent?) {
+                    val action = intent?.action ?: return
+                    handler.post {
+                        when (action) {
+                            Intent.ACTION_SCREEN_OFF -> ambient = true
+                            Intent.ACTION_SCREEN_ON -> ambient = false
+                            Intent.ACTION_USER_PRESENT -> ambient = false
+                        }
+                        refreshSceneState()
+                    }
+                }
+            }
+            screenReceiver = receiver
+            val filter = IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_ON)
+                addAction(Intent.ACTION_SCREEN_OFF)
+                addAction(Intent.ACTION_USER_PRESENT)
+            }
+            try {
+                if (android.os.Build.VERSION.SDK_INT >= 33) {
+                    registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+                } else {
+                    registerReceiver(receiver, filter)
+                }
+            } catch (t: Throwable) {
+                screenReceiver = null
+                Lg.w(WallpaperSettings.TAG, "3d screen receiver register failed", t)
+            }
+        }
+
+        private fun unregisterScreenState() {
+            val receiver = screenReceiver ?: return
+            screenReceiver = null
+            try {
+                unregisterReceiver(receiver)
+            } catch (t: Throwable) {
+                Lg.w(WallpaperSettings.TAG, "3d screen receiver unregister failed", t)
+            }
+        }
+
+        private fun keyguardLocked(): Boolean = try {
+            getSystemService(KeyguardManager::class.java)?.isKeyguardLocked ?: false
+        } catch (t: Throwable) {
+            Lg.w(WallpaperSettings.TAG, "3d keyguard state read failed", t)
+            false
+        }
+
+        /**
+         * 框架壁纸命令：息屏与唤醒由此下发，是三态判定的事件源。
+         *
+         * 息屏标志优先于锁屏状态，因为息屏时锁屏仍报已锁。
+         */
+        override fun onCommand(
+            action: String?,
+            x: Int,
+            y: Int,
+            z: Int,
+            extras: Bundle?,
+            resultRequested: Boolean,
+        ): Bundle? {
+            when (action) {
+                COMMAND_GOING_TO_SLEEP -> handler.post {
+                    ambient = true
+                    Lg.i(WallpaperSettings.TAG, "3d cmd=sleep")
+                    refreshSceneState()
+                }
+                COMMAND_WAKING_UP -> handler.post {
+                    ambient = false
+                    Lg.i(WallpaperSettings.TAG, "3d cmd=wake")
+                    refreshSceneState()
+                }
+                COMMAND_KEYGUARD_GOING_AWAY -> handler.post {
+                    ambient = false
+                    Lg.i(WallpaperSettings.TAG, "3d cmd=keyguard-away")
+                    if (lockSettlePending) {
+                        lockSettlePending = false
+                        handler.removeCallbacks(lockSettle)
+                    }
+                    applySceneState(SceneState.HOME, snap = false)
+                }
+            }
+            return super.onCommand(action, x, y, z, extras, resultRequested)
+        }
+
+        override fun onVisibilityChanged(isVisible: Boolean) {
+            handler.post {
+                visible = isVisible
+                if (isVisible) {
+                    refreshSceneState()
+                    if (surfaceReady) startLoopOnThread()
+                } else {
+                    stopLoopOnThread()
+                }
+            }
         }
 
         override fun onSurfaceCreated(holder: SurfaceHolder) {
@@ -112,8 +257,9 @@ class Lg3DWallpaperService : WallpaperService() {
                         sceneRenderer.onSurfaceChanged(width, height)
                         sceneRenderer.onSurfaceCreated()
                         config = WallpaperSettings.read3D(this@Lg3DWallpaperService)
-                        sceneRenderer.setCamera(config.camera)
                         renderer = sceneRenderer
+                        sceneActive = false
+                        applySceneConfig(sceneRenderer)
                     } catch (t: Throwable) {
                         Lg.e(WallpaperSettings.TAG, "3d renderer init failed", t)
                         sceneRenderer.release()
@@ -142,17 +288,6 @@ class Lg3DWallpaperService : WallpaperService() {
             }
         }
 
-        override fun onVisibilityChanged(isVisible: Boolean) {
-            handler.post {
-                visible = isVisible
-                if (isVisible && surfaceReady) {
-                    startLoopOnThread()
-                } else if (!isVisible) {
-                    stopLoopOnThread()
-                }
-            }
-        }
-
         override fun onOffsetsChanged(
             xOffset: Float,
             yOffset: Float,
@@ -164,6 +299,72 @@ class Lg3DWallpaperService : WallpaperService() {
             offsetX = xOffset
         }
 
+        /**
+         * 按配置切场景模式或曲线模式：场景模式给远面并按当前三态就位。
+         */
+        private fun applySceneConfig(target: Gl3DSceneRenderer) {
+            if (!WallpaperSettings.validScene(config.sceneId)) {
+                sceneActive = false
+                target.setCamera(config.camera)
+                Lg.i(WallpaperSettings.TAG, "3d mode=curve id=${config.curveId}")
+                return
+            }
+            sceneActive = true
+            target.setSceneCamera(driver.farPlane())
+            driver.reset(SceneModeResolver.resolve(ambient, keyguardLocked()))
+            lastSceneFrameMs = SystemClock.elapsedRealtime()
+            pushScenePose(target)
+            sceneStateLogged = driver.state
+            Lg.i(
+                WallpaperSettings.TAG,
+                "3d mode=scene id=${config.sceneId} state=${driver.state} far=${driver.farPlane()}",
+            )
+        }
+
+        private fun pushScenePose(target: Gl3DSceneRenderer) {
+            target.setScenePose(driver.pose())
+            target.setSceneMaterial(driver.dark(), driver.rot())
+        }
+
+        /**
+         * 三态变化：换目标并武装帧回调；亮屏直进锁屏时先等一拍再认。
+         */
+        private fun refreshSceneState() {
+            if (!sceneActive) return
+            val locked = keyguardLocked()
+            val next = SceneModeResolver.resolve(ambient, locked)
+            if (SceneModeResolver.needsLockSettle(driver.state, next, locked)) {
+                if (!lockSettlePending) {
+                    lockSettlePending = true
+                    handler.postDelayed(lockSettle, SceneModeResolver.LOCK_SETTLE_MS)
+                    Lg.i(WallpaperSettings.TAG, "3d scene lock-settle armed")
+                    armSceneFrames()
+                }
+                return
+            }
+            if (lockSettlePending) {
+                lockSettlePending = false
+                handler.removeCallbacks(lockSettle)
+            }
+            applySceneState(next, snap = false)
+        }
+
+        private fun applySceneState(next: SceneState, snap: Boolean) {
+            if (!sceneActive) return
+            val changed = driver.retarget(next, snap)
+            if (changed || sceneStateLogged != next) {
+                sceneStateLogged = next
+                Lg.i(WallpaperSettings.TAG, "3d scene state=$next snap=$snap")
+            }
+            if (changed || snap) armSceneFrames()
+        }
+
+        private fun armSceneFrames() {
+            if (!surfaceReady || !visible) return
+            lastSceneFrameMs = SystemClock.elapsedRealtime()
+            startLoopOnThread()
+        }
+
         private fun startLoopOnThread() {
             if (loopRunning) return
             ensureChoreographer()
@@ -172,7 +373,7 @@ class Lg3DWallpaperService : WallpaperService() {
             lastRenderMs = 0L
             configAtMs = 0L
             choreographer?.postFrameCallback(frameCallback)
-            Lg.i(WallpaperSettings.TAG, "3d loop start offset=$offsetX")
+            Lg.i(WallpaperSettings.TAG, "3d loop start offset=$offsetX scene=$sceneActive")
         }
 
         private fun stopLoopOnThread() {
@@ -195,16 +396,23 @@ class Lg3DWallpaperService : WallpaperService() {
             if (now - configAtMs >= 1000L) {
                 configAtMs = now
                 val fresh = WallpaperSettings.read3D(this@Lg3DWallpaperService)
-                if (fresh.curveId != lastCurveId || fresh.customText != lastCustom) {
+                val sceneChanged = fresh.sceneId != config.sceneId
+                val curveChanged = fresh.curveId != lastCurveId || fresh.customText != lastCustom
+                config = fresh
+                val target = renderer
+                if (target != null && sceneChanged) {
                     lastCurveId = fresh.curveId
                     lastCustom = fresh.customText
-                    renderer?.setCamera(fresh.camera)
+                    applySceneConfig(target)
+                } else if (target != null && curveChanged && !sceneActive) {
+                    lastCurveId = fresh.curveId
+                    lastCustom = fresh.customText
+                    target.setCamera(fresh.camera)
                     Lg.i(
                         WallpaperSettings.TAG,
                         "3d camera curve=${fresh.curveId} cycle=${fresh.cycleMs}ms speed=${fresh.speed} parallax=${fresh.parallax}",
                     )
                 }
-                config = fresh
             }
 
             val elapsed = elapsedMs()
@@ -212,6 +420,12 @@ class Lg3DWallpaperService : WallpaperService() {
             val scene = renderer
             if (scene != null) {
                 try {
+                    if (sceneActive) {
+                        val delta = now - lastSceneFrameMs
+                        lastSceneFrameMs = now
+                        driver.advance(delta)
+                        pushScenePose(scene)
+                    }
                     scene.draw(progress, offsetX, config.parallax, elapsed / 1000f)
                 } catch (t: Throwable) {
                     Lg.e(WallpaperSettings.TAG, "3d draw failed, fallback to solid clear", t)

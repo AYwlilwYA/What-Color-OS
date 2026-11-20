@@ -36,10 +36,12 @@ import com.coloros16.liquidglass.debug.DebugElement
 import com.coloros16.liquidglass.debug.DebugOverlay
 import com.coloros16.liquidglass.engine.PressGlow
 import com.coloros16.liquidglass.engine.SafetyFuse
+import com.coloros16.liquidglass.engine.VolumeTrackGeometry
 import com.coloros16.liquidglass.glass.GlassRegistry
 import com.coloros16.liquidglass.hook.capture.CaptureEngine
 import com.coloros16.liquidglass.hook.capture.CapturePolicy
 import com.coloros16.liquidglass.hook.capture.ExcludeSpec
+import com.coloros16.liquidglass.hook.capture.StaticCaptureBootstrap
 import com.coloros16.liquidglass.hook.spec.EngineLog
 import com.coloros16.liquidglass.hook.spec.HookSpec
 import com.coloros16.liquidglass.hook.spec.ProbeRegistry
@@ -127,6 +129,9 @@ object BlurDrawHook {
     // [spec/114] 16.00.14 旧架构无 onDrawContent，shader 不可用时系统改走 drawBlur 位图平铺 —— 挂它作等价兜底
     private const val METHOD_DRAW_BLUR = "drawBlur"
     private const val CLASS_FOREGROUND_BLUR_PARAM = "com.oplus.posteffect.ForegroundBlurParam"
+    /** LEGACY 世代内容重录入口（无参）：内部三道门后才分流到 drawBlurShader / drawBlur。 */
+    private const val METHOD_ON_DRAW_BLUR_CONTENT = "onDrawBlurContent"
+    private const val METHOD_GET_RENDER_NODE = "getRenderNode"
     private const val METHOD_ON_BLUR_READY = "onBlurReady"
     private const val METHOD_GET_DRAWABLE_SHADER_PAINT = "getDrawableShaderPaint"
     private const val METHOD_GET_DRAWABLE_SHADER = "getDrawableShader"
@@ -269,6 +274,12 @@ object BlurDrawHook {
     private const val NOTIF_CARD_HOST_NAME = "NotificationBackgroundView"
     /** 流体云卡 region 的 source 标签前缀（registerSeedlingCardRegion source="seedling-cardview"） */
     private const val SEEDLING_CARDVIEW_TAG = "seedling-cardview:"
+
+    /** 接管态小岛 region 的 source 标签前缀（SeedlingIslandWindow source="seedling-takeover"） */
+    private const val SEEDLING_TAKEOVER_TAG = "seedling-takeover:"
+
+    /** 系统原生胶囊岛（投屏/通话）与大卡行的来源前缀。 */
+    private const val SEEDLING_HEURISTIC_TAG = "seedling-heuristic:"
     /** 简易横幅 region 的 source 标签前缀（registerSeedlingCardRegion source="simple-banner"） */
     private const val SIMPLE_BANNER_TAG = "simple-banner:"
 
@@ -434,6 +445,8 @@ object BlurDrawHook {
     private const val CLASS_QUICK_SETTINGS_CONTROLLER = "com.android.systemui.shade.QuickSettingsControllerImpl"
     private const val METHOD_SET_EXPANSION_HEIGHT = "setExpansionHeight"
     /** QS 面板展开分数持有者（1=全展开，0=已收起），收起动画每帧经 setRawFraction 写入 */
+    /** 分离模式双面板控制器（通知/QS 各自有展开分数与展开布尔）。 */
+    private const val CLASS_SEPARATE_PANEL_CONTROLLER = "com.oplus.systemui.separate.OplusPanelViewPagerController"
     private const val CLASS_QS_PANEL_EXPAND_FRACTION = "com.oplus.systemui.plugins.qs.animator.QSPanelExpandFraction"
     private const val METHOD_SET_RAW_FRACTION = "setRawFraction"
     // ---- 任务 spec/14：未映射模糊控件补映射 hook（2026-08-13）----
@@ -538,6 +551,7 @@ object BlurDrawHook {
     //   pivotScreen = 容器 getLocationOnScreen + pivotX/Y，hook 主线程捕获）再折算 srcRect。
     private const val CLASS_NOTIFICATION_PANEL_VIEW = "com.android.systemui.shade.NotificationPanelView"
     private const val CLASS_NOTIFICATION_PANEL_CONTROLLER = "com.android.systemui.shade.NotificationPanelViewController"
+    private const val CLASS_SHADE_WINDOW_CONTROLLER = "com.android.systemui.shade.NotificationShadeWindowControllerImpl"
     /** C15 快捷开关详情弹窗（WiFi/蓝牙等）：独立窗口 + SurfaceControlViewHost，背景非 posteffect 可接管。 */
     private const val CLASS_THEME_SYSTEM_UI_DIALOG = "com.oplus.systemui.common.dialog.OplusThemeSystemUiDialog"
     private const val CLASS_OPLUS_QS_ROOT_VIEW = "com.oplus.systemui.plugins.qs.OplusQSRootView"
@@ -601,8 +615,8 @@ object BlurDrawHook {
     // ---- [doc/spec/09] 音量条液态玻璃化（hook COUIVerticalSeekBar.draw 盖玻璃） ----
     /** 音量条父类（public final draw；OplusVolumeSeekBar / OplusQsVerticalSeekBar 都继承它）。 */
     private const val CLASS_VERTICAL_SEEKBAR = "com.coui.appcompat.seekbar.COUIVerticalSeekBar"
-    /** 音量条具体类**类名后缀**（仅它走画玻璃路径；QS 亮度条背景已是 AutoBlurDrawable，走既有漏斗）。 */
-    private const val SUFFIX_VOLUME_SEEKBAR = "OplusVolumeSeekBar"
+    /** 音量条具体类**类名后缀**（判定见 [SeekbarHostPolicy]：音量条恒自绘，QS 滑杆按工厂可用性分流）。 */
+    private const val SUFFIX_VOLUME_SEEKBAR = SeekbarHostPolicy.SUFFIX_VOLUME
     /** 音量条玻璃开关重读间隔（ms）：改动无需重启 SystemUI。 */
     private const val VOLUME_SEEKBAR_GLASS_TTL_MS = 500L
     /** 音量条背景圆角 dimen（11dp）；资源读不到时按 dp 兜底折算。 */
@@ -617,7 +631,6 @@ object BlurDrawHook {
     /** 音量弹窗窗口根作为抓屏排除对象的活跃窗口（ms）：只在刚绘制过的时间窗内生效。 */
     private const val VOLUME_HOST_ACTIVE_MS = 1_500L
     /** 小岛胶囊状态栏窗口排除的活跃窗（ms）：胶囊玻璃刚绘制过才排除，岛不在屏不排状态栏。 */
-    private const val CAPSULE_EXCLUDE_ACTIVE_MS = 1_500L
     /** 亮白填充开启时的进度填充色：白 80%（近不透明亮磨砂），盖住玻璃扭曲、边界清晰。 */
     private val VOLUME_FROSTED_PROGRESS_COLOR = 0xCCFFFFFF.toInt()
     /** 面板背景替换开关 TTL（ms）重读间隔。 */
@@ -729,7 +742,7 @@ object BlurDrawHook {
 
     // ---- [任务 文字反转取色 spec/21] 亮度阈值与状态 ----
     /** 背景亮度阈值：>196 → 黑字（false）；≤196 → 白字（true）。与系统 OplusQsColorManager.setQsColorState 同阈值 */
-    private const val TEXT_CONTRAST_BRIGHTNESS_THRESHOLD = 196
+    internal const val TEXT_CONTRAST_BRIGHTNESS_THRESHOLD = 196
     /** [spec/21 修复 2026-08-13] onDraw 重采样节流间隔：仅快照换帧 / 位置变化才重采样（非每帧），
      *  150ms 内同 TextView 最多重采样一次，避免 getLocationOnScreen 每帧开销 */
     private const val TEXT_CONTRAST_RESAMPLE_INTERVAL_MS = 150L
@@ -982,6 +995,12 @@ object BlurDrawHook {
     @Volatile
     private var lastRegionFullCaptureAtMs = 0L
 
+    /** 区域抓屏实际执行帧计数（尝试 / 内容有变），供 worker 自报真实帧率。 */
+    @Volatile
+    private var regionCaptureAttempts = 0
+    @Volatile
+    private var regionCaptureNewFrames = 0
+
     /** 整屏快照抓屏失败重试计数（3 次/320ms） */
     private val elementCaptureRetries = ConcurrentHashMap<Int, Int>()
 
@@ -1026,6 +1045,15 @@ object BlurDrawHook {
     @Volatile
     private var captureRetryPosted = false
 
+    /** 静态档首帧补抓的连续失败数：拿到可用快照即归零，达上限本窗口不再尝试。 */
+    @Volatile
+    private var staticBootstrapFailures = 0
+
+    /** QS 进度层工厂（QsSeekBarBlurManager#getSeekBarActiveDrawable）是否挂载成功。
+     *  false = 该宿主无此路径，QS 滑杆改走自绘腿；true = 走既有 AutoBlurDrawable 漏斗，避免双腿叠加。 */
+    @Volatile
+    private var qsSeekbarFactoryAvailable = false
+
     /** [2026-08-14 spec/56] 快照就绪后的文字亮度全图扫描（原 worker 内联，540×1200 IntArray 2.6MB getPixels）
      *  拆为后台单飞执行（主线程直接抓屏时同步扫会卡 ANR）——单飞防并发扫描。
      *  [doc/spec/108 M4] 改 AtomicBoolean CAS：调用方从单一 worker 扩到 **worker + motionReset 主线程补算**
@@ -1066,7 +1094,43 @@ object BlurDrawHook {
     @Volatile
     private var posteffectArchProbed = PosteffectArch.UNKNOWN
     /** C15：面板展开状态（setExpandedHeightInternal 事件驱动写入；比 isShadeRenderingNow 的 500ms 窗口可靠）。 */
+    @Volatile
     private var preAgsPanelOpen = false
+    /** C15：shade 展开高度 px（逐帧源写入，完全收起为 0，无 QS 最小高度基线）。 */
+    @Volatile
+    private var preAgsPanelHeightPx = 0f
+    /** C15 逐帧高度源上一次落日志的值，仅变化时打（收起期恒定 0 不刷屏）。 */
+    @Volatile
+    private var preAgsPanelHeightLogged = -1f
+    /** 系统 QS 展开布尔态（setExpanded 事件驱动写入，只在真变化时回调）。 */
+    @Volatile
+    private var qsExpandedAuthoritative = false
+    /** 是否已收到过权威布尔态回调；未收到时 isPanelExpanded 回退高度判据。 */
+    @Volatile
+    private var qsExpandedKnown = false
+    /** QS 控制器实例弱引用，供权威态惰性读取兜底（事件丢失时不至于永久 stale）。 */
+    private var qsControllerRef: WeakReference<Any>? = null
+    /** getExpanded() 方法句柄（接口方法，不随实现类混淆漂移）。 */
+    private var qsGetExpandedMethod: Method? = null
+    /** 面板控制器实例弱引用 + isPanelExpanded() 句柄：通知中心展开态的权威来源。 */
+    private var panelControllerRef: WeakReference<Any>? = null
+    private var panelIsExpandedMethod: Method? = null
+    /** 面板展开态（updatePanelExpanded 事件驱动写入，只在真变化时回调）。 */
+    @Volatile
+    private var panelExpandedAuthoritative = false
+    @Volatile
+    private var panelExpandedKnown = false
+    @Volatile
+    private var panelExpandedReadAtMs = 0L
+    /** shade 窗口可见态（setPanelVisible 事件驱动写入，自带判重）：分离模式下唯一跟手的判据。 */
+    @Volatile
+    private var shadeVisibleAuthoritative = false
+    @Volatile
+    private var shadeVisibleKnown = false
+    /** 权威态惰性校准的上次读取时刻与最小间隔。 */
+    @Volatile
+    private var qsExpandedReadAtMs = 0L
+    private const val QS_EXPANDED_READ_TTL_MS = 400L
     /** C15 详情弹窗承载 View（qs_detail_frame）：玻璃自绘宿主 + 抓屏排除锚点。 */
     private var preAgsDialogFrameRef: WeakReference<View>? = null
     private var preAgsDialogSfcCache: SurfaceControl? = null
@@ -1077,6 +1141,8 @@ object BlurDrawHook {
     private var mPreAgsGetCornerRadii: Method? = null
     /** 无 getBlurDrawable() 的版本（C15）：PlatformBlurDrawable.blurDrawable 私有字段即内部 posteffect 实例。 */
     private var mPlatformInnerBlurField: Field? = null
+    /** LEGACY：BaseDrawable.getRenderNode()，内容重录期取 RecordingCanvas 用。 */
+    private var mGetRenderNode: Method? = null
     private val preAgsGlassPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     /** C15：drawable id → 已构建的液态玻璃 RuntimeShader（后续帧只走增量 uniform，不重建几何/源绑定）。 */
     private val preAgsShaderCache = HashMap<Int, RuntimeShader>()
@@ -1420,7 +1486,7 @@ object BlurDrawHook {
      *  ① 宿主 View context（registerHostView 捕获，最可靠）；② ActivityThread.currentApplication（原实现）；
      *  ③ ActivityThread.getSystemContext()（Application 未就绪时 system context 已存在）；
      *  ④ AppGlobals.getInitialApplication()。全部包 try-catch，反射失败静默降级到下一源。 */
-    private fun resolveSystemUiContext(): android.content.Context? {
+    internal fun resolveSystemUiContext(): android.content.Context? {
         hostWindowContext?.let { c ->
             try {
                 c.applicationContext?.let { return it }
@@ -1921,7 +1987,7 @@ object BlurDrawHook {
     internal var textContrastEnabled = true
     /** QS 面板区域平均亮度（-1=无快照；快照更新时 worker 线程计算；方案 B hook 读，判定 O(1)） */
     @Volatile
-    private var qsPanelBrightness = -1
+    internal var qsPanelBrightness = -1
     /** 文字局部反转 per-TextView 缓存（WeakHashMap 防泄漏；setTextColor hook 主线程读写）。
      *  节流：快照换帧（snapshotId）/位置（x,y）/原色（originalColor）任一变化才重采样。 */
     private val textContrastCache = WeakHashMap<TextView, TextContrastCacheEntry>()
@@ -2193,6 +2259,45 @@ object BlurDrawHook {
     private fun markRenderLeg(id: Int, leg: String) {
         if (renderLegMap.size > 1024) renderLegMap.clear()
         if (renderLegMap[id] != leg) renderLegMap[id] = leg
+        publishHealth()
+    }
+
+    /** 体检回传上次写入时刻（elapsedRealtime；0=从未写）。 */
+    @Volatile
+    private var healthPublishedAtMs = 0L
+
+    /**
+     * 体检状态回传：把「玻璃到底有没有在画」写进框架 prefs 供设置页显示。
+     * 由渲染腿标记驱动（事件驱动，无定时器），5s 节流；只读键，UI 不写。
+     */
+    private fun publishHealth() {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - healthPublishedAtMs < Prefs.HEALTH_PUBLISH_INTERVAL_MS) return
+        val a = api ?: return
+        healthPublishedAtMs = now
+        try {
+            val nowUp = SystemClock.uptimeMillis()
+            var active = 0
+            for ((id, e) in screenRegionMap) {
+                if (nowUp - e.lastSeenMs <= DEBUG_ELEMENT_TTL_MS && renderLegMap.containsKey(id)) active++
+            }
+            val capAt = lastValidSfcCaptureElapsedMs
+            Prefs.read(a).edit()
+                .putLong(Prefs.KEY_HEALTH_HEARTBEAT_MS, now)
+                .putBoolean(
+                    Prefs.KEY_HEALTH_MAIN_LEG,
+                    mDrawBlurShader != null ||
+                        (posteffectArchProbed == PosteffectArch.PRE_AGSL && mPreAgsDrawablePathField != null),
+                )
+                .putInt(Prefs.KEY_HEALTH_ACTIVE_COUNT, active)
+                .putBoolean(Prefs.KEY_HEALTH_GLASS_FUSED, glassFuseTripped)
+                .putBoolean(Prefs.KEY_HEALTH_CAPTURE_FUSED, CaptureApi.isTripped())
+                .putLong(Prefs.KEY_HEALTH_LAST_CAPTURE_MS, capAt)
+                .putBoolean(Prefs.KEY_HEALTH_SF_READY, SfGlassChannel.channelReady())
+                .apply()
+        } catch (t: Throwable) {
+            logThrottled("lg-health-pub", Log.WARN) { "health publish failed: ${t.javaClass.simpleName}" }
+        }
     }
 
     /** 调试悬浮窗元素过期阈值（ms）：注册 hook 超过该时长未再到达 → 不进快照（防过期框残留）。 */
@@ -2407,12 +2512,6 @@ object BlurDrawHook {
      *   install 读取以 Prefs.DEFAULT 为准覆盖本初值）。 */
     @Volatile
     private var seedlingCapsuleGlassEnabled = false
-    /** [2026-09-16] 上次渲染的小岛尺寸（仅用于尺寸变化去重，避免重复 register） */
-    private var lastIslandW = -1
-    private var lastIslandH = -1
-
-    /** dispatchDraw hook 是否已挂（install 幂等） */
-    private var seedlingDispatchDrawMounted = false
     /** 液态玻璃 canvas 绘制单例 Paint（避免每帧 new Paint） */
     private val seedlingGlassPaint = Paint(Paint.ANTI_ALIAS_FLAG)
 
@@ -2466,6 +2565,100 @@ object BlurDrawHook {
     /** 面板展开高度（setExpansionHeight 事件驱动写入，收起动画期逐帧下降） */
     @Volatile
     private var panelExpansionPx = 0f
+
+    /**
+     * 面板是否展开中（供接管岛收起规矩读取；事件驱动写入）。
+     * 优先用系统权威布尔态：展开高度带「最小高度」基线，收起后仍为该基线而非 0，不能当展开判据。
+     * 权威态尚未收到回调时回退高度判据。
+     */
+    internal fun isPanelExpanded(): Boolean =
+        if (sepStateKnown) sepQsExpanded || sepNotifyExpanded else panelExpansionPx > 0f
+
+    /**
+     * 分离模式下跟手的面板可见态：四条 AOSP 链实测零回调，只有 shade 窗口可见性如实翻转。
+     * 供接管岛收起规矩按需取用；取值口径与失效场景见
+     * doc/investigations/2026-11-19-面板态三链零回调-分离模式旁路.md
+     */
+    internal fun shadeWindowVisible(): Boolean {
+        if (shadeVisibleKnown) return shadeVisibleAuthoritative
+        readPanelExpandedLazy()
+        if (panelExpandedKnown) return panelExpandedAuthoritative
+        readQsExpandedLazy()
+        return qsExpandedKnown && qsExpandedAuthoritative
+    }
+
+    /**
+     * 通知中心展开态惰性校准：系统权威判据是 isPanelExpanded()（走 ShadeRepository）。
+     * 按 TTL 在调用方真来读时问一次，无定时器无轮询；取不到保留上次事件值。
+     */
+    private fun readPanelExpandedLazy() {
+        val now = SystemClock.uptimeMillis()
+        if (now - panelExpandedReadAtMs < QS_EXPANDED_READ_TTL_MS) return
+        panelExpandedReadAtMs = now
+        val obj = panelControllerRef?.get()
+        val m = panelIsExpandedMethod
+        if (obj == null || m == null) {
+            logThrottled("panel-expanded-nowire", Log.INFO) {
+                "panel-expanded: 权威态未接线 obj=${obj != null} method=${m != null}，回退高度判据"
+            }
+            return
+        }
+        try {
+            val v = m.invoke(obj) as? Boolean
+            if (v == null) {
+                logThrottled("panel-expanded-null", Log.INFO) {
+                    "panel-expanded: isPanelExpanded 返回非 Boolean，保留上次值"
+                }
+                return
+            }
+            if (!panelExpandedKnown || v != panelExpandedAuthoritative) {
+                Lg.i(TAG, "panel-expanded: lazy=$v (event=${if (panelExpandedKnown) panelExpandedAuthoritative.toString() else "none"})")
+            }
+            panelExpandedAuthoritative = v
+            panelExpandedKnown = true
+        } catch (t: Throwable) {
+            panelControllerRef = null
+            Lg.e(TAG, "panel-expanded: lazy read failed, fall back to event value", t)
+        }
+    }
+
+    /**
+     * 权威态惰性校准：事件回调可能漏（热重载换代 / 挂载晚于首次展开），故读取时按 TTL 直接问系统一次。
+     * 只在调用方真来读时才反射，无定时器无轮询；取不到就保留上次事件值。
+     */
+    private fun readQsExpandedLazy() {
+        val now = SystemClock.uptimeMillis()
+        if (now - qsExpandedReadAtMs < QS_EXPANDED_READ_TTL_MS) return
+        qsExpandedReadAtMs = now
+        val obj = qsControllerRef?.get()
+        val m = qsGetExpandedMethod
+        if (obj == null || m == null) {
+            logThrottled("qs-expanded-nowire", Log.INFO) {
+                "qs-expanded: 未接线 obj=${obj != null} method=${m != null}"
+            }
+            return
+        }
+        try {
+            val v = m.invoke(obj) as? Boolean
+            if (v == null) {
+                logThrottled("qs-expanded-null", Log.INFO) {
+                    "qs-expanded: getExpanded 返回非 Boolean，保留上次值"
+                }
+                return
+            }
+            if (!qsExpandedKnown || v != qsExpandedAuthoritative) {
+                Lg.i(TAG, "qs-expanded: lazy=$v (event=${if (qsExpandedKnown) qsExpandedAuthoritative.toString() else "none"})")
+            }
+            qsExpandedAuthoritative = v
+            qsExpandedKnown = true
+        } catch (t: Throwable) {
+            qsControllerRef = null
+            Lg.e(TAG, "qs-expanded: lazy read failed, fall back to event value", t)
+        }
+    }
+
+    /** 锁屏状态（供接管岛显示规则读取；500ms 缓存 + 广播失效，失败保守 true）。 */
+    internal fun isKeyguardLockedForIsland(): Boolean = isKeyguardLockedNow()
     /** 本次展开会话内见过的最大展开高度（淡出比例归一化基准；收起时复位） */
     @Volatile
     private var panelExpansionMaxPx = 0f
@@ -2555,6 +2748,13 @@ object BlurDrawHook {
     private var volumeBackgroundColorField: Field? = null
     @Volatile
     private var volumeTrackFieldsResolved = false
+    /** 轨道矩形/圆角字段缓存（玻璃几何跟随系统内部尺寸动画用；null=该宿主无此字段，走 View 全幅） */
+    @Volatile
+    private var volumeTrackRectField: Field? = null
+    @Volatile
+    private var volumeTrackRadiusField: Field? = null
+    @Volatile
+    private var volumeTrackGeomFieldsResolved = false
     /** OplusVolumeDialogView.mDialogView 字段缓存（expandPanel 后取面板容器） */
     @Volatile
     private var volumeDialogViewField: Field? = null
@@ -2636,19 +2836,15 @@ object BlurDrawHook {
     private var cardBackgroundActiveHost: WeakReference<View>? = null
     /** CardBackgroundView 持续抓屏 worker 运行标志（幂等） */
     private var cardBackgroundContinuousRunning = false
-    /** 小岛胶囊玻璃最近一次实际绘制时刻（renderSeedlingCardGlass 画玻璃时刷新）。
-     *  排除链 statusbar 项的活跃门控：TTL 窗内才排除状态栏窗口，防岛不在屏时误排时钟/图标。 */
-    @Volatile
-    private var lastCapsuleGlassDrawMs = 0L
     /** 小岛胶囊宿主弱引用（画玻璃时登记），白名单引用判据用（零反射）。 */
     private var capsuleGlassHost: WeakReference<View>? = null
-    /** 小岛玻璃撕除链：最近画过玻璃的容器弱引用 + 上帧是否有可见胶囊（gone 边沿 invalidate 用）。 */
+    /** 小岛玻璃撕除链：最近画过玻璃的胶囊容器弱引用（detach 边沿 invalidate 用）。 */
     private var capsuleContainerRef: WeakReference<View>? = null
-    private var lastCapsulePresent = false
     private var capsuleDetachHookMounted = false
-    /** 胶囊逐帧宽度场缓存（混淆名启发式解析一次）+ 上帧动画宽（变化者优先判据）。 */
-    private var capsuleWidthField: Field? = null
-    private var capsuleLastAnimW = 0
+    /** 小岛胶囊 onDraw 玻璃 hook 是否已挂（install 幂等）。 */
+    private var capsuleGlassMounted = false
+    /** 胶囊逐帧动画 bounds 暂存（避免每帧 new Rect）：玻璃 drawable 自身 bounds 即插件弹性动画真值。 */
+    private val capsuleAnimBounds = Rect()
     // ---- [spec/61 2026-08-23] 流体云展开大卡 attach 强制启动持续抓屏 + 系统控制中心模糊力度 ----
     /** CardBackgroundView attach hook 是否已挂（install 幂等） */
     private var cardBgAttachMounted = false
@@ -2908,6 +3104,7 @@ object BlurDrawHook {
 
     fun install(api: XposedInterface, classLoader: ClassLoader) {
         ParticleDissolveHook.install(api, classLoader)
+        SeedlingTakeoverHook.install(api, classLoader)
         this.api = api
         hostClassLoader = classLoader
         // 引擎全量日志门控读取器（500ms TTL 热切换）
@@ -3020,6 +3217,8 @@ object BlurDrawHook {
         mountAddBlurDrawable(api, classLoader)
         // [spec/114] 16.00.14 旧架构：无 onDrawContent → 挂 drawBlur 作等价兜底（现役直接返回）
         mountLegacyDrawBlur(api, classLoader)
+        // LEGACY：内容重录入口本身（三道门之前），系统停模糊时仍能出玻璃
+        mountLegacyBlurContent(api, classLoader)
         // C15（PRE_AGSL）：无 BaseDrawable/agsl → 挂根 drawable draw(Canvas) 作玻璃接管面（现役直接返回）
         mountPreAgsDraw(api, classLoader)
         // C15：快捷开关详情弹窗（独立窗口，背景走静态模糊/白混色）→ 自己上玻璃（现役直接返回）
@@ -3368,13 +3567,12 @@ object BlurDrawHook {
 
     private object EffectQsNeedLight : HookEngine.HookEffect {
         override fun intercept(chain: XposedInterface.Chain): Any? {
-            if (textForceWhiteEnabled) return true
             val brightness = qsPanelBrightness
-            return if (brightness < 0) {
-                chain.proceed()
-            } else {
-                brightness <= TEXT_CONTRAST_BRIGHTNESS_THRESHOLD
+            if (textContrastEnabled && brightness >= 0) {
+                return brightness <= TEXT_CONTRAST_BRIGHTNESS_THRESHOLD
             }
+            if (textForceWhiteEnabled) return true
+            return if (brightness < 0) chain.proceed() else brightness <= TEXT_CONTRAST_BRIGHTNESS_THRESHOLD
         }
     }
 
@@ -3716,6 +3914,8 @@ object BlurDrawHook {
                 null
             }
             mGetShaderOrNull = shaderCls?.let { c -> resolveMethodChain(c, METHOD_GET_SHADER_OR_NULL) }
+            mGetRenderNode = resolveMethodChain(base, METHOD_GET_RENDER_NODE)
+            if (mGetRenderNode == null) logLegacyDegrade("BaseDrawable.getRenderNode")
             if (mGetDrawableShaderPaint == null) logLegacyDegrade("BaseDrawable.getDrawableShaderPaint")
             if (mGetDrawableShader == null) logLegacyDegrade("BaseDrawable.getDrawableShader")
             if (mGetEnableShader == null) logLegacyDegrade("BaseDrawable.getEnableShader")
@@ -7157,8 +7357,113 @@ object BlurDrawHook {
         mountQsPageScroll(api, classLoader)
         mountPanelExpansion(api, classLoader)
         mountQSPanelFraction(api, classLoader)
+        mountSeparatePanelFraction(api, classLoader)
         mountCustomRowTranslation(api, classLoader)
     }
+
+    /**
+     * 分离模式（通知与 QS 双面板）展开态真值源：`OplusPanelViewPagerController` 的两个 public 写入点。
+     * 该模式下 AOSP shade 开合链（setPanelVisible / updatePanelExpanded / setExpanded）整条被旁路，
+     * 只有这两个方法逐帧收到真实分数与展开布尔。
+     */
+    private fun mountSeparatePanelFraction(api: XposedInterface, classLoader: ClassLoader) {
+        try {
+            val clazz = Class.forName(CLASS_SEPARATE_PANEL_CONTROLLER, false, classLoader)
+            try {
+                val notify = clazz.getDeclaredMethod(
+                    "updateNotifyExpandFraction",
+                    Float::class.javaPrimitiveType, Boolean::class.javaPrimitiveType,
+                )
+                api.hook(notify)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .intercept { chain ->
+                        try {
+                            val f = chain.getArg(0) as? Float ?: 0f
+                            onSeparatePanelFraction(f, fromQs = false)
+                        } catch (t: Throwable) {
+                            Lg.e(TAG, "sep-panel-fraction: notify intercept error", t)
+                        }
+                        chain.proceed()
+                    }
+                Lg.i(TAG, "Hook G mounted: $CLASS_SEPARATE_PANEL_CONTROLLER#updateNotifyExpandFraction")
+            } catch (t: Throwable) {
+                Lg.e(TAG, "Hook G mount FAILED: $CLASS_SEPARATE_PANEL_CONTROLLER#updateNotifyExpandFraction", t)
+            }
+            try {
+                val qs = clazz.getDeclaredMethod(
+                    "updateQSExpandFraction",
+                    Float::class.javaPrimitiveType, Boolean::class.javaPrimitiveType,
+                    Boolean::class.javaPrimitiveType, Float::class.javaPrimitiveType,
+                )
+                api.hook(qs)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .intercept { chain ->
+                        try {
+                            val f = chain.getArg(0) as? Float ?: 0f
+                            onSeparatePanelFraction(f, fromQs = true)
+                        } catch (t: Throwable) {
+                            Lg.e(TAG, "sep-panel-fraction: qs intercept error", t)
+                        }
+                        chain.proceed()
+                    }
+                Lg.i(TAG, "Hook G mounted: $CLASS_SEPARATE_PANEL_CONTROLLER#updateQSExpandFraction")
+            } catch (t: Throwable) {
+                Lg.e(TAG, "Hook G mount FAILED: $CLASS_SEPARATE_PANEL_CONTROLLER#updateQSExpandFraction", t)
+            }
+        } catch (t: Throwable) {
+            Lg.e(TAG, "Hook G mount FAILED: $CLASS_SEPARATE_PANEL_CONTROLLER", t)
+        }
+    }
+
+    /** 分离模式分数落地：两面板取大者为面板整体展开量，任一展开即视为面板已展开。 */
+    private fun onSeparatePanelFraction(fraction: Float, fromQs: Boolean) {
+        val f = if (fraction.isFinite()) fraction.coerceIn(0f, 1f) else 0f
+        // 分数是唯一可靠量：通知侧实现恒传 expanded=false，QS 侧收起末帧仍可能带 true
+        val open = f > SEP_PANEL_OPEN_EPS
+        if (fromQs) {
+            sepQsFraction = f
+            sepQsExpanded = open
+        } else {
+            sepNotifyFraction = f
+            sepNotifyExpanded = open
+        }
+        sepStateKnown = true
+        sepPanelFraction = maxOf(sepQsFraction, sepNotifyFraction)
+        val anyOpen = sepQsExpanded || sepNotifyExpanded
+        val flipped = anyOpen != preAgsPanelOpen
+        preAgsPanelOpen = anyOpen
+        panelExpansionActive = anyOpen
+        markMotion()
+        invalidateRegisteredHostViews()
+        val now = SystemClock.uptimeMillis()
+        // 开合翻转必须无节流落日志（判据靠它），连续分数只在节流窗内取样
+        if (flipped || now - sepFractionLogAtMs >= 120L) {
+            sepFractionLogAtMs = now
+            Lg.i(
+                TAG,
+                "sep-panel: qs=$sepQsFraction notify=$sepNotifyFraction open=$anyOpen " +
+                    "qsExp=${sepQsExpanded} notifyExp=${sepNotifyExpanded} flipped=$flipped " +
+                    "from=${if (fromQs) "qs" else "notify"}",
+            )
+        }
+    }
+
+    /** 分离模式判「已展开」的分数下限（最后一次回弹尾帧仍可能非零）。 */
+    private const val SEP_PANEL_OPEN_EPS = 0.01f
+
+    @Volatile
+    private var sepQsFraction = 0f
+    @Volatile
+    private var sepNotifyFraction = 0f
+    @Volatile
+    private var sepPanelFraction = 0f
+    @Volatile
+    private var sepQsExpanded = false
+    @Volatile
+    private var sepNotifyExpanded = false
+    @Volatile
+    private var sepStateKnown = false
+    private var sepFractionLogAtMs = 0L
 
     /**
      * [2026-08-15 偶发不抓屏根治（resolveShadeSfc 三来源全空）] hook `NotificationShadeWindowView`
@@ -7306,6 +7611,7 @@ object BlurDrawHook {
                         // [spec/55 诊断日志] hook 触发时间戳（每次回调都打，Log.d 可关）——判断「hook 触发时机/频率」
                         // [spec/59 追加 2026-08-14] state 附带 panelWasCollapsed（本次分支判定前值，确认首帧状态机）
                         diagHookLog("setExpansionHeight", expansion, "panelWasCollapsed=$panelWasCollapsed")
+                        if (qsControllerRef?.get() == null) qsControllerRef = WeakReference(chain.thisObject)
                         // [2026-08-13 回退 spec/49 场景门控] 不再维护 isShadeExpanded 标志（误拦锁屏：锁屏时
                         // setExpansionHeight 不回调/回调 0 且无 heads-up → 门控把锁屏玻璃抓屏也停掉）。
                         // 「收起零抓屏」由周期抓屏的 idle-skip 空闲判定保证（收起且无内容变化信号 → 保持旧帧）。
@@ -7375,6 +7681,30 @@ object BlurDrawHook {
                 }
             Lg.i(TAG, "Hook G mounted: $CLASS_QUICK_SETTINGS_CONTROLLER#$METHOD_SET_EXPANSION_HEIGHT(float) (panel expand -> invalidate hosts)")
 
+            // 展开布尔态权威源：高度值带最小高度基线（收起≠0），只有布尔态能判「是否展开」。
+            // setExpanded 只在真变化时被调用，天然边沿触发；getExpanded 是接口方法，不随实现类混淆漂移。
+            try {
+                qsGetExpandedMethod = clazz.getMethod("getExpanded")
+                val setExpandedMethod = clazz.getMethod("setExpanded", Boolean::class.javaPrimitiveType)
+                api.hook(setExpandedMethod)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .intercept { chain ->
+                        try {
+                            val expanded = (chain.getArg(0) as? Boolean) ?: false
+                            qsControllerRef = WeakReference(chain.thisObject)
+                            qsExpandedAuthoritative = expanded
+                            qsExpandedKnown = true
+                            Lg.i(TAG, "qs-expanded: expanded=$expanded")
+                        } catch (t: Throwable) {
+                            Lg.e(TAG, "qs-expanded: intercept error", t)
+                        }
+                        chain.proceed()
+                    }
+                Lg.i(TAG, "Hook G mounted: $CLASS_QUICK_SETTINGS_CONTROLLER#setExpanded(boolean) (authoritative panel expanded state)")
+            } catch (t: Throwable) {
+                Lg.e(TAG, "Hook G mount FAILED: $CLASS_QUICK_SETTINGS_CONTROLLER#setExpanded(boolean)", t)
+            }
+
             // [2026-08-13 延迟调查·触发时机提前] 系统 QS 触摸追踪三重门控（isTracking/touchSlop/
             // shouldQuickSettingsIntercept，QuickSettingsControllerImpl.java:1024-1032）→ 触摸确认下拉后
             // 30-150ms 才首帧 setExpansionHeight(>0)。onExpansionStarted 在触摸确认下拉瞬间（setTracking(true)
@@ -7412,7 +7742,71 @@ object BlurDrawHook {
             Lg.e(TAG, "Hook G mount FAILED: $CLASS_QUICK_SETTINGS_CONTROLLER#$METHOD_SET_EXPANSION_HEIGHT", t)
         }
         // C15：面板高度逐帧回调（拖动与回弹动画都经它），setExpansionHeight 在这一代只回调少数几次
+        // 权威展开态全代次都挂（判据与架构无关），逐帧高度源才按代次门控
+        mountPanelExpandedState(api, classLoader)
         mountPreAgsPanelHeight(api, classLoader)
+    }
+
+    /**
+     * 面板可见态权威源：NotificationShadeWindowControllerImpl#setPanelVisible(boolean)。
+     * 它直接决定 shade 窗口可见性，且自带判重（同值早退）= 天然边沿触发；
+     * 分离模式下 NPVC 的展开链整条不走，只有这一层跟手。
+     */
+    private fun mountShadePanelVisible(api: XposedInterface, classLoader: ClassLoader) {
+        try {
+            val clazz = Class.forName(CLASS_SHADE_WINDOW_CONTROLLER, false, classLoader)
+            val m = clazz.getMethod("setPanelVisible", Boolean::class.javaPrimitiveType)
+            api.hook(m)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .intercept { chain ->
+                    try {
+                        val visible = (chain.getArg(0) as? Boolean) ?: false
+                        if (!shadeVisibleKnown || visible != shadeVisibleAuthoritative) {
+                            Lg.i(TAG, "shade-visible: event=$visible")
+                        }
+                        shadeVisibleAuthoritative = visible
+                        shadeVisibleKnown = true
+                    } catch (t: Throwable) {
+                        Lg.e(TAG, "shade-visible: intercept error", t)
+                    }
+                    chain.proceed()
+                }
+            Lg.i(TAG, "Hook G mounted: $CLASS_SHADE_WINDOW_CONTROLLER#setPanelVisible(boolean) (authoritative shade window visibility)")
+        } catch (t: Throwable) {
+            Lg.e(TAG, "Hook G mount FAILED: $CLASS_SHADE_WINDOW_CONTROLLER#setPanelVisible", t)
+        }
+    }
+
+    /** 通知中心展开态权威源：NotificationPanelViewController#updatePanelExpanded() / isPanelExpanded()。 */
+    private fun mountPanelExpandedState(api: XposedInterface, classLoader: ClassLoader) {
+        mountShadePanelVisible(api, classLoader)
+        try {
+            val clazz = Class.forName(CLASS_NOTIFICATION_PANEL_CONTROLLER, false, classLoader)
+            panelIsExpandedMethod = clazz.getMethod("isPanelExpanded")
+            val update = clazz.getDeclaredMethod("updatePanelExpanded").apply { isAccessible = true }
+            api.hook(update)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .intercept { chain ->
+                    val r = chain.proceed()
+                    try {
+                        panelControllerRef = WeakReference(chain.thisObject)
+                        val v = (panelIsExpandedMethod?.invoke(chain.thisObject) as? Boolean)
+                        if (v != null) {
+                            if (!panelExpandedKnown || v != panelExpandedAuthoritative) {
+                                Lg.i(TAG, "panel-expanded: event=$v")
+                            }
+                            panelExpandedAuthoritative = v
+                            panelExpandedKnown = true
+                        }
+                    } catch (t: Throwable) {
+                        Lg.e(TAG, "panel-expanded: intercept error", t)
+                    }
+                    r
+                }
+            Lg.i(TAG, "Hook G mounted: $CLASS_NOTIFICATION_PANEL_CONTROLLER#updatePanelExpanded() (authoritative shade expanded state)")
+        } catch (t: Throwable) {
+            Lg.e(TAG, "Hook G mount FAILED: $CLASS_NOTIFICATION_PANEL_CONTROLLER#updatePanelExpanded", t)
+        }
     }
 
     /** C15（PRE_AGSL）逐帧运动源：NotificationPanelViewController#setExpandedHeightInternal(float)。 */
@@ -7433,7 +7827,13 @@ object BlurDrawHook {
                         } catch (t: Throwable) {
                             0f
                         }
+                        if (panelControllerRef?.get() == null) panelControllerRef = WeakReference(chain.thisObject)
+                        preAgsPanelHeightPx = h
                         preAgsPanelOpen = h > 0.5f
+                        if (h != preAgsPanelHeightLogged) {
+                            preAgsPanelHeightLogged = h
+                            Lg.i(TAG, "c15-panel-height: h=$h open=$preAgsPanelOpen")
+                        }
                         // 拖动/回弹期 = 运动态：抓屏走满速，玻璃才跟得上背景刷新
                         markMotion()
                         invalidateRegisteredHostViews()
@@ -8540,20 +8940,31 @@ object BlurDrawHook {
             Lg.i(TAG, "Seedling card glass disabled by prefs, skip mount")
             return
         }
-        if (seedlingDispatchDrawMounted) return
+        mountCapsuleGlass(api, classLoader)
+        mountCapsuleDetachTeardown(api, classLoader)
+    }
+
+    /**
+     * 小岛（胶囊）玻璃：hook 基类 `View.onDraw(Canvas)`，拦截体字符串类名快路径判定
+     * `this == CapsuleView`（跨 classloader 安全）。命中后**把黑底 background 直接换成玻璃 drawable**
+     * （[CapsuleGlassDrawable]，同菜单卡 NotificationPopupGlassDrawable 已验证路径）——不再叠一层玻璃盖黑底。
+     *
+     * 弹性动画真值在 **drawable bounds 通道**：插件 `CapsuleView.onDraw` 每帧
+     * `setCapsuleDrawableWidth` 调 `getBackground().setBounds(动画宽居中)`（View 几何全静态）。
+     * 换成玻璃 drawable 后，插件逐帧 setBounds 落在玻璃 drawable 上 → 其 draw 按当前 bounds 画玻璃，
+     * 黑底本身即玻璃、随岛逐帧弹动；开关关 → drawable 内画原黑底；detach → 还原原 background。
+     * 安装放在 proceed 之后（此时插件已调过 getBackground().setBounds，不 NPE）；幂等（已是玻璃则跳过）。
+     */
+    private fun mountCapsuleGlass(api: XposedInterface, classLoader: ClassLoader) {
+        if (capsuleGlassMounted) return
+        var capsuleCls: Class<*>? = try {
+            Class.forName(CLASS_CAPSULE_VIEW, false, classLoader)
+        } catch (t: Throwable) {
+            Lg.d(TAG, "CapsuleView glass: class not loaded yet (deferred), fallback to runtime name check: $CLASS_CAPSULE_VIEW")
+            null
+        }
         try {
-            // 容器类可能尚未加载（状态栏布局惰性 inflate）：成功则 isInstance 判定，失败则运行时类名兜底，
-            // 不阻塞 hook 挂载（ViewGroup.dispatchDraw 基类始终 hook，拦截体快速判定 this 是否是容器）。
-            val containerCls = try {
-                Class.forName(CLASS_CAPSULE_PLUGIN_CONTAINER, false, classLoader)
-            } catch (t: Throwable) {
-                Lg.d(TAG, "Seedling container class not loaded yet (deferred), fallback to runtime name check: $CLASS_CAPSULE_PLUGIN_CONTAINER")
-                null
-            }
-            // CapsulePluginContainer 未 override dispatchDraw → hook 基类 ViewGroup.dispatchDraw(Canvas)，
-            // 拦截体里判定 this 是容器实例（避免 hook 全 ViewGroup 的性能/安全影响）。
-            val vgCls = Class.forName(CLASS_VIEW_GROUP, false, classLoader)
-            val method = vgCls.getDeclaredMethod(METHOD_DISPATCH_DRAW, Canvas::class.java)
+            val method = View::class.java.getDeclaredMethod(METHOD_ON_DRAW, Canvas::class.java).apply { isAccessible = true }
             api.hook(method)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
                 .intercept { chain ->
@@ -8563,45 +8974,79 @@ object BlurDrawHook {
                         } catch (t: Throwable) {
                             null
                         }
-                        if (thisView != null) {
-                            val isContainer = containerCls?.isInstance(thisView)
-                                ?: (thisView.javaClass.name == CLASS_CAPSULE_PLUGIN_CONTAINER)
-                            if (isContainer) {
-                                // [2026-09-16] 原每帧 dumpParents(thisView) 诊断已移除（逐帧刷屏）；
-                                // 需要时用 dumpParents 单独排查
-                                val canvas = try {
-                                    chain.getArg(0) as? Canvas
-                                } catch (t: Throwable) {
-                                    null
-                                }
-                                // [2026-09-16 用户需求变更] 绘制顺序改回「**玻璃在子 View 之下**」：
-                                // 先画玻璃，再 proceed 画子 View（岛）。岛是半透明深色底 → 玻璃透过它可见，
-                                // 形成「岛原版颜色叠在玻璃之上」的层次（用户明确要求，且岛原版背景不再置空）。
-                                // [对比 2026-08-15] 那次改成画在子 View 之上，是因为置空了岛背景后
-                                // 插件不透明绘制把玻璃挡没了；现在**保留岛原版背景**并接受玻璃在下。
-                                if (canvas != null) {
-                                    try {
-                                        renderSeedlingCardGlass(canvas, thisView)
-                                    } catch (t: Throwable) {
-                                        Lg.e(TAG, "seedling-card: dispatchDraw glass failed", t)
-                                    }
-                                }
+                        // 最高频方法：先字符串类名快路径，未命中立即跳过
+                        if (thisView != null && thisView.javaClass.name == CLASS_CAPSULE_VIEW) {
+                            var cached = capsuleCls
+                            if (cached == null) {
+                                cached = thisView.javaClass
+                                capsuleCls = cached
+                            }
+                            if (cached.isInstance(thisView)) {
+                                // 先 proceed（插件 super.onDraw + setCapsuleDrawableWidth 调 getBackground().setBounds）
                                 val result = chain.proceed()
-                                // 拦截体内已 proceed，return 防 fall-through 到外层 chain.proceed() 重复画子 View
+                                try {
+                                    ensureCapsuleGlassBackground(thisView)
+                                } catch (t: Throwable) {
+                                    Lg.e(TAG, "seedling-capsule: install glass bg failed", t)
+                                }
                                 return@intercept result
                             }
                         }
                     } catch (t: Throwable) {
-                        Lg.e(TAG, "seedling-card: dispatchDraw intercept error", t)
+                        Lg.e(TAG, "seedling-capsule: onDraw intercept error", t)
                     }
                     chain.proceed()
                 }
-            seedlingDispatchDrawMounted = true
-            Lg.i(TAG, "Seedling card glass mounted: $CLASS_CAPSULE_PLUGIN_CONTAINER#$METHOD_DISPATCH_DRAW(Canvas)")
+            capsuleGlassMounted = true
+            Lg.i(TAG, "Seedling capsule glass mounted: $CLASS_CAPSULE_VIEW#$METHOD_ON_DRAW(Canvas) (bg replace)")
         } catch (t: Throwable) {
-            Lg.e(TAG, "Seedling card glass mount FAILED: $CLASS_CAPSULE_PLUGIN_CONTAINER#$METHOD_DISPATCH_DRAW", t)
+            Lg.e(TAG, "Seedling capsule glass mount FAILED: $CLASS_CAPSULE_VIEW#$METHOD_ON_DRAW", t)
         }
-        mountCapsuleDetachTeardown(api, classLoader)
+    }
+
+    /** 幂等安装玻璃背景：CapsuleView.background 非玻璃 drawable 时包装替换（保留原黑底作开关关回退）。 */
+    private fun ensureCapsuleGlassBackground(capsule: View) {
+        val bg = try {
+            capsule.background
+        } catch (t: Throwable) {
+            null
+        }
+        if (bg is CapsuleGlassDrawable) return
+        capsule.background = CapsuleGlassDrawable(capsule, bg)
+        // 首绘前登记宿主：排除链按在屏判定，静止岛首帧快照也要排掉状态栏窗口
+        capsuleGlassHost = WeakReference(capsule)
+        logThrottled("seedling-capsule-bg-install", Log.INFO) {
+            "seedling-capsule: glass bg installed from=${bg?.javaClass?.simpleName ?: "null"}"
+        }
+    }
+
+    /**
+     * 胶囊黑底替换 drawable：开关开 → 按当前 bounds（插件逐帧动画真值）画液态玻璃；
+     * 关 → 画原黑底（转发 bounds）。同 [NotificationPopupGlassDrawable] 结构。
+     */
+    private class CapsuleGlassDrawable(
+        private val host: View,
+        val orig: Drawable?,
+    ) : Drawable() {
+        override fun draw(canvas: Canvas) {
+            if (BlurDrawHook.seedlingCapsuleGlassEnabled && !BlurDrawHook.isPowerSaveGlassOff()) {
+                try {
+                    BlurDrawHook.renderCapsuleGlass(canvas, host, bounds)
+                    return
+                } catch (t: Throwable) {
+                    Lg.e(BlurDrawHook.TAG, "seedling-capsule: glass bg draw failed", t)
+                }
+            }
+            orig?.let {
+                it.setBounds(bounds)
+                it.draw(canvas)
+            }
+        }
+
+        override fun setAlpha(alpha: Int) {}
+        override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) {}
+        @Deprecated("Deprecated in java")
+        override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
     }
 
     /** 小岛玻璃撕除链：CapsuleView detach 窗口（岛移走/收起的必然事件）→ 清活跃标记 +
@@ -8621,8 +9066,17 @@ object BlurDrawHook {
                             null
                         }
                         if (thisView != null && thisView.javaClass.name == CLASS_CAPSULE_VIEW) {
-                            lastCapsulePresent = false
                             logThrottled("seedling-detach", Log.INFO) { "seedling-card: capsule detached, teardown stale glass" }
+                            // 还原原黑底（防复用 CapsuleView 带着玻璃 drawable 引用死宿主）
+                            val bg = try {
+                                thisView.background
+                            } catch (t: Throwable) {
+                                null
+                            }
+                            if (bg is CapsuleGlassDrawable) {
+                                thisView.background = bg.orig
+                            }
+                            if (capsuleGlassHost?.get() === thisView) capsuleGlassHost = null
                             capsuleContainerRef?.get()?.let { it.invalidate() }
                             invalidateRegisteredHostViews()
                         }
@@ -8639,203 +9093,90 @@ object BlurDrawHook {
     }
 
     /**
-     * [2026-09-16 小岛玻璃化] 容器 dispatchDraw 拦截体：找容器内的**小胶囊（小岛）**并画液态玻璃。
+     * 小岛（胶囊）玻璃渲染：[CapsuleGlassDrawable.draw] 调用（黑底已被替换为玻璃 drawable）。
      *
-     * **本 hook 只负责小岛**；展开大卡片走 [mountCardBackgroundGlass]（`CardBackgroundView.onDraw`），
-     * 两条路径互不干扰（真机实证：展开大卡在 NotificationShade，不在本容器）。
+     * 弹性动画真值在 drawable bounds 通道：插件每帧 setCapsuleDrawableWidth 调
+     * getBackground().setBounds(动画宽居中于 measured 槽)（View 几何全静态）。bg 换成玻璃 drawable 后，
+     * 逐帧 setBounds 落在它身上 → [animBounds] 即动画宽 + 居中偏移，玻璃随岛弹动；
+     * bounds 无效（静止未设/1x1/3x3 假值）回落 measured 全幅。
      *
-     * 目标是 **`CapsuleView`**（胶囊本体，[collectCapsuleViews] 递归按类名找），不取外层的
-     * `CapsuleContainer`——那只是"外框"，会把玻璃画大（用户反馈「玻璃比岛大、超出边缘」）。
-     * 尺寸用 `CapsuleView` 的 `measuredWidth/Height`（真机 402x120；其 `getWidth()` 恒 0，
-     * 插件未调 `setLeftTopRightBottom`），位置按**容器几何居中**算（CapsuleView 自身的
-     * `getLocationOnScreen()` 是陈旧值，实测返回屏幕中心）。
-     *
-     * 由 `seedlingCapsuleGlassEnabled`（Prefs.KEY_SEEDLING_CAPSULE_GLASS，默认 **false**＝默认关，
-     * 2026-10-10 用户拍板）控制；圆角用全圆 `min(w,h)/2`（真机 160 高 → 80，与系统路径实测 corner=80 一致）。
-     * 绘制层次见 [mountSeedlingCardContainer]（玻璃在子 View 之下）。
+     * drawable.draw canvas 原点 = CapsuleView 左上角，玻璃偏移取 bounds.left/top；
+     * 屏幕区域 = 全宽 CapsulePluginContainer 屏幕位置 + 胶囊居中 + bounds 偏移。
+     * 圆角全圆 min(w,h)/2。动画期插件逐帧 invalidate → draw 逐帧触发，无需帧泵。
      */
-    private fun renderSeedlingCardGlass(canvas: Canvas, container: View) {
-        // [spec/85 省电模式] 省电开启 → 不注入胶囊玻璃（直接让系统原样绘制）
+    private fun renderCapsuleGlass(canvas: Canvas, capsule: View, animBounds: Rect) {
         if (isPowerSaveGlassOff()) return
-        val containerView = container as? android.view.ViewGroup ?: return
-        val containerHeight = containerView.height
-        if (containerHeight <= 0) {
-            if (moduleLogEnabled) Lg.i(TAG, "seedling-card: skip container height=$containerHeight ${container.javaClass.name}")
-            return
-        }
-        if (moduleLogEnabled) {
-            Lg.i(TAG, "seedling-card: dispatch container=${container.javaClass.name} " +
-                "w=${containerView.width} h=$containerHeight childCount=${containerView.childCount}")
-        }
-        if (!seedlingCapsuleGlassEnabled) {
-            if (moduleLogEnabled) Lg.i(TAG, "seedling-card: island glass off, skip")
-            return
-        }
-        // [2026-09-16] 目标 = **CapsuleView（胶囊本体）**，不是 CapsuleContainer（外框）：
-        // `CapsuleContainer.onMeasure`(:445-449) 宽度 = 子宽 + padding，`CapsuleContainer.q()`(:506-516)
-        // 把 CapsuleView **居中**摆放 —— 拿外框当本体玻璃必然画大、超出胶囊（用户反馈「玻璃比岛大」）。
-        val capsules = ArrayList<View>(4)
-        collectCapsuleViews(containerView, capsules)
-        val present = capsules.any { it.visibility == View.VISIBLE }
-        if (!present && lastCapsulePresent) {
-            // 岛移走/收起边沿：容器此后不再 dispatchDraw，旧玻璃 display list 无人失效 →
-            // 主动 invalidate 宿主重录（不画玻璃）清残留；只边沿触发一次，非轮询。
-            logThrottled("seedling-gone", Log.INFO) { "seedling-card: capsule gone, invalidate to clear stale glass" }
-            invalidateRegisteredHostViews()
-        }
-        lastCapsulePresent = present
-        capsuleContainerRef = WeakReference(containerView)
-        if (capsules.isEmpty()) {
-            // [2026-09-16 用户需求] 胶囊 ↔ 展开大卡片互转期间插件会把 CapsuleView 从容器移除
-            // （真机实证），此时**玻璃不显示**——用户明确要求「动画期间干脆不显示」，不做补绘。
-            lastIslandW = -1
-            lastIslandH = -1
-            return
-        }
-        val containerLoc = IntArray(2)
-        try {
-            containerView.getLocationOnScreen(containerLoc)
-        } catch (t: Throwable) {
-            return
-        }
-        for (capsule in capsules) {
-            // 不可见的不画（插件动画期间会短暂置 INVISIBLE）。
-            if (capsule.visibility != View.VISIBLE) {
-                logThrottled("seedling-invis", Log.WARN, 500L) {
-                    "seedling-card: skip invisible CapsuleView vis=${capsule.visibility}"
-                }
-                continue
+        if (!seedlingCapsuleGlassEnabled) return
+        if (capsule.visibility != View.VISIBLE) return
+        val cvW = if (capsule.width > 0) capsule.width else capsule.measuredWidth
+        val cvH = if (capsule.height > 0) capsule.height else capsule.measuredHeight
+        if (cvW <= 0 || cvH <= 0) {
+            logThrottled("seedling-zero", Log.WARN, 500L) {
+                "seedling-capsule: ABORT zero size cv=${capsule.width}x${capsule.height} " +
+                    "measured=${capsule.measuredWidth}x${capsule.measuredHeight}"
             }
-            // CapsuleView 由 setLeftTopRightBottom 摆放，getWidth() 偶为 0（布局未完成）→ 退回 measured
-            val cvW = if (capsule.width > 0) capsule.width else capsule.measuredWidth
-            val cvH = if (capsule.height > 0) capsule.height else capsule.measuredHeight
-            if (cvW <= 0 || cvH <= 0) {
-                logThrottled("seedling-zero", Log.WARN, 500L) {
-                    "seedling-card: ABORT zero size cv=${capsule.width}x${capsule.height} " +
-                        "measured=${capsule.measuredWidth}x${capsule.measuredHeight} vis=${capsule.visibility}"
-                }
-                continue
-            }
-            // 可见宽度优先取逐帧动画真值 capsuleDrawableWidth（插件宽度动画每帧 onDraw 重设，
-            // 真机字段名混淆 → 特征启发式：int 且 0<值<=measuredWidth，跨帧变化者优先）；
-            // 次选 foreground bounds 宽（动画期插件每帧重设 bounds）；都拿不到回落 measured（静态）。
-            val animW = readCapsuleAnimWidth(capsule, cvW)
-            val drawW = if (animW in 1..cvW) animW else cvW
-            // ★ **不能用 CapsuleView.getLocationOnScreen()**：真机实测返回 (720,80) = 屏幕中心
-            //   （玻璃画在岛中心，用户反馈"岛偏了"）。原因在插件里——`CapsuleContainer.q()`
-            //   计算居中位置时 CapsuleView 尚未测量（measuredWidth=0 → (1440-0)/2=720），
-            //   之后测量完成但位置**不再更新** → 该值陈旧。
-            //   改为按容器几何直接算居中：系统布局中胶囊水平/垂直居中于容器
-            //   （CapsuleContainer 自身也居中于 CapsulePluginContainer，真机 432@504 = (1440-432)/2）。
-            val left = containerLoc[0] + (containerView.width - drawW) / 2f
-            val top = containerLoc[1] + (containerHeight - cvH) / 2f
-            val region = RectF(left, top, left + drawW, top + cvH)
-            if (region.width() <= 0f || region.height() <= 0f) {
-                logThrottled("seedling-badregion", Log.WARN, 500L) {
-                    "seedling-card: ABORT bad region=$region draw=${drawW}x$cvH"
-                }
-                continue
-            }
-            // [2026-09-16 用户需求] **去掉岛的原版渲染**：置空背景/前景 Drawable（内容 View 不受影响，
-            // 图标/文字照常绘制），配合「玻璃画在子 View 之下」→ 小岛呈现为「纯液态玻璃 + 内容」。
-            // 幂等（已是 null 则跳过）；失败静默（保持原渲染，不崩）。
+            return
+        }
+        // 逐帧动画几何：玻璃 drawable 自身 bounds（插件每帧 setBounds=动画宽居中）；无效回落 measured 全幅
+        val b = capsuleAnimBounds
+        b.set(animBounds)
+        var drawW = cvW
+        var drawH = cvH
+        var offX = 0f
+        var offY = 0f
+        // bounds 偶发 1x1/3x3 假值（记忆 project_seedling-island-glass）→ 低于高度 1/4 视为无效，
+        // 回落 measured 全幅，防玻璃缩成中心小点
+        val minSide = cvH / 4
+        if (b.width() in minSide..cvW && b.height() in minSide..cvH) {
+            drawW = b.width()
+            drawH = b.height()
+            offX = b.left.toFloat()
+            offY = b.top.toFloat()
+        }
+        // 屏幕区域：上溯找全宽 CapsulePluginContainer（其 getLocationOnScreen 可靠），胶囊居中于它
+        // （不能只用 immediate parent + capsule.left：parent 若是全宽 Root/PluginContainer 则 left=0，
+        //  居中发生在更深层 → 玻璃偏左；旧版按全宽容器居中是已验证正确路径）。
+        var container: View? = capsule.parent as? View
+        var hop = 0
+        while (container != null && hop < 8) {
+            if (container.javaClass.name == CLASS_CAPSULE_PLUGIN_CONTAINER) break
+            container = container.parent as? View
+            hop++
+        }
+        val anchor = container ?: (capsule.parent as? View)
+        val ploc = IntArray(2)
+        var baseX = 0f
+        var baseY = 0f
+        if (anchor != null) {
             try {
-                if (capsule.background != null) capsule.background = null
-                if (capsule.foreground != null) capsule.foreground = null
+                anchor.getLocationOnScreen(ploc)
+                baseX = ploc[0] + (anchor.width - cvW) / 2f
+                baseY = ploc[1] + (anchor.height - cvH) / 2f
             } catch (t: Throwable) {
+                baseX = 0f
+                baseY = 0f
             }
-            // 胶囊全圆角：min(可见宽, 高)/2
-            val cornerOverride = Math.min(drawW, cvH) / 2f
-            val id = System.identityHashCode(capsule)
-            registerSeedlingCardRegion(
-                id, region, Rect(0, 0, drawW, cvH), capsule,
-                cornerRadiusOverride = cornerOverride,
-            )
-            // canvas 原点是本容器左上角 → 偏移取胶囊可见区相对容器的位置
-            val offX = left - containerLoc[0]
-            val offY = top - containerLoc[1]
-            drawSeedlingGlassOnCanvas(
-                canvas, capsule, id, drawW, cvH, region,
-                offsetX = offX, offsetY = offY,
-            )
-            lastCapsuleGlassDrawMs = SystemClock.uptimeMillis()
-            capsuleGlassHost = WeakReference(capsule)
+        }
+        val region = RectF(baseX + offX, baseY + offY, baseX + offX + drawW, baseY + offY + drawH)
+        if (region.width() <= 0f || region.height() <= 0f) return
+        val cornerOverride = Math.min(drawW, drawH) / 2f
+        val id = System.identityHashCode(capsule)
+        registerSeedlingCardRegion(
+            id, region, Rect(0, 0, drawW, drawH), capsule,
+            cornerRadiusOverride = cornerOverride,
+        )
+        // onDraw canvas 原点 = CapsuleView 左上角 → 玻璃偏移 = 动画 bounds 居中偏移
+        drawSeedlingGlassOnCanvas(
+            canvas, capsule, id, drawW, drawH, region,
+            offsetX = offX, offsetY = offY,
+        )
+        capsuleGlassHost = WeakReference(capsule)
+        capsuleContainerRef = WeakReference(anchor ?: capsule)
+        startCapsuleRegionCapture()
+        logThrottled("seedling-capsule-geom", Log.INFO, 500L) {
+            "seedling-capsule: geom cv=${cvW}x$cvH draw=${drawW}x$drawH off=($offX,$offY) region=$region"
         }
     }
-
-    /**
-     * [2026-09-16 小岛玻璃化] 递归收集容器内所有 `CapsuleView`（胶囊本体）。
-     *
-     * View 层级（真机 dump + 插件反编译实证）：
-     * ```
-     * CapsulePluginContainer            w=1440 h=160   ← 本 hook 的容器
-     *  └─ CapsuleContainerRoot          w=1440 h=160   ← 撑满状态栏
-     *      └─ CapsuleContainer          w=432  h=160   ← 外框（onMeasure 宽 = 子宽 + padding）
-     *          └─ CapsuleView           ← ★ 胶囊本体（CapsuleContainer.q() 把它居中摆放）
-     *              └─ FrameLayout ...   ← 内容
-     * ```
-     * 插件 View 在独立 classloader → 用**字符串类名**比较（同 [mountCardBackgroundGlass]）。
-     * 命中即停止下钻（CapsuleView 内部是内容 View，不是胶囊本体）。
-     */
-    /** 逐帧胶囊宽度真值读取：优先混淆字段特征启发式（int 且 0<值<=measuredWidth，
-     *  跨帧变化者优先=动画宽度场），次选 foreground bounds 宽（插件动画每帧重设），
-     *  都拿不到返回 0（调用方回落 measured 静态宽）。缓存 Field 避免每帧反射扫描。 */
-    private fun readCapsuleAnimWidth(capsule: View, measuredW: Int): Int {
-        var f = capsuleWidthField
-        if (f == null) {
-            f = try {
-                capsule.javaClass.declaredFields.firstOrNull { fld ->
-                    fld.type == Int::class.javaPrimitiveType && run {
-                        fld.isAccessible = true
-                        val v = fld.getInt(capsule)
-                        v in 1..measuredW
-                    }
-                }
-            } catch (t: Throwable) {
-                null
-            }
-            capsuleWidthField = f
-        }
-        val prev = capsuleLastAnimW
-        var fieldW = 0
-        if (f != null) {
-            fieldW = try {
-                f.getInt(capsule)
-            } catch (t: Throwable) {
-                0
-            }
-            if (fieldW !in 1..measuredW) fieldW = 0
-        }
-        val fgW = try {
-            capsule.foreground?.bounds?.width() ?: 0
-        } catch (t: Throwable) {
-            0
-        }
-        val pick = when {
-            fieldW in 1..measuredW && prev > 0 && fieldW != prev -> fieldW
-            fgW in 1..measuredW -> fgW
-            fieldW in 1..measuredW -> fieldW
-            else -> 0
-        }
-        capsuleLastAnimW = if (pick > 0) pick else prev
-        return pick
-    }
-
-    private fun collectCapsuleViews(parent: View, out: MutableList<View>, depth: Int = 0) {
-        if (depth > 8) return
-        if (parent.javaClass.name == CLASS_CAPSULE_VIEW) {
-            out.add(parent)
-            return
-        }
-        val group = parent as? android.view.ViewGroup ?: return
-        for (i in 0 until group.childCount) {
-            // [2026-09-16] **不在此过滤 visibility**：插件动画期间会反复切 CapsuleView 的 visibility
-            // （CapsuleView.c(hide) → setVisibility(hide ? INVISIBLE : VISIBLE)），过滤掉就分不清
-            // 「树里根本没有」和「有但当前不可见」——两者处理方式不同。visibility 判定下移到渲染循环。
-            collectCapsuleViews(group.getChildAt(i), out, depth + 1)
-        }
-    }
-
 
     /** [seedling 诊断 2026-08-15] 递归打印 View 树（类名/尺寸/屏幕位置），定位展开大卡片真实 View。 */
     private fun dumpViewTree(v: View, depth: Int, maxDepth: Int) {
@@ -8888,7 +9229,7 @@ object BlurDrawHook {
      *  CardBackgroundView 用卡片真实圆角 round_corner_radius_fluid_cloud=20dp 换算 px（≈52px），
      *  启发式 min(w,h)×0.22（大卡 ≈132px）过大失真。
      */
-    private fun registerSeedlingCardRegion(
+    internal fun registerSeedlingCardRegion(
         id: Int,
         screenRegion: RectF,
         bounds: Rect,
@@ -9167,12 +9508,18 @@ object BlurDrawHook {
         return cachedQsHideSecondaryGlass
     }
 
-    /** 面板展开比例 0..1（收起动画期 setExpansionHeight 逐帧下降 → 白色填充随之淡出）。 */
+    /** 面板展开比例 0..1（收起动画期逐帧下降 → 白色填充随之淡出）。 */
     private fun panelExpansionFraction(): Float {
-        val max = panelExpansionMaxPx
-        if (max <= 0f) return 1f
+        // 分离模式：分数是真值（收起时从 1 降到 0），高度基线恒 366 不能用
+        val raw = if (sepStateKnown) {
+            sepPanelFraction
+        } else {
+            val max = panelExpansionMaxPx
+            if (max <= 0f) return 1f
+            panelExpansionPx / max
+        }
         // 只有最后 18% 收起行程才淡出：完全展开时恒定满强度，不因回弹峰值把白填充调暗
-        return (((panelExpansionPx / max) - PANEL_FADE_START) / (1f - PANEL_FADE_START)).coerceIn(0f, 1f)
+        return (((raw - PANEL_FADE_START) / (1f - PANEL_FADE_START))).coerceIn(0f, 1f)
     }
 
     /** 宿主 + 祖先链 alpha 连乘（系统收面板就是给容器 setAlpha，白填充跟着它淡出）。 */
@@ -9538,22 +9885,25 @@ object BlurDrawHook {
         return cachedVolumeSeekBarGlass
     }
 
-    /** 音量条 View 判定：类名后缀匹配（父类 hook 会命中 QS 亮度条等所有子类，只对音量条画玻璃）。 */
+    /** 音量条 View 判定：类名后缀匹配（父类 hook 会命中所有子类，只挑目标两类）。
+     *  QS 滑杆仅在「进度层账本不可用」时纳入 —— 有 QsSeekBarBlurManager 的宿主上它已有
+     *  AutoBlurDrawable 进度层走既有漏斗，两条腿同时画会叠双份玻璃。 */
     private fun isVolumeSeekBarView(v: View): Boolean {
-        if (!v.javaClass.name.endsWith(SUFFIX_VOLUME_SEEKBAR)) return false
+        val name = v.javaClass.name
+        if (!SeekbarHostPolicy.isSelfDrawHost(name, qsSeekbarFactoryAvailable)) return false
         if (!volumeClassLogged) {
             volumeClassLogged = true
-            Lg.i(TAG, "volume-seekbar: matched view class = ${v.javaClass.name}")
+            Lg.i(TAG, "volume-seekbar: matched view class = $name qsFactory=$qsSeekbarFactoryAvailable")
         }
         return true
     }
 
     /** 音量条玻璃绘制：自身 bounds 登记 + 画玻璃（onDraw canvas 原点 = view 左上角 → 平移 0）。 */
     private fun renderVolumeSeekBarGlass(canvas: Canvas, seekbar: View) {
-        val w = seekbar.width
-        val h = seekbar.height
-        if (w <= 0 || h <= 0) {
-            logVolumeDiag("zero-size", "volume-seekbar: 跳过 —— 宿主尺寸 ${w}x${h}（布局未完成）")
+        val vw = seekbar.width
+        val vh = seekbar.height
+        if (vw <= 0 || vh <= 0) {
+            logVolumeDiag("zero-size", "volume-seekbar: 跳过 —— 宿主尺寸 ${vw}x${vh}（布局未完成）")
             return
         }
         // 可见性/透明度守卫：多实例同坐标堆叠时，收起动画期 alpha→0 或不可见的实例不再画玻璃
@@ -9571,28 +9921,96 @@ object BlurDrawHook {
         } catch (t: Throwable) {
             Lg.e(TAG, "volume-seekbar: getLocationOnScreen failed", t); return
         }
+        // 玻璃几何 = 系统轨道矩形（内部尺寸动画随粗细条变化，View bounds 恒定）；
+        // 读不到轨道字段（如控制中心滑杆）回落 View 全幅，行为与旧版一致
+        val track = volumeTrackRect(seekbar)
+        val ox: Float
+        val oy: Float
+        val w: Int
+        val h: Int
+        val corner: Float
+        if (track != null && track.isValid()) {
+            ox = track.left
+            oy = track.top
+            w = track.width.toInt().coerceAtLeast(1)
+            h = track.height.toInt().coerceAtLeast(1)
+            corner = track.cornerRadius.takeIf { it > 0f } ?: resolveVolumeCornerPx(seekbar)
+            if (w < vw - 2 || h < vh - 2) {
+                logVolumeDiag(
+                    "track-geom",
+                    "volume-seekbar: track=(${track.left},${track.top},${track.right},${track.bottom}) r=$corner view=${vw}x${vh}",
+                )
+            }
+        } else {
+            ox = 0f
+            oy = 0f
+            w = vw
+            h = vh
+            corner = resolveVolumeCornerPx(seekbar)
+        }
         val viewRegion = RectF(
-            loc[0].toFloat(), loc[1].toFloat(),
-            (loc[0] + w).toFloat(), (loc[1] + h).toFloat(),
+            loc[0] + ox, loc[1] + oy,
+            loc[0] + ox + w, loc[1] + oy + h,
         )
-        // 抓屏/登记 region = 以控件为中心的暴力正方形（边长 = 对角线×2）：弹出动画位置瞬移越屏时，
+        // 抓屏/登记 region = 以轨道为中心的暴力正方形（边长 = 对角线×2）：弹出动画位置瞬移越屏时，
         // 采样塌缩可经 entry.region 兜底折算到正方形的屏内部分，玻璃不断档；采样仍按当前位置矩形
         // （正方形整体喂采样会把内容缩成控件内的缩略图）
         val side = sqrt((w * w + h * h).toDouble()).toFloat() * 2f
-        val cx = loc[0] + w * 0.5f
-        val cy = loc[1] + h * 0.5f
+        val cx = viewRegion.centerX()
+        val cy = viewRegion.centerY()
         val captureRegion = RectF(cx - side * 0.5f, cy - side * 0.5f, cx + side * 0.5f, cy + side * 0.5f)
         logVolumeDiag("region-square", "volume-seekbar: 抓屏 region 原矩形=$viewRegion 正方形=$captureRegion")
         val id = System.identityHashCode(seekbar)
         registerSeedlingCardRegion(
             id, captureRegion, Rect(0, 0, w, h), seekbar,
-            source = "volume-seekbar", cornerRadiusOverride = resolveVolumeCornerPx(seekbar),
+            source = "volume-seekbar", cornerRadiusOverride = corner,
         )
-        drawSeedlingGlassOnCanvas(canvas, seekbar, id, w, h, viewRegion, offsetX = 0f, offsetY = 0f)
+        drawSeedlingGlassOnCanvas(
+            canvas, seekbar, id, w, h, viewRegion,
+            offsetX = 0f, offsetY = 0f, dstOffsetX = ox, dstOffsetY = oy,
+        )
         // 顺带失效 ···按钮：玻璃/填充开关切换后按钮视图随音量条每帧重绘即时生效
         try {
             volumeMoreBtnHost?.get()?.takeIf { it.isAttachedToWindow }?.invalidate()
         } catch (t: Throwable) {
+        }
+    }
+
+    /** 宿主轨道矩形（View 局部 px）：优先系统现成 mBackgroundRect（draw 期恒新鲜），缺字段回 null。 */
+    private fun volumeTrackRect(seekbar: View): VolumeTrackGeometry.Track? {
+        resolveVolumeTrackGeomFields(seekbar.javaClass)
+        val rectField = volumeTrackRectField ?: return null
+        return try {
+            val r = rectField.get(seekbar) as? Rect ?: return null
+            val radius = volumeTrackRadiusField?.getFloat(seekbar) ?: 0f
+            VolumeTrackGeometry.Track(
+                r.left.toFloat(), r.top.toFloat(), r.right.toFloat(), r.bottom.toFloat(), radius,
+            )
+        } catch (t: Throwable) {
+            logVolumeDiag("track-geom-fail", "volume-seekbar: 轨道矩形读取失败 ${t.javaClass.simpleName}")
+            null
+        }
+    }
+
+    /** 轨道矩形/圆角字段一次解析（public 字段，沿继承链 getField）。 */
+    private fun resolveVolumeTrackGeomFields(cls: Class<*>) {
+        if (volumeTrackGeomFieldsResolved) return
+        synchronized(this) {
+            if (volumeTrackGeomFieldsResolved) return
+            volumeTrackRectField = try {
+                cls.getField("mBackgroundRect")
+            } catch (t: Throwable) {
+                null
+            }
+            volumeTrackRadiusField = try {
+                cls.getField("mCurBackgroundRadius")
+            } catch (t: Throwable) {
+                null
+            }
+            volumeTrackGeomFieldsResolved = true
+            if (volumeTrackRectField == null) {
+                Lg.i(TAG, "volume-seekbar: no mBackgroundRect on ${cls.name}, glass uses full view bounds")
+            }
         }
     }
 
@@ -9620,6 +10038,9 @@ object BlurDrawHook {
     }
 
     // ------------------------------------------------------------ 点按位置发光 ------------------------------------------------------------
+
+    /** 按住态无事件兜底时限：超过即视为流已断，帧泵收尾（正常按住/滚动续流不受影响）。 */
+    private const val PRESS_GLOW_HOLD_TIMEOUT_MS = 5000L
 
     /** 发光状态表：**宿主 View id** → 触点包络（主线程读写；上限 16，超出整表清）。
      *  玻璃区域表的键是 drawable id，触摸事件落在 View 上——两套 id 空间，靠别名表桥接。 */
@@ -9754,19 +10175,32 @@ object BlurDrawHook {
             }
             MotionEvent.ACTION_MOVE -> {
                 if (pressGlowStates.isEmpty()) return
-                // 逐 pointer 按 id 找归属宿主并更新坐标（多指各归各的宿主）
+                // 逐 pointer 按 id 找归属宿主并更新坐标（多指各归各的宿主）；
+                // 本事件没带该 pointer（子 View 被 CANCEL 后父容器续流）→ 触点已交棒，
+                // 在这里收尾（父容器每帧 MOVE 都到，等效松手淡出，不留冻结光斑）
                 val vloc = IntArray(2)
                 view.getLocationOnScreen(vloc)
                 val hloc = IntArray(2)
                 for ((hid, list) in pressGlowStates) {
-                    val host = pressGlowHostById(hid) ?: continue
+                    val host = pressGlowHostById(hid)
+                    if (host == null) {
+                        list.clear()
+                        continue
+                    }
                     host.getLocationOnScreen(hloc)
                     var touched = false
                     for (i in list.indices) {
                         val st = list[i]
                         if (st.upAtMs != null) continue
                         val idx = ev.findPointerIndex(st.pid)
-                        if (idx < 0) continue
+                        if (idx < 0) {
+                            list[i] = st.copy(upAtMs = now)
+                            touched = true
+                            logThrottled("press-glow-handoff", Log.INFO, 1000L) {
+                                "press-glow: handoff-release hid=$hid pid=${st.pid} (pointer left this stream)"
+                            }
+                            continue
+                        }
                         list[i] = st.copy(
                             x = ev.getX(idx) + (vloc[0] - hloc[0]),
                             y = ev.getY(idx) + (vloc[1] - hloc[1]),
@@ -9788,11 +10222,11 @@ object BlurDrawHook {
                     }
                 }
             }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                // 主流结束：本视图窗口内全部未松手触点一起收尾（防单指残留常亮）
+            MotionEvent.ACTION_UP -> {
+                // 真松手：全部未松手触点一起收尾（防单指残留常亮）
                 if (pressGlowStates.values.any { l -> l.any { it.upAtMs == null } }) {
                     logThrottled("press-glow-upall", Log.INFO, 1000L) {
-                        "press-glow: up/cancel view=${view.javaClass.simpleName} action=$action (release all)"
+                        "press-glow: up view=${view.javaClass.simpleName} (release all)"
                     }
                 }
                 for ((hid, list) in pressGlowStates) {
@@ -9806,6 +10240,17 @@ object BlurDrawHook {
                     if (any) {
                         logThrottled("press-glow-up", Log.INFO, 500L) { "press-glow: up-all hid=$hid" }
                         pressGlowHostById(hid)?.invalidate()
+                    }
+                }
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                // 夺流≠松手：父容器滚动/翻页拦截给子 View 发 CANCEL 时手指可能仍按着——
+                // 不收尾（光斑保持），交给后续 MOVE 续跟 / UP 收尾 / 新 DOWN 过期兜底
+                var held = 0
+                for (list in pressGlowStates.values) held += list.count { it.upAtMs == null }
+                if (held > 0) {
+                    logThrottled("press-glow-cancel", Log.INFO, 1000L) {
+                        "press-glow: cancel view=${view.javaClass.simpleName} held=$held (keep)"
                     }
                 }
             }
@@ -9829,6 +10274,16 @@ object BlurDrawHook {
                             val it = pressGlowStates.entries.iterator()
                             while (it.hasNext()) {
                                 val e = it.next()
+                                // 按住超时兜底：流被别的窗口整体夺走且再无 MOVE/UP 时防冻结常亮
+                                for (i in e.value.indices) {
+                                    val st = e.value[i]
+                                    if (st.upAtMs == null && now - st.downAtMs > PRESS_GLOW_HOLD_TIMEOUT_MS) {
+                                        e.value[i] = st.copy(upAtMs = now)
+                                        logThrottled("press-glow-timeout", Log.INFO, 2000L) {
+                                            "press-glow: hold-timeout hid=${e.key} pid=${st.pid}"
+                                        }
+                                    }
+                                }
                                 e.value.removeAll { st -> PressGlow.finished(st, now) }
                                 if (e.value.isEmpty()) {
                                     it.remove()
@@ -9893,6 +10348,9 @@ object BlurDrawHook {
             k[i] = PressGlow.intensity(st, now) * strength
             xs[i] = st.x
             ys[i] = st.y
+        }
+        logThrottled("press-glow-uniform-$id", Log.INFO, 500L) {
+            "press-glow: uniform id=$id k=${k[0]} at=(${xs[0].toInt()},${ys[0].toInt()}) r=${PressGlow.radiusPx(minOf(w, h).toFloat()).toInt()} strength=$strength"
         }
         LiquidGlassShader.setPressGlowSpots(
             shader, k[0], xs[0], ys[0], k[1], xs[1], ys[1], k[2], xs[2], ys[2],
@@ -10377,7 +10835,7 @@ object BlurDrawHook {
      *  dispatchDraw 的 canvas 原点本就是 row 左上角，**必须传 (0,0)**——再按 host.left/top 平移会
      *  把玻璃整体下移/右移、超出裁剪区被裁掉（glass 不可见）。
      */
-    private fun drawSeedlingGlassOnCanvas(
+    internal fun drawSeedlingGlassOnCanvas(
         canvas: Canvas,
         host: View,
         id: Int,
@@ -10386,6 +10844,8 @@ object BlurDrawHook {
         screenRegion: RectF,
         offsetX: Float = host.left.toFloat(),
         offsetY: Float = host.top.toFloat(),
+        dstOffsetX: Float = 0f,
+        dstOffsetY: Float = 0f,
     ) {
         // [spec/85 省电模式] 省电开启 → 不画 canvas 玻璃（覆盖 CardBackgroundView / Simple Banner 等
         // 所有走本函数的注入点）
@@ -10477,7 +10937,7 @@ object BlurDrawHook {
         applyPressGlowUniforms(shader, id, w, h)
         canvas.save()
         try {
-            canvas.translate(offsetX, offsetY)
+            canvas.translate(offsetX + dstOffsetX, offsetY + dstOffsetY)
             seedlingGlassPaint.shader = shader
             val path = android.graphics.Path().apply {
                 val r = cornerRadius
@@ -10675,6 +11135,159 @@ object BlurDrawHook {
      * 本线程零阻塞；pending 去重单通道）。停止：卡片收起/窗口销毁（[isCardBackgroundHostActive] false）
      * → 退出（零后台耗电）；锁屏期间不启动/退出。与 heads-up / simple-banner 持续源独立。
      */
+    /**
+     * 接管态小岛显示期启动区域抓屏 worker（岛 + 副岛 bbox，恒定 30FPS）。
+     * 与展开大卡共用同一 worker 与单通道队列，靠 [transientRegionBBox] 判活跃，岛消失即停。
+     */
+    internal fun startIslandRegionCapture() {
+        if (CapturePolicy.captureMode() == Prefs.BG_CAPTURE_MODE_STATIC) {
+            logThrottled("island-region-skip", Log.INFO) { "seedling-island: region capture skip static-mode" }
+            return
+        }
+        if (islandRegionCaptureRunning) return
+        if (isKeyguardLockedNow()) {
+            logThrottled("island-region-skip", Log.INFO) { "seedling-island: region capture skip keyguard" }
+            return
+        }
+        islandRegionCaptureRunning = true
+        Lg.i(TAG, "seedling-island: region capture start hz=30 visible=${SeedlingIslandWindow.isIslandVisible()}")
+        Thread {
+            var idleTicks = 0
+            try {
+                while (!isKeyguardLockedNow()) {
+                    val bounds = SeedlingIslandWindow.captureBoundsScreen()
+                    if (bounds == null) {
+                        // 首帧布局前 width=0 属正常，给若干拍宽限；持续不可见才停
+                        if (++idleTicks > ISLAND_CAPTURE_IDLE_TICKS) break
+                    } else {
+                        idleTicks = 0
+                        markContentChanged()
+                        triggerRegionCapture()
+                        logThrottledOpt("island-region-capture", Log.INFO) {
+                            transientRegionBBox()?.let { "seedling-island: region tick bbox=${it.toShortString()} island=${bounds.toShortString()}" }
+                        }
+                    }
+                    try {
+                        Thread.sleep(CapturePolicy.transientCaptureIntervalMs())
+                    } catch (ignored: InterruptedException) {
+                    }
+                }
+            } finally {
+                islandRegionCaptureRunning = false
+                Lg.i(TAG, "seedling-island: region capture stopped idleTicks=$idleTicks")
+            }
+        }.start()
+    }
+
+    @Volatile
+    private var islandRegionCaptureRunning = false
+
+    /** 岛不可见的宽限拍数（首帧布局前 width=0；30FPS 下约 1s）。 */
+    private const val ISLAND_CAPTURE_IDLE_TICKS = 30
+
+    /** 原生胶囊岛（投屏/通话等）活跃判定：宿主已登记且可见。 */
+    private fun isCapsuleHostActive(): Boolean {
+        val v = capsuleGlassHost?.get() ?: return false
+        return try {
+            v.isAttachedToWindow && v.visibility == View.VISIBLE && v.width > 0
+        } catch (t: Throwable) {
+            false
+        }
+    }
+
+    /**
+     * 原生胶囊岛显示期启动区域抓屏（恒定 30FPS，只抓胶囊 bbox）。
+     * 胶囊由系统绘制、内容随投屏/通话状态变化，整屏快照跟不上会表现为一卡一卡。
+     */
+    private fun startCapsuleRegionCapture() {
+        if (CapturePolicy.captureMode() == Prefs.BG_CAPTURE_MODE_STATIC) {
+            logThrottled("capsule-region-skip", Log.INFO) { "seedling-capsule: region capture skip static-mode" }
+            return
+        }
+        if (capsuleRegionCaptureRunning) return
+        if (isKeyguardLockedNow()) {
+            logThrottled("capsule-region-skip", Log.INFO) { "seedling-capsule: region capture skip keyguard" }
+            return
+        }
+        capsuleRegionCaptureRunning = true
+        Lg.i(TAG, "seedling-capsule: region capture start hz=30")
+        Thread {
+            var idle = 0
+            var ticks = 0
+            var windowStart = SystemClock.uptimeMillis()
+            var windowAttempts = 0
+            var windowNew = 0
+            try {
+                while (!isKeyguardLockedNow()) {
+                    if (!isCapsuleHostActive()) {
+                        if (++idle > ISLAND_CAPTURE_IDLE_TICKS) break
+                    } else {
+                        idle = 0
+                        ticks++
+                        markContentChanged()
+                        triggerRegionCapture()
+                        if (ticks % CAPSULE_RATE_WINDOW_TICKS == 0) {
+                            val now = SystemClock.uptimeMillis()
+                            val dt = (now - windowStart).coerceAtLeast(1L)
+                            val a = regionCaptureAttempts - windowAttempts
+                            val n = regionCaptureNewFrames - windowNew
+                            windowAttempts = regionCaptureAttempts
+                            windowNew = regionCaptureNewFrames
+                            windowStart = now
+                            Lg.i(
+                                TAG,
+                                "seedling-capsule: rate window ${dt}ms ticks=$ticks " +
+                                    "capture=${a * 1000L / dt}Hz new=${n * 1000L / dt}Hz " +
+                                    "bbox=${transientRegionBBox()?.toShortString()}",
+                            )
+                        }
+                        logThrottledOpt("capsule-region-capture", Log.INFO) {
+                            transientRegionBBox()?.let { "seedling-capsule: region tick bbox=${it.toShortString()} capsule=${capsuleRegionBBox()?.toShortString()}" }
+                        }
+                    }
+                    try {
+                        Thread.sleep(CapturePolicy.transientCaptureIntervalMs())
+                    } catch (ignored: InterruptedException) {
+                    }
+                }
+            } finally {
+                capsuleRegionCaptureRunning = false
+                Lg.i(TAG, "seedling-capsule: region capture stopped idle=$idle")
+            }
+        }.start()
+    }
+
+    @Volatile
+    private var capsuleRegionCaptureRunning = false
+
+    /** 胶囊岛抓屏 bbox：容器整幅（岛本体 + 同容器内的信号图标与状态点）外扩留边，clamp 屏幕内。
+     *  容器不可用时退回已登记 region。 */
+    private fun capsuleRegionBBox(): RectF? {
+        val host = capsuleGlassHost?.get() ?: return null
+        val fallback = screenRegionMap[System.identityHashCode(host)]?.region
+        val c = capsuleContainerRef?.get()
+        if (c == null || c.width <= 0 || c.height <= 0) return fallback
+        val loc = IntArray(2)
+        val box = try {
+            c.getLocationOnScreen(loc)
+            RectF(loc[0].toFloat(), loc[1].toFloat(), (loc[0] + c.width).toFloat(), (loc[1] + c.height).toFloat())
+        } catch (t: Throwable) {
+            return fallback
+        }
+        val dm = android.content.res.Resources.getSystem().displayMetrics
+        val pad = CAPSULE_CAPTURE_PAD_DP * dm.density
+        box.inset(-pad, -pad)
+        if (!box.intersect(0f, 0f, dm.widthPixels.coerceAtLeast(1).toFloat(), dm.heightPixels.coerceAtLeast(1).toFloat())) {
+            return fallback
+        }
+        return box
+    }
+
+    private const val CAPSULE_CAPTURE_PAD_DP = 6f
+
+    /** 胶囊 worker 自报帧率的统计窗口（拍数）。 */
+    private const val CAPSULE_RATE_WINDOW_TICKS = 30
+
     private fun startCardBackgroundContinuousCapture() {
         if (CapturePolicy.captureMode() == Prefs.BG_CAPTURE_MODE_STATIC) return
         if (cardBackgroundContinuousRunning) return
@@ -10700,12 +11313,12 @@ object BlurDrawHook {
                             break
                         }
                         markContentChanged()
-                        scheduleElementCaptures()
+                        triggerRegionCapture()
                         logThrottled("seedling-cardview-continuous", Log.INFO) {
-                            "seedling-cardview: continuous tick queued (single-channel)"
+                            "seedling-cardview: continuous tick queued (region-first)"
                         }
                         try {
-                            Thread.sleep(CapturePolicy.continuousCaptureIntervalMs())
+                            Thread.sleep(CapturePolicy.transientCaptureIntervalMs())
                         } catch (ignored: InterruptedException) {
                         }
                     }
@@ -10734,15 +11347,17 @@ object BlurDrawHook {
         }
     }
 
-    /** 小岛胶囊所在状态栏窗口根 sfc（防小岛玻璃自采样）。活跃门控：胶囊玻璃最近实际绘制在
-     *  [CAPSULE_EXCLUDE_ACTIVE_MS] 窗内且宿主仍 attach 才排除；岛不在屏返回 null（不排状态栏，
+    /** 小岛胶囊所在状态栏窗口根 sfc（防小岛玻璃自采样）。门控：宿主 attach+VISIBLE+有尺寸
+     *  （静止岛不重绘，绘制时间窗会过期致自采样）；岛不在屏返回 null（不排状态栏，
      *  防误排时钟/图标——排除层必须语义约束）。宿主窗口根=StatusBarWindowView（C16 实测）。 */
     @Synchronized
     private fun resolveStatusBarSfcForCapsule(): SurfaceControl? {
         if (!seedlingCapsuleGlassEnabled) return null
-        if (SystemClock.uptimeMillis() - lastCapsuleGlassDrawMs > CAPSULE_EXCLUDE_ACTIVE_MS) return null
+        // 静止岛不重绘 → 绘制时间窗会过期 → 状态栏混进快照自采样；改按宿主在屏判定
+        // （attach+VISIBLE+有尺寸），detach 清理由 mountCapsuleDetachTeardown 负责
         val host = capsuleGlassHost?.get() ?: return null
-        if (!host.isAttachedToWindow) return null
+        if (!host.isAttachedToWindow || host.visibility != View.VISIBLE) return null
+        if (host.width <= 0 || host.height <= 0) return null
         return try {
             reflectViewRootSurfaceControl(host.rootView)
         } catch (t: Throwable) {
@@ -11843,9 +12458,10 @@ object BlurDrawHook {
                 snapshotId, loc[0], loc[1], color, injected, SystemClock.uptimeMillis()
             )
             if (injected == color) return chain.proceed()
-            val args = chain.getArgs().toTypedArray()
-            args[0] = injected
-            return chain.proceed(args)
+            // 先按系统原色放行，再过渡到注入色（直接改入参是硬切）
+            val result = chain.proceed()
+            applyTextColorAnimated(textView, injected)
+            return result
         } else {
             // 未 attach / 尺寸未知 → 登记待 onDraw 重查（injected=原色，不注入；onDraw 兜底重注入）
             val existing = textContrastCache[textView]
@@ -11856,6 +12472,52 @@ object BlurDrawHook {
         }
     }
 
+
+    /** 文字变色过渡时长（黑↔白硬切会闪，按 ARGB 插值淡变）。 */
+    private const val TEXT_COLOR_ANIM_MS = 200L
+
+    /** 正在做变色过渡的 TextView → 动画。同一视图重复触发起新一次时先取消上一次。 */
+    private val textColorAnimators = java.util.WeakHashMap<TextView, android.animation.ValueAnimator>()
+
+    /** 注入文字色：颜色不同则做一次短过渡，避免黑↔白硬切。 */
+    private fun applyTextColorAnimated(textView: TextView, to: Int) {
+        val from = textView.currentTextColor
+        if (from == to) return
+        logThrottled("text-color-anim", Log.DEBUG) {
+            "text-contrast anim ${Integer.toHexString(from)} → ${Integer.toHexString(to)} ${TEXT_COLOR_ANIM_MS}ms"
+        }
+        try {
+            textColorAnimators.remove(textView)?.cancel()
+            val anim = android.animation.ValueAnimator.ofArgb(from, to)
+            anim.duration = TEXT_COLOR_ANIM_MS
+            anim.interpolator = android.view.animation.DecelerateInterpolator()
+            anim.addUpdateListener { a ->
+                val c = a.animatedValue as Int
+                textContrastResampling = true
+                try {
+                    textView.setTextColor(c)
+                } catch (t: Throwable) {
+                } finally {
+                    textContrastResampling = false
+                }
+            }
+            anim.addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    if (textColorAnimators[textView] === animation) textColorAnimators.remove(textView)
+                }
+            })
+            textColorAnimators[textView] = anim
+            anim.start()
+        } catch (t: Throwable) {
+            textContrastResampling = true
+            try {
+                textView.setTextColor(to)
+            } catch (t2: Throwable) {
+            } finally {
+                textContrastResampling = false
+            }
+        }
+    }
 
     /** [spec/21 修复 2026-08-13] 单个 TextView 节流重采样（onDraw 兜底，150ms 节流）：已登记 TextView
      *  统一走 [resolveReadableTextColor]（spec/63）计算可读性注入色，颜色变化才 setTextColor（幂等不闪）。
@@ -11899,17 +12561,7 @@ object BlurDrawHook {
         val snap = screenSnapshot
         val snapshotId = snap?.let { System.identityHashCode(it.bitmap) } ?: -1
         textContrastCache[textView] = TextContrastCacheEntry(snapshotId, loc[0], loc[1], original, injected, now)
-        if (injected != entry.injectedColor) {
-            // 防自循环：setTextColor hook 见 textContrastResampling=true 直接 proceed（不递归采样）
-            textContrastResampling = true
-            try {
-                textView.setTextColor(injected)
-            } catch (t: Throwable) {
-                Lg.e(TAG, "text-contrast A re-sample setTextColor failed", t)
-            } finally {
-                textContrastResampling = false
-            }
-        }
+        if (injected != entry.injectedColor) applyTextColorAnimated(textView, injected)
     }
 
 
@@ -12062,15 +12714,7 @@ object BlurDrawHook {
             snapshotId, loc[0], loc[1], original, injected, SystemClock.uptimeMillis()
         )
         if (injected == textView.currentTextColor) return
-        // 防自循环：setTextColor hook 见 textContrastResampling=true 直接 proceed（不递归采样）
-        textContrastResampling = true
-        try {
-            textView.setTextColor(injected)
-        } catch (t: Throwable) {
-            Lg.e(TAG, "text-contrast forceRefresh setTextColor failed", t)
-        } finally {
-            textContrastResampling = false
-        }
+        applyTextColorAnimated(textView, injected)
     }
 
 
@@ -12124,11 +12768,33 @@ object BlurDrawHook {
                 y += 4
             }
             qsPanelBrightness = if (n > 0) (sum / n).toInt() else -1
+            brightnessGrid = com.coloros16.liquidglass.engine.BrightnessGrid.build(pixels, w, h)
+            brightnessGridW = w
+            brightnessGridH = h
             logThrottled("text-contrast-brightness", Log.DEBUG) { "text-contrast: QS panel avg brightness=$qsPanelBrightness (${w}x${h} @step4)" }
         } catch (t: Throwable) {
             qsPanelBrightness = -1
         }
     }
+
+    /** 快照期算好的局部亮度网格（行优先，-1=无数据）；与 qsPanelBrightness 同批更新。 */
+    @Volatile
+    private var brightnessGrid: IntArray? = null
+
+    @Volatile
+    private var brightnessGridW = 0
+
+    @Volatile
+    private var brightnessGridH = 0
+
+    /**
+     * 屏幕坐标处的局部背景亮度（-1=无快照）：整屏均值会把「暗壁纸上的浅色控制中心」判成暗底，
+     * 故按快照网格取该点所在格的均值。查询 O(1)，不额外抓屏。
+     */
+    internal fun localBrightnessAt(screenX: Int, screenY: Int): Int =
+        com.coloros16.liquidglass.engine.BrightnessGrid.at(
+            brightnessGrid, screenX, screenY, brightnessGridW, brightnessGridH,
+        )
 
     /** [doc/spec/108 M4] [updateQsBrightnessLocked] 临界区锁对象。
      *  ⚠️ 原 KDoc「并发时各自拿到自己那次的引用，不会写坏别人的缓冲」与代码事实**相反**：
@@ -12324,6 +12990,10 @@ object BlurDrawHook {
      *  （面板收起）→ 持续抓屏超时停止，兜底 panelExpansionActive 卡 true 导致 120Hz 空转。 */
     @Volatile
     private var lastValidSfcCaptureMs = 0L
+
+    /** 最近一次成功整屏抓屏的 elapsedRealtime（体检回传用；0=从未成功）。 */
+    @Volatile
+    private var lastValidSfcCaptureElapsedMs = 0L
 
     /** [2026-08-13 回退 spec/49 场景门控] isShadeExpanded 字段已删除：其门控（面板收起且无 heads-up 宿主
      *  → 停周期抓屏）误拦锁屏（锁屏时 setExpansionHeight 不回调/回调 0 且无 heads-up）→ 锁屏玻璃背景冻结。
@@ -12529,7 +13199,9 @@ object BlurDrawHook {
         val headsUp = isHeadsUpHostActive()
         val card = isCardBackgroundHostActive()
         val banner = isSimpleBannerHostActive()
-        if (!headsUp && !card && !banner) return null
+        val island = SeedlingIslandWindow.isIslandVisible()
+        val capsule = isCapsuleHostActive()
+        if (!headsUp && !card && !banner && !island && !capsule) return null
         var left = Float.MAX_VALUE
         var top = Float.MAX_VALUE
         var right = -Float.MAX_VALUE
@@ -12539,6 +13211,8 @@ object BlurDrawHook {
             val name = e.hostViewName
             val hit = (headsUp && name == NOTIF_CARD_HOST_NAME) ||
                 (card && name.startsWith(SEEDLING_CARDVIEW_TAG)) ||
+                (island && name.startsWith(SEEDLING_TAKEOVER_TAG)) ||
+                (capsule && name.startsWith(SEEDLING_HEURISTIC_TAG)) ||
                 (banner && name.startsWith(SIMPLE_BANNER_TAG))
             if (!hit) continue
             val r = e.region
@@ -12548,6 +13222,24 @@ object BlurDrawHook {
             if (r.right > right) right = r.right
             if (r.bottom > bottom) bottom = r.bottom
             any = true
+        }
+        if (island) {
+            SeedlingIslandWindow.captureBoundsScreen()?.let { r ->
+                if (r.left < left) left = r.left
+                if (r.top < top) top = r.top
+                if (r.right > right) right = r.right
+                if (r.bottom > bottom) bottom = r.bottom
+                any = true
+            }
+        }
+        if (capsule) {
+            capsuleRegionBBox()?.let { r ->
+                if (r.left < left) left = r.left
+                if (r.top < top) top = r.top
+                if (r.right > right) right = r.right
+                if (r.bottom > bottom) bottom = r.bottom
+                any = true
+            }
         }
         if (!any) return null
         val dm = android.content.res.Resources.getSystem().displayMetrics
@@ -12581,6 +13273,8 @@ object BlurDrawHook {
         val active = when {
             name == NOTIF_CARD_HOST_NAME -> isHeadsUpHostActive()
             name.startsWith(SEEDLING_CARDVIEW_TAG) -> isCardBackgroundHostActive()
+            name.startsWith(SEEDLING_TAKEOVER_TAG) -> SeedlingIslandWindow.isIslandVisible()
+            name.startsWith(SEEDLING_HEURISTIC_TAG) -> isCapsuleHostActive()
             name.startsWith(SIMPLE_BANNER_TAG) -> isSimpleBannerHostActive()
             else -> false
         }
@@ -13438,6 +14132,7 @@ object BlurDrawHook {
         try {
             val clazz = Class.forName(CLASS_QS_SEEKBAR_BLUR_MANAGER, false, classLoader)
             val method = QsSeekbarCompat.instance.resolveActiveFactory(clazz)
+            qsSeekbarFactoryAvailable = true
             api.hook(method)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
                 .intercept { chain ->
@@ -13456,7 +14151,9 @@ object BlurDrawHook {
                 }
             Lg.i(TAG, "Hook mounted: $method (spec/86 seekbar active tint)")
         } catch (t: Throwable) {
+            qsSeekbarFactoryAvailable = false
             Lg.w(TAG, "Hook mount skipped: $CLASS_QS_SEEKBAR_BLUR_MANAGER#$METHOD_GET_SEEKBAR_ACTIVE_DRAWABLE", t)
+            Lg.i(TAG, "qs-seekbar: 进度层工厂不可用，QS 亮度/音量滑杆改走自绘腿（同音量条路径）")
         }
     }
 
@@ -14179,6 +14876,85 @@ object BlurDrawHook {
         }
     }
 
+    /**
+     * LEGACY 内容重录入口接管：`onDrawBlurContent()`（无参）内部先过三道门
+     * （未注册直接 return / contentDirty / 模糊图为空），门后才是 drawBlurShader / drawBlur。
+     * 系统把模糊停掉时第一道门就 return，两条腿都够不到 —— 故把接管点上移到入口本身，
+     * 自己取 RenderNode 的 RecordingCanvas 录玻璃。失败一律交回原方法。
+     */
+    private fun mountLegacyBlurContent(api: XposedInterface, classLoader: ClassLoader) {
+        if (!legacyPosteffectArch) return
+        if (mGetRenderNode == null || mDrawBlurShader == null) {
+            Lg.e(TAG, "Hook B mount FAILED: legacy onDrawBlurContent (renderNode/drawBlurShader unresolved)")
+            return
+        }
+        // override 在子类，父类空实现也要挂：getDeclaredMethod 取不到继承方法
+        for (name in arrayOf(CLASS_CONTINUOUS_BLUR_DRAWABLE, CLASS_BASE_DRAWABLE)) {
+            try {
+                val clazz = Class.forName(name, false, classLoader)
+                val method = clazz.getDeclaredMethod(METHOD_ON_DRAW_BLUR_CONTENT)
+                api.hook(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .intercept { chain ->
+                        val drawable = try {
+                            chain.getThisObject()
+                        } catch (t: Throwable) {
+                            Lg.e(TAG, "legacy-content: getThisObject failed", t); null
+                        }
+                        var handled = false
+                        if (drawable != null) {
+                            try {
+                                handled = tryRenderLegacyBlurContent(drawable)
+                            } catch (t: Throwable) {
+                                Lg.e(TAG, "legacy-content: intercept error", t)
+                                glassFuse.recordFailure(FUSE_DOMAIN_GLASS, "legacyContent:${t.javaClass.simpleName}")
+                            }
+                        }
+                        if (!handled) chain.proceed() else null
+                    }
+                Lg.i(TAG, "Hook B mounted: $name#$METHOD_ON_DRAW_BLUR_CONTENT() (LEGACY content entry)")
+            } catch (t: Throwable) {
+                logThrottled("legacy-content-mount-miss", Log.INFO) {
+                    "legacy-content: $name#$METHOD_ON_DRAW_BLUR_CONTENT unavailable (${t.javaClass.simpleName})"
+                }
+            }
+        }
+    }
+
+    /** LEGACY 入口自绘：取 RenderNode 录制画布 → 换 shader → drawBlurShader；任一环不满足即 false。 */
+    private fun tryRenderLegacyBlurContent(drawable: Any): Boolean {
+        if (glassFuseTripped) return false
+        val draw = mDrawBlurShader ?: return false
+        val getRn = mGetRenderNode ?: return false
+        if (!replaceShaderIfPossible(drawable)) return false
+        val node = try {
+            getRn.invoke(drawable) as? android.graphics.RenderNode
+        } catch (t: Throwable) {
+            Lg.e(TAG, "legacy-content: getRenderNode failed", t); null
+        } ?: return false
+        val id = System.identityHashCode(drawable)
+        return try {
+            val canvas = node.beginRecording()
+            try {
+                draw.invoke(drawable, canvas)
+            } finally {
+                node.endRecording()
+            }
+            try {
+                (mGetPaint?.invoke(drawable) as? Paint)?.reset()
+            } catch (ignored: Throwable) {
+            }
+            logThrottled("legacy-content-draw", Log.INFO) {
+                "legacy-content: glass recorded id=$id ${node.width}x${node.height}"
+            }
+            true
+        } catch (t: Throwable) {
+            Lg.e(TAG, "legacy-content: record failed", t)
+            glassFuse.recordFailure(FUSE_DOMAIN_GLASS, "legacyContentRecord:${t.javaClass.simpleName}")
+            false
+        }
+    }
+
     /** [spec/114] 旧架构 shader 不可用兜底：改写 blurShaderPaint 为液态玻璃后触发 drawBlurShader。 */
     private fun tryRenderLegacyDrawBlur(drawable: Any, canvas: Canvas): Boolean {
         if (glassFuseTripped) return false
@@ -14625,6 +15401,11 @@ object BlurDrawHook {
         }
         try {
             SfGlassChannel.sessionGlassOff("hot-reload")
+        } catch (t: Throwable) {
+            // ignore
+        }
+        try {
+            SeedlingTakeoverHook.shutdownForHotReload()
         } catch (t: Throwable) {
             // ignore
         }
@@ -15553,11 +16334,31 @@ object BlurDrawHook {
         if (isPowerSaveGlassOff()) return null
         val snap = screenSnapshot
         val valid = snap != null && snap.bitmap.width > 0 && snap.bitmap.height > 0
-        if (valid) return snap
-        // 静态模式 → 不入队（零抓屏）：返回最近快照（可为 null → 回退系统模糊）
-        if (CapturePolicy.captureMode() == Prefs.BG_CAPTURE_MODE_STATIC) return snap
+        if (valid) {
+            staticBootstrapFailures = 0
+            return snap
+        }
+        // 静态档：有旧帧就冻结不抓；一帧都没有时放行有界首帧补抓，否则冷启后永远没有背景源
+        val mode = CapturePolicy.captureMode()
+        if (mode == Prefs.BG_CAPTURE_MODE_STATIC) {
+            val sf = SfGlassChannel.renderMode(api) == Prefs.RENDER_MODE_SF
+            if (!StaticCaptureBootstrap.shouldBootstrap(
+                    mode, Prefs.BG_CAPTURE_MODE_STATIC,
+                    hasSnapshot = false, sfRenderMode = sf, failures = staticBootstrapFailures,
+                )
+            ) {
+                if (!sf) {
+                    logThrottled("static-bootstrap-giveup", Log.INFO) {
+                        "bg-static: no snapshot, bootstrap exhausted (failures=$staticBootstrapFailures), keep system blur"
+                    }
+                }
+                return snap
+            }
+            logThrottled("static-bootstrap", Log.INFO) {
+                "bg-static: first-frame bootstrap capture (no snapshot yet, failures=$staticBootstrapFailures)"
+            }
+        }
         // 快照缺失 → 直接入队 worker 异步抓屏（不阻塞渲染线程）；失败冷却期内不重抓
-        val now = SystemClock.uptimeMillis()
         // [2026-08-14 用户要求·去冷却] 移除失败冷却检查（不再设置冷却）
         if (!captureInFlightIds.contains(SNAPSHOT_ID) && pendingCaptureIds.add(SNAPSHOT_ID)) {
             elementCaptureQueue.add(SNAPSHOT_ID)
@@ -16654,7 +17455,7 @@ object BlurDrawHook {
                         // [2026-08-15 主动式持续抓屏] force=true 绕过冷却/内容变化节流；速率可配
                         // [continuousCaptureIntervalMs]（运动满速 120Hz / 静止 60Hz，2026-08-14）。
                         markContentChanged()
-                        scheduleElementCaptures()
+                        triggerRegionCapture()
                         logThrottled("heads-up-capture-tick", Log.INFO, 500) {
                             "heads-up-capture: tick ok (not paused), panelExpansionActive=$panelExpansionActive"
                         }
@@ -16855,6 +17656,7 @@ object BlurDrawHook {
         }
         if (bg != null) {
             if (regionBBox != null) {
+                regionCaptureAttempts++
                 // 区域快照用独立指纹比对：内容未变丢弃本帧，不驱动重绘
                 val regionFp = snapshotContentFingerprint(bg.bitmap)
                 if (regionFp != 0 && regionFp == lastRegionSnapshotFingerprint) {
@@ -16864,6 +17666,7 @@ object BlurDrawHook {
                     return
                 }
                 lastRegionSnapshotFingerprint = regionFp
+                regionCaptureNewFrames++
                 prebuildLowResChain(bg.bitmap)
                 regionSnapshot = bg
                 logThrottled("region-snapshot-captured", Log.INFO) {
@@ -16878,7 +17681,10 @@ object BlurDrawHook {
             // [2026-08-14 CPU 修复] shade sfc 有效 = shade 在渲染（面板展开）→ 记录时刻，持续抓屏据此
             // 判断是否该停（sfc 长期无效 = 收起 → 停止 120Hz 空转）
             // [2026-09-17 修复] 只用**真 shade** 更新（fallback 兜底层不算「shade 在渲染」，见上方说明）
-            if (realShadeValid) lastValidSfcCaptureMs = SystemClock.uptimeMillis()
+            if (realShadeValid) {
+                lastValidSfcCaptureMs = SystemClock.uptimeMillis()
+                lastValidSfcCaptureElapsedMs = android.os.SystemClock.elapsedRealtime()
+            }
             // [2026-09-17 需求变更·检查变化] 内容指纹比对：**内容未变 → 丢弃本帧**。
             // 三种瞬态场景（heads-up / 流体云卡 / simple-banner）走高频强制抓，但其中大量帧内容完全相同
             //（悬浮玻璃底下没动）—— 若照旧更新快照 + postInvalidateHosts，就会白白驱动
@@ -16905,6 +17711,8 @@ object BlurDrawHook {
             // [spec/127 多尺度源] 帧发布链预构建 1/16 降采样档（worker 线程，渲染线程只取引用）
             prebuildLowResChain(bg.bitmap)
             screenSnapshot = bg
+            staticBootstrapFailures = 0
+            lastValidSfcCaptureElapsedMs = android.os.SystemClock.elapsedRealtime()
             if (mainThreadSync) diagFirstLog("snapshot-replace", " source=$source")
             if (textContrastEnabled && !isMotionActive) {
                 runTextContrastScanAsync(bg)
@@ -16928,10 +17736,21 @@ object BlurDrawHook {
             }
             if (regionBBox != null) {
                 logThrottled("region-capture-fail", Log.DEBUG) { "bg-element: region capture failed, keep previous region snapshot" }
-            } else if (CapturePolicy.bgCaptureRetryEnabled()) {
-                handleElementCaptureFailure(SNAPSHOT_ID, "capture")
             } else {
-                logThrottled("capture-fail-skip", Log.DEBUG) { "bg-element: capture failed, skip (retry disabled, wait event)" }
+                if (screenSnapshot == null &&
+                    CapturePolicy.captureMode() == Prefs.BG_CAPTURE_MODE_STATIC &&
+                    staticBootstrapFailures < StaticCaptureBootstrap.MAX_FAILURES
+                ) {
+                    staticBootstrapFailures++
+                    logThrottled("static-bootstrap-fail", Log.INFO) {
+                        "bg-static: first-frame bootstrap failed ($staticBootstrapFailures/${StaticCaptureBootstrap.MAX_FAILURES})"
+                    }
+                }
+                if (CapturePolicy.bgCaptureRetryEnabled()) {
+                    handleElementCaptureFailure(SNAPSHOT_ID, "capture")
+                } else {
+                    logThrottled("capture-fail-skip", Log.DEBUG) { "bg-element: capture failed, skip (retry disabled, wait event)" }
+                }
             }
         }
     }
@@ -18015,7 +18834,17 @@ object BlurDrawHook {
                 logThrottled("capture-display-token-ok", Log.INFO) {
                     "bg-element: captureDisplay(token) ok ${viaToken.width}x${viaToken.height} crop=$crop (${newScale}x, excl=${newExcludes.size})"
                 }
-                return ElementBackground(viaToken, region)
+                // 输出尺寸必须与 crop 折算一致：不一致说明底层未按区域出图，
+                // 此时按 region 折算采样坐标会错位 ⇒ 弃用本次结果落旧路径（旧路径按 crop 出图）
+                val wantW = (crop.width() * newScale).toInt().coerceAtLeast(1)
+                val wantH = (crop.height() * newScale).toInt().coerceAtLeast(1)
+                if (viaToken.width == wantW && viaToken.height == wantH) {
+                    return ElementBackground(viaToken, region)
+                }
+                logThrottled("capture-token-size-mismatch", Log.WARN) {
+                    "bg-element: token size ${viaToken.width}x${viaToken.height} != crop*scale ${wantW}x$wantH crop=$crop → fallback"
+                }
+                viaToken.recycle()
             }
 
             val wmBinder = hostForName("android.os.ServiceManager")

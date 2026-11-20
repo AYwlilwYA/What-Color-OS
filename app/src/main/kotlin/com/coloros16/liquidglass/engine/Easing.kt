@@ -21,6 +21,15 @@ fun interface Easing {
         val ACCELERATE_DECELERATE = Easing { t ->
             ((cos((t.coerceIn(0f, 1f) + 1f) * PI) / 2.0) + 0.5).toFloat()
         }
+
+        /** 弹出过冲：冲过 1 再回落，用于「转着弹出来」的落位。 */
+        val OVERSHOOT = Easing { t ->
+            val q = t.coerceIn(0f, 1f) - 1f
+            q * q * ((OVERSHOOT_TENSION + 1f) * q + OVERSHOOT_TENSION) + 1f
+        }
+
+        /** 过冲张力：越大冲得越远，2.0 对应峰值约 1.10。 */
+        const val OVERSHOOT_TENSION = 2.0f
     }
 }
 

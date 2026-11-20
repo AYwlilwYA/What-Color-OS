@@ -63,6 +63,8 @@ class HomeIconEntrancePreviewContractTest {
         HomeMotion.iconEntrance(EffectCatalog.HOME_ICON_BACKGROUND_FLY, 0, 8, 0L, 420f, 28f, 60f, back)
         assertTrue("前景飞入自下而上", fore.y > 0f)
         assertTrue("后景飞入自上而下", back.y < 0f)
+        assertTrue("前景在屏幕前方必须放大", fore.scale > 1f)
+        assertTrue("后景在屏幕后方必须缩小", back.scale < 1f)
     }
 
     @Test
@@ -95,9 +97,27 @@ class HomeIconEntrancePreviewContractTest {
     fun staggerDelaysLaterIcons() {
         val first = IconEntranceState()
         val last = IconEntranceState()
-        HomeMotion.iconEntrance(EffectCatalog.HOME_ICON_FOREGROUND_FLY, 0, 12, 60L, 420f, 28f, 60f, first)
-        HomeMotion.iconEntrance(EffectCatalog.HOME_ICON_FOREGROUND_FLY, 11, 12, 60L, 420f, 28f, 60f, last)
-        assertTrue("靠后的图标必须还没落位", last.alpha < first.alpha)
+        HomeMotion.iconEntrance(EffectCatalog.HOME_ICON_ROTATE_FLY, 0, 12, 60L, 420f, 28f, 60f, first)
+        HomeMotion.iconEntrance(EffectCatalog.HOME_ICON_ROTATE_FLY, 11, 12, 60L, 420f, 28f, 60f, last)
+        assertTrue("旋转飞入靠后的图标必须还没落位", last.alpha < first.alpha)
+    }
+
+    /** 前景/后景/淡出淡入整屏一起动：首末位姿态逐位相同。 */
+    @Test
+    fun nonRotateEffectsMoveAllIconsTogether() {
+        for (id in listOf(
+            EffectCatalog.HOME_ICON_FOREGROUND_FLY,
+            EffectCatalog.HOME_ICON_BACKGROUND_FLY,
+            EffectCatalog.HOME_ICON_CROSSFADE,
+        )) {
+            val first = IconEntranceState()
+            val last = IconEntranceState()
+            HomeMotion.iconEntrance(id, 0, 12, 60L, 420f, 28f, 60f, first)
+            HomeMotion.iconEntrance(id, 11, 12, 60L, 420f, 28f, 60f, last)
+            assertEquals("$id 首末位 alpha 必须相同", first.alpha, last.alpha, 1e-6f)
+            assertEquals("$id 首末位 scale 必须相同", first.scale, last.scale, 1e-6f)
+            assertEquals("$id 首末位 y 必须相同", first.y, last.y, 1e-6f)
+        }
     }
 
     @Test

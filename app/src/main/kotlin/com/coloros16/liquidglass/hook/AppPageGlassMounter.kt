@@ -65,6 +65,18 @@ object PageGlassEngine {
         XposedEntry.PACKAGE_QUICK_SEARCH_BOX to Prefs.KEY_QUICK_SEARCH_PAGE_GLASS,
     )
 
+    /** 按 App 玻璃开关：用户在玻璃页开「相册/速览/搜索/计算器/侧边栏」即驱动本进程页玻璃，不必另开总闸。 */
+    private val APP_SWITCH_KEYS = mapOf(
+        XposedEntry.PACKAGE_GALLERY to Prefs.KEY_GALLERY_GLASS,
+        XposedEntry.PACKAGE_CALCULATOR to Prefs.KEY_CALCULATOR_GLASS,
+        XposedEntry.PACKAGE_SMART_SIDEBAR to Prefs.KEY_SMART_SIDEBAR_GLASS,
+        XposedEntry.PACKAGE_ASSISTANT_SCREEN to Prefs.KEY_ASSISTANT_SCREEN_GLASS,
+        XposedEntry.PACKAGE_QUICK_SEARCH_BOX to Prefs.KEY_QUICK_SEARCH_GLASS,
+        XposedEntry.PACKAGE_CALENDAR to Prefs.KEY_CALENDAR_GLASS,
+        XposedEntry.PACKAGE_NOTE to Prefs.KEY_NOTE_GLASS,
+        XposedEntry.PACKAGE_WEATHER to Prefs.KEY_WEATHER_GLASS,
+    )
+
     private val COMPAT_SWITCH_DEFAULTS = mapOf(
         Prefs.KEY_ASSISTANT_PAGE_GLASS to Prefs.DEFAULT_ASSISTANT_PAGE_GLASS,
         Prefs.KEY_QUICK_SEARCH_PAGE_GLASS to Prefs.DEFAULT_QUICK_SEARCH_PAGE_GLASS,
@@ -79,6 +91,9 @@ object PageGlassEngine {
 
     @Volatile
     private var compatSwitchDefault: Boolean = false
+
+    @Volatile
+    private var appSwitchKey: String? = null
 
     @Volatile
     private var cachedSwitch = false
@@ -131,6 +146,7 @@ object PageGlassEngine {
         this.hostClassLoader = classLoader
         compatSwitchKey = COMPAT_SWITCH_KEYS[packageName]
         compatSwitchKey?.let { compatSwitchDefault = COMPAT_SWITCH_DEFAULTS[it] ?: false }
+        appSwitchKey = APP_SWITCH_KEYS[packageName]
         GlassElementRegistry.attach(api)
         EngineLog.attach { Prefs.read(api) }
         if (hooksMounted) return
@@ -690,6 +706,7 @@ object PageGlassEngine {
             cachedSwitch = try {
                 val prefs = Prefs.read(api!!)
                 prefs.getBoolean(Prefs.KEY_ELEMENT_GLASS_ENABLE, Prefs.DEFAULT_ELEMENT_GLASS_ENABLE) ||
+                    appSwitchKey?.let { prefs.getBoolean(it, false) } == true ||
                     compatSwitchKey?.let {
                         prefs.getBoolean(it, compatSwitchDefault)
                     } == true
@@ -699,7 +716,7 @@ object PageGlassEngine {
             }
             val shouldLog = cachedSwitch != before || !switchLogged
             switchLogged = true
-            if (shouldLog) Lg.i(TAG, "switch element_glass=$cachedSwitch (compat=$compatSwitchKey)")
+            if (shouldLog) Lg.i(TAG, "switch element_glass=$cachedSwitch (app=$appSwitchKey compat=$compatSwitchKey)")
         }
         return cachedSwitch
     }

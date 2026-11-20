@@ -10,8 +10,10 @@ import android.view.View
 import com.coloros16.liquidglass.config.Prefs
 import com.coloros16.liquidglass.engine.ClockAnchor
 import com.coloros16.liquidglass.engine.ClockAnchorMapper
+import com.coloros16.liquidglass.engine.ClockHandoffPolicy
 import com.coloros16.liquidglass.engine.ClockStateMachine
 import com.coloros16.liquidglass.engine.SceneState
+import com.coloros16.liquidglass.engine.TransitionEdge
 import com.coloros16.liquidglass.engine.WidgetRectPx
 import com.coloros16.liquidglass.log.Lg
 import io.github.libxposed.api.XposedInterface
@@ -25,9 +27,10 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * - 第一路：[DesktopClockAnchorHook] 从 Launcher 广播来的桌面时钟小部件矩形；
  * - 第二路：[StatusBarClockAnchorHook] 在进程内直接给的状态栏时钟矩形。
- * - 优先级：桌面大时钟小部件 > 状态栏时钟 > 隐藏（alpha=0）。
+ * - 优先级：桌面大时钟小部件 > 状态栏时钟 > 淡出（alpha=0）。
  * - 门控 = [Prefs.KEY_MASTER] ∧ [Prefs.KEY_ALIVE_AOD_HANDOFF]（TTL 500ms），关时只丢包不卸载。
- * - 只收 launcher 包发来的广播（API 34+ 校验来源包，取不到则放行并记日志）。
+ * - 只收 launcher 包发来的上行包（API 34+ 校验来源包，取不到则放行并记日志）。
+ * - 同时把交接进度下行推给 Launcher，由它写桌面小部件 alpha 完成两颗钟换手。
  * - 事件驱动、无轮询；进程生命周期内常驻一个 receiver。
  */
 object DesktopClockAnchorBridge {
@@ -56,6 +59,12 @@ object DesktopClockAnchorBridge {
     /** 锁屏时钟高度（缩放基准）；未接线时为 0，缩放退化为 1。 */
     @Volatile private var lockClockHeightPx = 0f
 
+    /** 宿主自带桌面时钟平移（C17 灵感时钟）：为真则整条交接让位。 */
+    @Volatile private var nativeClockPresent = false
+    @Volatile private var lastHandoffSent = Float.NaN
+    @Volatile private var lastHandoffEnabledSent = false
+    private val handoffSends = AtomicLong()
+
     private var api: XposedInterface? = null
 
     private fun logThrottled(key: String, msg: String, intervalMs: Long = THROTTLE_MS) {
@@ -74,6 +83,7 @@ object DesktopClockAnchorBridge {
         }
         this.api = api
         refreshGate()
+        probeNativeClock(classLoader)
         val ctx = Lg.processContext()?.applicationContext
         if (ctx == null) {
             Lg.e(TAG, "dc-bridge 进程 Context 为空，未注册接收器")
@@ -103,10 +113,100 @@ object DesktopClockAnchorBridge {
         }
     }
 
-    /** 最近一次生效的 HOME 锚点（三路优先级合并后；隐藏时 alpha=0）。 */
+    /** 最近一次生效的 HOME 锚点（三路优先级合并后；两路皆无时 alpha=0）。 */
     fun anchorOrNull(): ClockAnchor? = lastAnchor
 
     fun desktopClockVisible(): Boolean = lastVisible
+
+    /**
+     * 宿主自带桌面时钟平移探针：桌面进程的灵感时钟类不在本进程 classloader 里，
+     * 故只按 launcher 宿主版本查池；Launcher 侧另有类探针，两侧各自独立判定同一档。
+     */
+    private fun probeNativeClock(classLoader: ClassLoader) {
+        val byVersion = try {
+            val ver = VersionPool.readVersion(DesktopClockProtocol.LAUNCHER_PKG)
+            VersionPool.query(DesktopClockProtocol.LAUNCHER_PKG, ver)
+                .profile.desktopClockPath == DesktopClockPath.NATIVE_INSPIRATION
+        } catch (t: Throwable) {
+            false
+        }
+        val byClass = try {
+            Class.forName(ClockHandoffPolicy.CLASS_NATIVE_CLOCK, false, classLoader)
+            true
+        } catch (t: Throwable) {
+            false
+        }
+        nativeClockPresent = byVersion || byClass
+        Lg.i(
+            TAG,
+            "dc-bridge-native present=$nativeClockPresent byVer=$byVersion byClass=$byClass " +
+                "translate=${ClockHandoffPolicy.moduleTranslates(nativeClockPresent)}",
+        )
+    }
+
+    /** 本模块是否该补桌面段平移（宿主自带则让位）。 */
+    fun moduleTranslates(): Boolean = ClockHandoffPolicy.moduleTranslates(nativeClockPresent)
+
+    /**
+     * 交接进度下行：帧链内调用，值未变不发（同值重发等于自造跨进程轮询）。
+     *
+     * [edge] 为 null（静止态）时按当前静态归属发端值：桌面态 = 1，其余 = 0。
+     */
+    fun publishHandoff(edge: TransitionEdge?, t: Float, staticState: SceneState) {
+        if (!refreshGate()) return
+        val p = if (edge != null) {
+            ClockHandoffPolicy.progress(edge, t)
+        } else if (staticState == SceneState.HOME) {
+            1f
+        } else {
+            0f
+        }
+        val enabled = moduleTranslates() && widgetAnchor != null
+        if (!ClockHandoffPolicy.shouldPublish(p, lastHandoffSent, enabled, lastHandoffEnabledSent)) return
+        lastHandoffSent = p
+        lastHandoffEnabledSent = enabled
+        sendHandoff(p, enabled, edge?.name ?: "static:$staticState")
+    }
+
+    /**
+     * 撤效果时把桌面小部件还原：强制发一次使能位 false，桌面进程按记账回写原 alpha。
+     *
+     * 不走 [publishHandoff] 的值判重，避免「上一次也是 false」被判成无变化而不发。
+     */
+    fun releaseHandoff(reason: String) {
+        if (!lastHandoffEnabledSent && lastHandoffSent.isNaN()) return
+        lastHandoffSent = Float.NaN
+        lastHandoffEnabledSent = false
+        sendHandoff(0f, false, "release:$reason")
+    }
+
+    private fun sendHandoff(p: Float, enabled: Boolean, reason: String) {
+        val ctx = Lg.processContext()?.applicationContext ?: run {
+            logThrottled("dc-handoff-ctx", "Context 为空，交接未发送")
+            return
+        }
+        try {
+            val intent = Intent(DesktopClockProtocol.ACTION).apply {
+                setPackage(DesktopClockProtocol.LAUNCHER_PKG)
+                addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+                putExtra(DesktopClockProtocol.EXTRA_DIRECTION, DesktopClockProtocol.DIR_HANDOFF)
+                putExtra(DesktopClockProtocol.EXTRA_HANDOFF, p)
+                putExtra(DesktopClockProtocol.EXTRA_HANDOFF_ENABLED, enabled)
+                putExtra(DesktopClockProtocol.EXTRA_REASON, reason)
+            }
+            ctx.sendBroadcast(intent)
+            handoffSends.incrementAndGet()
+            logThrottled(
+                "dc-handoff-pub",
+                String.format(
+                    Locale.US, "p=%.3f on=%b reason=%s sends=%d",
+                    p, enabled, reason, handoffSends.get(),
+                ),
+            )
+        } catch (t: Throwable) {
+            logThrottled("dc-handoff-send", "交接发送失败 ${t.javaClass.simpleName}: ${t.message}")
+        }
+    }
 
     /** 锁屏时钟高度接入点：由锁屏时钟锚点链在测到高度后回填，状态栏小目标的缩放才正确。 */
     fun setLockClockHeightPx(px: Float) {
@@ -178,7 +278,7 @@ object DesktopClockAnchorBridge {
         return anchor
     }
 
-    /** 三路优先级合并后写进状态机；widget 优先于状态栏时钟，二者皆无则隐藏。 */
+    /** 三路优先级合并后写进状态机；widget 优先于状态栏时钟，二者皆无则淡出。 */
     private fun applyHomeAnchor(reason: String) {
         val effective = ClockAnchorMapper.pickHomeAnchor(widgetAnchor, statusBarAnchor)
         machine.setAnchor(SceneState.HOME, effective, SystemClock.uptimeMillis())
@@ -203,6 +303,10 @@ object DesktopClockAnchorBridge {
             logThrottled("dc-bridge-gate", "门控关闭，丢弃 drop=${drops.get()}")
             return
         }
+        val dir = intent.getIntExtra(
+            DesktopClockProtocol.EXTRA_DIRECTION, DesktopClockProtocol.DIR_ANCHOR,
+        )
+        if (dir != DesktopClockProtocol.DIR_ANCHOR) return
         val from = senderPackage(receiver)
         if (from != null && from != DesktopClockProtocol.LAUNCHER_PKG) {
             drops.incrementAndGet()
@@ -234,6 +338,7 @@ object DesktopClockAnchorBridge {
             widgetAnchor = null
         }
         applyHomeAnchor(reason)
+        lastHandoffSent = Float.NaN
         logThrottled(
             if (visible) "dc-bridge-set" else "dc-bridge-hide",
             String.format(

@@ -97,7 +97,7 @@ sealed class AodItem {
 
     class Stub(@StringRes val titleRes: Int) : AodItem()
 
-    /** 打开内联编辑面板（添加小组件）；无内联面板时退回 [fallbackScreenId] 编辑页。 */
+    /** 就地编辑动作；宿主没有内联编辑能力时退回 [fallbackScreenId] 页。 */
     class EditAction(val action: String, val fallbackScreenId: String) : AodItem()
 
     object ResetParams : AodItem()
@@ -106,6 +106,9 @@ sealed class AodItem {
 /** 行跳转动作。 */
 sealed class AodNavAction {
     class Push(val screenId: String) : AodNavAction()
+
+    /** 关面板就地编辑；[editPageId] 只在宿主没有内联编辑能力时用作退路。 */
+    class InlineEdit(val editPageId: String) : AodNavAction()
     object SystemWallpaper : AodNavAction()
     object SystemIcons : AodNavAction()
     object PickPhoto : AodNavAction()
@@ -456,7 +459,7 @@ object AodSettingsPages {
                         R.string.settings_aod_edit_row_desc_lock
                     },
                     R.drawable.ic_row_config,
-                    AodNavAction.Push("aodui/$editPageId"),
+                    AodNavAction.InlineEdit(editPageId),
                 ),
             ),
         ),
@@ -762,15 +765,6 @@ object AodSettingsPages {
         )
         out.add(AodGroup(R.string.settings_aod_advanced_reset, listOf(AodItem.ResetParams)))
         return out
-    }
-
-    /** 效果清单 → 选项；标签取 EffectDef.nameKey 对应的字符串资源。 */
-    private fun effectOptions(context: Context, kind: EffectKind): List<AodOption> =
-        EffectCatalog.of(kind).map { AodOption(it.id, labelOf(context, it)) }
-
-    private fun labelOf(context: Context, def: EffectDef): Int {
-        val res = context.resources.getIdentifier(def.nameKey, "string", context.packageName)
-        return if (res != 0) res else android.R.string.ok
     }
 
     /** 家族展示名。 */
@@ -1541,6 +1535,15 @@ class AodSettingsController(
     private fun onNav(action: AodNavAction) {
         when (action) {
             is AodNavAction.Push -> push(action.screenId)
+            is AodNavAction.InlineEdit -> {
+                val handler = editAction
+                if (handler != null) {
+                    handler("inline_edit:${action.editPageId}")
+                } else {
+                    Lg.i(TAG, "inline edit unavailable page=${action.editPageId} fallback page")
+                    push("aodui/${action.editPageId}")
+                }
+            }
             AodNavAction.SystemWallpaper -> launch(
                 Intent(Intent.ACTION_SET_WALLPAPER).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             )
@@ -1589,12 +1592,15 @@ class AodSettingsController(
         val resolved = EffectResolver.resolveOne(
             id, kind, id,
             settings.allowAodDynamic,
-            settings.aodStyleId == AodStyleCatalog.ID_FULLSCREEN,
+            com.coloros16.liquidglass.engine.effect.panoramaAodActiveOf(effectiveStyleId()),
             hasGyro,
             false,
         )
         return resolved.reason.takeIf { it != com.coloros16.liquidglass.engine.effect.EffectBlockReason.NONE }
     }
+
+    /** 门槛判定用的样式：预览面板按草稿 id，独立设置页按已存配置。 */
+    private fun effectiveStyleId(): String = styleOverride ?: settings.aodStyleId
 
     private fun gateTextRes(reason: com.coloros16.liquidglass.engine.effect.EffectBlockReason): Int = when (reason) {
         com.coloros16.liquidglass.engine.effect.EffectBlockReason.UNIMPLEMENTED -> R.string.settings_aod_gate_unimplemented

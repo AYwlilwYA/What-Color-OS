@@ -878,8 +878,10 @@ object LiquidGlassShader {
                     exp(-pd2 * pd2 * 2.4) * uPressGlow2 +
                     exp(-pd3 * pd3 * 2.4) * uPressGlow3;
                 spot = min(spot, 1.0);
-                float3 room = max(float3(glass.a) - glass.rgb, float3(0.0));
-                glass.rgb += room * spot * 0.85;
+                // 亮度提升：按 alpha 比例抬 rgb（不透明度越低抬升越弱），再钳回预乘上限；
+                // 旧「剩余空间加性」在亮背景（rgb≈a）上余量≈0 → 光斑不可见
+                float3 lift = float3(spot * 0.55) * glass.a;
+                glass.rgb = min(glass.rgb + lift, float3(glass.a));
             }
 
             // [临时诊断 高光] 逐像素可视化（需 uDebugHighlight>0.5）。

@@ -2,7 +2,6 @@ package com.coloros16.liquidglass.ui.aod
 
 import android.content.Context
 import android.graphics.Canvas
-import android.graphics.DashPathEffect
 import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
@@ -18,9 +17,11 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
 import com.coloros16.liquidglass.R
+import com.coloros16.liquidglass.engine.SCREEN_ASPECT
 import com.coloros16.liquidglass.engine.edit.ClockFonts
 import com.coloros16.liquidglass.engine.edit.ClockInfo
 import com.coloros16.liquidglass.engine.edit.ClockLayout
+import com.coloros16.liquidglass.engine.edit.EditAnchorOverlay
 import com.coloros16.liquidglass.engine.edit.EditAxis
 import com.coloros16.liquidglass.engine.edit.EditLayoutSolver
 import com.coloros16.liquidglass.engine.edit.EditSurface
@@ -29,7 +30,6 @@ import com.coloros16.liquidglass.engine.edit.LockWidget
 import com.coloros16.liquidglass.engine.edit.PillPlacement
 import com.coloros16.liquidglass.engine.edit.SnapEngine
 import com.coloros16.liquidglass.engine.edit.WidgetCatalog
-import kotlin.math.abs
 import kotlin.math.min
 
 /**
@@ -68,6 +68,24 @@ class AodEditView @JvmOverloads constructor(
             invalidate()
         }
 
+    /** 样式时钟锚点（归一化）由外部注入；未注入时回落编辑缺省位。 */
+    var anchor: Pair<Float, Float>? = null
+        set(value) {
+            field = value
+            invalidate()
+        }
+
+    private fun anchorX(): Float =
+        anchor?.first ?: EditAnchorOverlay.defaultX()
+
+    private fun anchorY(): Float =
+        anchor?.second ?: EditAnchorOverlay.defaultYOf(surface)
+
+    /** 时钟实际绘制中心（px）：这一轴没编辑过就落样式锚点，编辑过取用户值。 */
+    private fun clockCenterPx(s: LockLayoutSettings, w: Float, h: Float): Pair<Float, Float> =
+        ClockLayout.configToVisual(s.clockX, anchorX(), EditAnchorOverlay.defaultX()) * w to
+            ClockLayout.configToVisual(s.clockY, anchorY(), EditAnchorOverlay.defaultYOf(surface)) * h
+
     private enum class Kind { CLOCK, WIDGET, PILL }
 
     private enum class Selection { NONE, CLOCK, WIDGET, PILL }
@@ -88,9 +106,12 @@ class AodEditView @JvmOverloads constructor(
     private var startY = 0f
     private var startVX = 0f
     private var startVY = 0f
-    private var startScale = 1f
     private var resizeAnchorLeft = 0f
     private var resizeAnchorTop = 0f
+    private var startStretchX = 1f
+    private var startStretchY = 1f
+    private var resizeAnchorHalfW = 0f
+    private var resizeAnchorHalfH = 0f
     private var guideX = -1f
     private var guideY = -1f
 
@@ -110,28 +131,25 @@ class AodEditView @JvmOverloads constructor(
     }
     private val platePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
-        color = 0x1FFFFFFF
+        color = EditChromePainter.PLATE_COLOR
     }
     private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = 1f * density
         color = 0x40FFFFFF
     }
-    private val selectPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeWidth = 1.6f * density
-        color = context.getColor(R.color.lg_blued_ink)
-        pathEffect = DashPathEffect(floatArrayOf(7f * density, 5f * density), 0f)
-    }
-    private val guidePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeWidth = 1f * density
-        color = context.getColor(R.color.lg_blued_ink)
-        pathEffect = DashPathEffect(floatArrayOf(6f * density, 6f * density), 0f)
-    }
+    private val selectPaint =
+        EditChromePainter.selectPaint(density, context.getColor(R.color.lg_blued_ink))
+    private val guidePaint =
+        EditChromePainter.guidePaint(density, context.getColor(R.color.lg_blued_ink))
     private val handlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
         color = context.getColor(R.color.lg_blued_ink)
+    }
+    private val handleStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 1f * density
+        color = 0x66000000
     }
     private val widgetTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textSize = 12f * density
@@ -145,7 +163,7 @@ class AodEditView @JvmOverloads constructor(
 
     private val clockBounds = RectF()
     private var clockTextSize = 0f
-    private val dateColor = 0xFFE7EDF4.toInt()
+    private val dateColor = EditChromePainter.DATE_COLOR
 
     private val holdClock = Runnable {
         if (target == Kind.CLOCK) {
@@ -180,6 +198,22 @@ class AodEditView @JvmOverloads constructor(
         }
     }
 
+    /**
+     * 画布按整屏等比测：容器给多大都在里面摆一个手机比例的框，
+     * 归一化坐标才与真机一致，不会被正方形容器压扁。
+     */
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val availW = MeasureSpec.getSize(widthMeasureSpec).toFloat().coerceAtLeast(1f)
+        val availH = MeasureSpec.getSize(heightMeasureSpec).toFloat().coerceAtLeast(1f)
+        var w = availH * SCREEN_ASPECT
+        var h = availH
+        if (w > availW) {
+            w = availW
+            h = w / SCREEN_ASPECT
+        }
+        setMeasuredDimension(w.toInt().coerceAtLeast(1), h.toInt().coerceAtLeast(1))
+    }
+
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         backgroundPaint.shader = LinearGradient(
@@ -205,11 +239,14 @@ class AodEditView @JvmOverloads constructor(
     }
 
     private fun drawClock(canvas: Canvas, s: LockLayoutSettings, w: Float, h: Float) {
+        val center = clockCenterPx(s, w, h)
         clockTextSize = ClockGlyphPainter.draw(
-            canvas, s.clockX * w, s.clockY * h, ClockLayout.fontPx(w, h, s.clockScale),
+            canvas, center.first, center.second,
+            ClockLayout.fontPx(w, h, s.clockScale),
             timeText(), dateText(), s.clock.colorArgb, dateColor,
             typefaceOf(s), dateTypeface(), s.clock.letterSpacing, s.clock.info,
-            clockPaint, subPaint, clockBounds, 14f * density,
+            clockPaint, subPaint, clockBounds, EditChromePainter.CLOCK_PAD_DP * density,
+            s.clockStretchX, s.clockStretchY,
         )
     }
 
@@ -268,9 +305,9 @@ class AodEditView @JvmOverloads constructor(
             } ?: return
             Selection.NONE -> return
         }
-        canvas.drawRoundRect(rect, 12f * density, 12f * density, selectPaint)
+        EditChromePainter.drawSelection(canvas, rect, selection == Selection.PILL, density, selectPaint)
         if (selection == Selection.CLOCK) {
-            canvas.drawCircle(rect.right, rect.bottom, 7f * density, handlePaint)
+            EditChromePainter.drawClockHandles(canvas, rect, density, handlePaint, handleStroke)
         }
     }
 
@@ -331,12 +368,17 @@ class AodEditView @JvmOverloads constructor(
                 guideY = -1f
                 target = null
                 targetId = null
+                // 存量配置可能带着超框拉伸进来，手柄那时已经不在可点范围，先收一次再判命中
+                ensureStretchFits(s)
                 if (selection == Selection.CLOCK && nearClockHandle(x, y)) {
                     resizing = true
                     target = Kind.CLOCK
-                    startScale = s.clockScale
+                    startStretchX = s.clockStretchX
+                    startStretchY = s.clockStretchY
                     resizeAnchorLeft = clockBounds.left
                     resizeAnchorTop = clockBounds.top
+                    resizeAnchorHalfW = clockBounds.width() / 2f
+                    resizeAnchorHalfH = clockBounds.height() / 2f
                     return true
                 }
                 if (!pick(x, y, s)) {
@@ -345,8 +387,9 @@ class AodEditView @JvmOverloads constructor(
                 }
                 when (target) {
                     Kind.CLOCK -> {
-                        startX = s.clockX
-                        startY = s.clockY
+                        val c = clockCenterPx(s, width.toFloat(), height.toFloat())
+                        startX = c.first / width.toFloat()
+                        startY = c.second / height.toFloat()
                         handler.postDelayed(holdClock, ViewConfiguration.getLongPressTimeout().toLong())
                     }
                     Kind.WIDGET -> {
@@ -462,12 +505,16 @@ class AodEditView @JvmOverloads constructor(
         val ny = (startY + (y - downY) / h).coerceIn(0f, 1f)
         when (target) {
             Kind.CLOCK -> {
-                val cx = clampCenterX(nx, clockBounds.width() / 2f, clockEdgeMargin)
-                val cy = if (surface.axis == EditAxis.HORIZONTAL_ONLY) {
-                    ny
+                val vx = clampVisualCenter(nx, clockBounds.width() / 2f, w)
+                val vy = if (surface.axis == EditAxis.HORIZONTAL_ONLY) {
+                    clockBounds.centerY() / h
                 } else {
-                    clampCenterY(ny, clockBounds.height() / 2f, clockEdgeMargin)
+                    clampVisualCenter(ny, clockBounds.height() / 2f, h)
                 }
+                val cx = ClockLayout.visualToConfig(vx, anchorX(), EditAnchorOverlay.defaultX())
+                val cy = ClockLayout.visualToConfig(
+                    vy, anchorY(), EditAnchorOverlay.defaultYOf(surface),
+                )
                 val result = if (s.snapEnabled) {
                     s.moveClock(cx, cy)
                 } else {
@@ -507,34 +554,69 @@ class AodEditView @JvmOverloads constructor(
         }
     }
 
-    /** 右下角手柄缩放：字号按位移求值，中心同量右移下移使左上角钉死。 */
+    /** 右下角手柄自由变形：横向位移拉宽、纵向位移拉高，左上角钉死。 */
     private fun resizeClock(s: LockLayoutSettings, dx: Float, dy: Float) {
         val w = width.toFloat()
         val h = height.toFloat()
         if (w <= 0f || h <= 0f) return
-        val next = min(
-            ClockLayout.resizeScale(startScale, dx, dy, min(w, h)),
-            fitMaxScale(),
+        val next = ClockLayout.resizeStretch(
+            startStretchX, startStretchY, dx, dy, resizeAnchorHalfW, resizeAnchorHalfH,
         )
-        if (next <= 0f) return
-        s.clockScale = next
+        s.clockStretchX = next[0]
+        s.clockStretchY = next[1]
         drawClockOffscreen(s, w, h)
-        s.clockX = (resizeAnchorLeft + clockBounds.width() / 2f) / w
-        s.clockY = (resizeAnchorTop + clockBounds.height() / 2f) / h
+        // 框超出画布时钩心会被推到屏幕外，手柄是唯一收窄入口 ⇒ 拉过头就拉不回来。
+        val fit = ClockLayout.fitStretch(
+            s.clockStretchX, s.clockStretchY, clockBounds.width(), clockBounds.height(),
+            2f * EditChromePainter.CLOCK_PAD_DP * density, w, h,
+        )
+        if (fit[0] != s.clockStretchX || fit[1] != s.clockStretchY) {
+            s.clockStretchX = fit[0]
+            s.clockStretchY = fit[1]
+            drawClockOffscreen(s, w, h)
+        }
+        val cx = (resizeAnchorLeft + clockBounds.width() / 2f) / w
+        val cy = (resizeAnchorTop + clockBounds.height() / 2f) / h
+        s.clockX = ClockLayout.visualToConfig(cx, anchorX(), EditAnchorOverlay.defaultX())
+        s.clockY = ClockLayout.visualToConfig(
+            cy, anchorY(), EditAnchorOverlay.defaultYOf(surface),
+        )
+        logResize(next[0], next[1], s)
     }
 
-    /** 只量框不绘制：缩放中按新字号重算命中框，供左上角反算中心。 */
+    /** 手柄变形全链路值：锚点、两轴拉伸、反算中心，用于定位左上角漂移。 */
+    private fun logResize(sx: Float, sy: Float, s: LockLayoutSettings) {
+        val now = android.os.SystemClock.uptimeMillis()
+        val key = "${(sx * 100f).toInt()}|${(sy * 100f).toInt()}|${(s.clockX * 500f).toInt()}"
+        if (key == resizeLogKey && now - resizeLogAt < 1200L) return
+        resizeLogKey = key
+        resizeLogAt = now
+        com.coloros16.liquidglass.log.Lg.i(
+            "AodEdit",
+            "clock-stretch sx=$sx sy=$sy anchorL=$resizeAnchorLeft anchorT=$resizeAnchorTop " +
+                "anchorHalfW=$resizeAnchorHalfW anchorHalfH=$resizeAnchorHalfH " +
+                "newHalfW=${clockBounds.width() / 2f} newHalfH=${clockBounds.height() / 2f} " +
+                "cx=${s.clockX} cy=${s.clockY}",
+        )
+    }
+
+    private var resizeLogKey = ""
+    private var resizeLogAt = 0L
+
+    /** 只量框不绘制：变形中按新拉伸重算命中框，供左上角反算中心。 */
     private fun drawClockOffscreen(s: LockLayoutSettings, w: Float, h: Float) {
         val size = ClockLayout.fontPx(w, h, s.clockScale)
         val probe = Paint(clockPaint).apply {
             textSize = size
             typeface = typefaceOf(s)
             letterSpacing = s.clock.letterSpacing
+            textScaleX = s.clockStretchX
         }
-        val halfW = probe.measureText(timeText()) / 2f + 14f * density
-        val halfH = size * ClockGlyphPainter.BOUNDS_HALF_HEIGHT_RATIO
-        val cx = s.clockX * w
-        val cy = s.clockY * h
+        val halfW = probe.measureText(timeText()) / 2f + EditChromePainter.CLOCK_PAD_DP * density
+        val halfH = size * ClockGlyphPainter.BOUNDS_HALF_HEIGHT_RATIO * s.clockStretchY
+        val center = clockCenterPx(s, w, h)
+        val cx = center.first
+        val cy = center.second
         clockBounds.set(cx - halfW, cy - halfH, cx + halfW, cy + halfH)
     }
 
@@ -542,17 +624,52 @@ class AodEditView @JvmOverloads constructor(
     private fun fitMaxScale(): Float {
         val w = width.toFloat()
         val current = settings?.clockScale ?: 1f
-        val drawn = clockBounds.width() - 28f * density
+        val drawn = clockBounds.width() - 2f * EditChromePainter.CLOCK_PAD_DP * density
         if (w <= 0f || current <= 0f || drawn <= 0f) return LockLayoutSettings.MAX_CLOCK_SCALE
         return ClockLayout.fitScale(drawn, current, w * (1f - 2f * clockEdgeMargin))
     }
 
+    /** 边界钳位按实际绘制中心做，再换算回配置值；直接钳配置值会让左上锚点漂。 */
     private fun clampClock(s: LockLayoutSettings) {
         val w = width.toFloat()
         val h = height.toFloat()
         if (w <= 0f || h <= 0f) return
-        s.clockX = clampCenterX(s.clockX, clockBounds.width() / 2f, clockEdgeMargin)
-        if (surface.axis == EditAxis.FREE) s.clockY = clampCenterY(s.clockY, clockBounds.height() / 2f, clockEdgeMargin)
+        val center = clockCenterPx(s, w, h)
+        val vx = clampVisualCenter(center.first / w, clockBounds.width() / 2f, w)
+        s.clockX = ClockLayout.visualToConfig(vx, anchorX(), EditAnchorOverlay.defaultX())
+        if (surface.axis == EditAxis.FREE) {
+            val vy = clampVisualCenter(center.second / h, clockBounds.height() / 2f, h)
+            s.clockY = ClockLayout.visualToConfig(
+                vy, anchorY(), EditAnchorOverlay.defaultYOf(surface),
+            )
+        }
+    }
+
+    /**
+     * 拉伸后框比屏还宽时不钳位：钳位会把中心拍回 0.5，左上锚点当场跳走。
+     *
+     * 只有框还装得下才钳；装不下就保留用户拖出的中心，允许溢出屏幕。
+     */
+    private fun clampVisualCenter(visual: Float, halfPx: Float, sizePx: Float): Float {
+        if (sizePx <= 0f || halfPx <= 0f) return visual
+        val half = halfPx / sizePx + clockEdgeMargin
+        if (half * 2f >= 1f) {
+            logOversize(half, visual)
+            return visual
+        }
+        return visual.coerceIn(half, 1f - half)
+    }
+
+    private var oversizeLogAt = 0L
+
+    private fun logOversize(half: Float, visual: Float) {
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - oversizeLogAt < 1500L) return
+        oversizeLogAt = now
+        com.coloros16.liquidglass.log.Lg.i(
+            "AodEdit",
+            "clock-clamp skipped oversize half=${"%.3f".format(half)} visual=${"%.3f".format(visual)}",
+        )
     }
 
     private fun clampCenterX(value: Float, halfPx: Float, margin: Float = 0f): Float {
@@ -569,8 +686,22 @@ class AodEditView @JvmOverloads constructor(
         return if (half * 2f >= 1f) 0.5f else value.coerceIn(half, 1f - half)
     }
 
-    private fun nearClockHandle(x: Float, y: Float): Boolean {
-        val r = 22f * density
-        return abs(x - clockBounds.right) <= r && abs(y - clockBounds.bottom) <= r
+    /** 框超出画布时按比例收拉伸并落盘：手柄是唯一收窄入口，超框即不可达。 */
+    private fun ensureStretchFits(s: LockLayoutSettings) {
+        val w = width.toFloat()
+        val h = height.toFloat()
+        if (w <= 0f || h <= 0f || clockBounds.width() <= 0f) return
+        val fit = ClockLayout.fitStretch(
+            s.clockStretchX, s.clockStretchY, clockBounds.width(), clockBounds.height(),
+            2f * EditChromePainter.CLOCK_PAD_DP * density, w, h,
+        )
+        if (fit[0] == s.clockStretchX && fit[1] == s.clockStretchY) return
+        s.clockStretchX = fit[0]
+        s.clockStretchY = fit[1]
+        drawClockOffscreen(s, w, h)
+        listener?.onLayoutEdited()
     }
+
+    private fun nearClockHandle(x: Float, y: Float): Boolean =
+        EditChromePainter.nearHook(x, y, clockBounds, density)
 }

@@ -35,10 +35,7 @@
             <TextView android:id="@+id/infoGlassPreset" style="@style/ShellGroupInfo" />
             <View style="@style/ShellGroupRule" />
         </LinearLayout>
-        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:background="@drawable/bg_plate" android:divider="@drawable/bg_seam_line_inset" android:dividerHeight="1dp" android:orientation="vertical" android:showDividers="middle">
-            <include android:id="@+id/presetAppearanceRow" layout="@layout/item_row" android:layout_width="match_parent" android:layout_height="wrap_content" />
-            <include android:id="@+id/presetCustomRow" layout="@layout/item_row" android:layout_width="match_parent" android:layout_height="wrap_content" />
-        </LinearLayout>
+        <LinearLayout android:id="@+id/glassStyleList" android:layout_width="match_parent" android:layout_height="wrap_content" android:background="@drawable/bg_plate" android:divider="@drawable/bg_seam_line_inset" android:dividerHeight="1dp" android:orientation="vertical" android:showDividers="middle" />
         <TextView style="@style/ShellHint" android:text="@string/settings_glass_preset_hint" />
         <!-- ===== 配置管理 ===== -->
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="20dp" android:layout_marginBottom="8dp" android:gravity="center_vertical" android:orientation="horizontal">
@@ -94,6 +91,21 @@
                     <com.coloros16.liquidglass.ui.LgSwitch android:id="@+id/switchSmartSidebarGlass" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_smart_sidebar_glass" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
                     />
                     <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_smart_sidebar_glass_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
+                    <com.coloros16.liquidglass.ui.LgSwitch android:id="@+id/switchCalendarGlass" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_calendar_glass" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                    />
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_calendar_glass_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
+                    <com.coloros16.liquidglass.ui.LgSwitch android:id="@+id/switchNoteGlass" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_note_glass" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                    />
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_note_glass_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
+                    <com.coloros16.liquidglass.ui.LgSwitch android:id="@+id/switchWeatherGlass" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_weather_glass" android:thumb="@drawable/lg_sw_thumb" android:track="@drawable/lg_sw_track" android:textSize="15sp" android:textColor="@color/lg_ink_100"     android:minHeight="0dp"
+                    />
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="@string/settings_weather_glass_desc" android:textAppearance="?attr/textAppearanceBodySmall" android:textColor="?android:attr/textColorSecondary" />
                 </LinearLayout>
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:paddingHorizontal="15dp" android:paddingVertical="13dp">
                     <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">

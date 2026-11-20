@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 不声明息屏 ambient 能力：该能力要 signature 级权限，普通应用设壁纸会被拒。
+     三态切换走公开 onCommand 与屏幕广播。 -->
 <wallpaper xmlns:android="http://schemas.android.com/apk/res/android"
     android:author="@string/app_name"
     android:description="@string/wp_3d_picker_desc"

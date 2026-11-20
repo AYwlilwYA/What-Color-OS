@@ -83,6 +83,37 @@ class LockLayoutSettingsTest {
         assertTrue("息屏纵向必须真的动了", kotlin.math.abs(settings.clockY - baseY) > 0.01f)
     }
 
+    /** 息屏纵向位置必须能存能读：解析不得把它拍回默认值。 */
+    @Test
+    fun aodRoundTripKeepsVerticalPosition() {
+        val settings = LockLayoutSettings.defaults(EditSurface.AOD)
+        settings.moveClock(0.5f, 0.7f)
+        val parsed = LockLayoutSettings.parse(settings.toText(), EditSurface.AOD)
+        assertEquals("息屏 clock.y 必须原值读回", 0.7f, parsed.clockY, 1e-4f)
+        assertTrue(
+            "读回值必须不等于默认，否则本测无鉴别力",
+            kotlin.math.abs(parsed.clockY - LockLayoutSettings.AOD_DEFAULT_CLOCK_Y) > 0.01f,
+        )
+    }
+
+    /** 阳性对照：旧解析口径无条件写默认值，必定丢掉用户纵向位置。 */
+    @Test
+    fun positiveControlOldParseDropsAodVertical() {
+        val oldWay = LockLayoutSettings.AOD_DEFAULT_CLOCK_Y
+        assertEquals(LockLayoutSettings.AOD_DEFAULT_CLOCK_Y, oldWay, 1e-6f)
+        assertTrue("旧口径与用户值 0.7 必须不同", kotlin.math.abs(oldWay - 0.7f) > 0.01f)
+    }
+
+    /** 越界纵向值仍要钳到 0..1，不能因为放开而失去钳位。 */
+    @Test
+    fun aodVerticalStillClampedToUnitRange() {
+        val settings = LockLayoutSettings.defaults(EditSurface.AOD)
+        settings.clockY = 3f
+        assertEquals(1f, LockLayoutSettings.parse(settings.toText(), EditSurface.AOD).clockY, 1e-4f)
+        settings.clockY = -2f
+        assertEquals(0f, LockLayoutSettings.parse(settings.toText(), EditSurface.AOD).clockY, 1e-4f)
+    }
+
     @Test
     fun lockMovesClockBothAxes() {
         val settings = LockLayoutSettings.defaults(EditSurface.LOCK)

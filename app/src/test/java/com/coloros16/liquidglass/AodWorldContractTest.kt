@@ -56,7 +56,7 @@ class AodWorldContractTest {
             nonScene++
             assertNull("非场景样式 $id 不该有世界契约", AodSceneCatalog.forStyle(id))
         }
-        assertEquals("十款样式里六款有世界、四款无", 4, nonScene)
+        assertEquals("十款样式里七款有世界（含手绘）、三款无", 3, nonScene)
     }
 
     @Test

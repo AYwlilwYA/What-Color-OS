@@ -60,8 +60,18 @@ readelf -d "$OUT/linkstub.so" | grep -q "SONAME.*\[$REAL_SLOT\]" || {
 }
 
 echo "== 3/4 trampoline.so (aarch64) =="
+V="$T/vendor/xz-embedded"
+XZCFG=(-include "$V/lg_xz_config.h" -I "$V")
+for f in xz_dec_stream xz_dec_lzma2 xz_crc32 xz_crc64 xz_sha256; do
+  "$CC" --target=aarch64-linux-android31 --sysroot="$SYSROOT" \
+    -c -fPIC -O2 -fvisibility=hidden "${XZCFG[@]}" \
+    "$V/$f.c" -o "$OUT/$f.o"
+done
 "$CC" --target=aarch64-linux-android31 --sysroot="$SYSROOT" \
-  -c -fPIC -O2 -fvisibility=hidden \
+  -c -fPIC -O2 -fvisibility=hidden "${XZCFG[@]}" \
+  "$T/xzdec.c" -o "$OUT/xzdec.o"
+"$CC" --target=aarch64-linux-android31 --sysroot="$SYSROOT" \
+  -c -fPIC -O2 -fvisibility=hidden -I "$T" \
   "$T/elfsym.c" -o "$OUT/elfsym.o"
 "$CC" --target=aarch64-linux-android31 --sysroot="$SYSROOT" \
   -c -fPIC -O2 -fvisibility=hidden \
@@ -73,7 +83,9 @@ echo "== 3/4 trampoline.so (aarch64) =="
   -shared -fPIC -O2 -std=c++17 -fvisibility=hidden \
   -Wl,--no-undefined -Wl,-soname,lg_sf_trampoline.so \
   -Wl,--no-as-needed "$OUT/linkstub.so" -Wl,--as-needed \
-  "$T/trampoline.cpp" "$OUT/engine.o" "$OUT/elfsym.o" "$OUT/glass_shader.o" -llog -ldl \
+  "$T/trampoline.cpp" "$OUT/engine.o" "$OUT/elfsym.o" "$OUT/glass_shader.o" \
+  "$OUT/xzdec.o" "$OUT/xz_dec_stream.o" "$OUT/xz_dec_lzma2.o" \
+  "$OUT/xz_crc32.o" "$OUT/xz_crc64.o" "$OUT/xz_sha256.o" -llog -ldl \
   -o "$OUT/trampoline.so"
 
 echo "== 4/4 ELF 断言 + 落位 =="

@@ -189,8 +189,14 @@ object DisplayRootChannel {
             // 真机实测：只设 `setFrameScale(0.25)` 时仍返回 1440x3168 全分辨率，
             // 每次抓屏要 wrap+copy 一张 18MB 位图（旧路径同参数只有 1.1MB），高频抓屏下 GC 压力大。
             // 故这里直接给缩放后的尺寸；`frameScale` 保持默认 1.0，避免二次缩放。
-            val outW = (dm.widthPixels * frameScale).toInt().coerceAtLeast(1)
-            val outH = (dm.heightPixels * frameScale).toInt().coerceAtLeast(1)
+            // 输出尺寸按 crop 折算：整屏 crop 时与原行为一致；区域 crop 时只出那一小块，
+            // 否则 crop 内容被拉伸到全屏尺寸，调用方按 region 折算采样坐标会整体错位。
+            val fullScreen = crop.left <= 0 && crop.top <= 0 &&
+                crop.right >= dm.widthPixels && crop.bottom >= dm.heightPixels
+            val srcW = if (fullScreen) dm.widthPixels else crop.width().coerceAtLeast(1)
+            val srcH = if (fullScreen) dm.heightPixels else crop.height().coerceAtLeast(1)
+            val outW = (srcW * frameScale).toInt().coerceAtLeast(1)
+            val outH = (srcH * frameScale).toInt().coerceAtLeast(1)
             builderCls.getMethod(
                 "setSize", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType
             ).invoke(builder, outW, outH)

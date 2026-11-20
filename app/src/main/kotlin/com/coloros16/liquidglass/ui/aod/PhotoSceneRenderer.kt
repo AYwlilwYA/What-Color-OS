@@ -171,7 +171,24 @@ class PhotoSceneRenderer(context: Context) {
         }.onFailure { paint.shader = null }
     }
 
+    /**
+     * 丢弃揭开底图的 shader 缓存：调用方回收旧位图前必须调。
+     *
+     * 缓存按位图身份判重，位图被回收后若仍命中旧 shader，采样已释放内存会崩。
+     */
+    fun forgetReveal() {
+        revealKey = null
+        revealShader = null
+    }
+
+    /** 丢弃相框照片的 shader 缓存：调用方回收旧位图前必须调。 */
+    fun forgetPair() {
+        pairKey = null
+        pairShader = null
+    }
+
     private fun revealShaderOf(bitmap: Bitmap): BitmapShader? {
+        if (bitmap.isRecycled) return null
         if (bitmap === revealKey) return revealShader
         revealKey = bitmap
         revealShader = BitmapShader(bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
@@ -179,6 +196,7 @@ class PhotoSceneRenderer(context: Context) {
     }
 
     private fun pairShaderOf(bitmap: Bitmap): BitmapShader? {
+        if (bitmap.isRecycled) return null
         if (bitmap === pairKey) return pairShader
         pairKey = bitmap
         pairShader = BitmapShader(bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)

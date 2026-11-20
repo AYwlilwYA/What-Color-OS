@@ -159,6 +159,15 @@ object CameraMatrices {
         out.perspective(pose.fovDeg, aspect, NEAR_PLANE, FAR_PLANE)
     }
 
+    /**
+     * 指定远裁剪面的投影：世界尺度大的场景（相机距离超过默认远面）必须用它，
+     * 否则整幅几何被远面裁掉、画面全黑。
+     */
+    fun buildProjection(pose: CameraPose, aspect: Float, farPlane: Float, out: Mat4) {
+        val far = if (farPlane > NEAR_PLANE) farPlane else FAR_PLANE
+        out.perspective(pose.fovDeg, aspect, NEAR_PLANE, far)
+    }
+
     fun buildViewProjection(pose: CameraPose, aspect: Float, out: Mat4, scratch: Mat4 = Mat4()) {
         buildProjection(pose, aspect, out)
         buildView(pose, scratch)

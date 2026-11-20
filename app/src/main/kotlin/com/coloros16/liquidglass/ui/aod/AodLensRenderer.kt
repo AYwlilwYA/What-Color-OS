@@ -130,6 +130,9 @@ class AodLensRenderer(context: Context) {
         }
     }
 
+    /** 预模糊底图是否已就绪，供调用方在跳过时记诊断。 */
+    fun hasSoftBackdrop(): Boolean = lightSoft != null
+
     /** 以 cover 同框把预模糊壁纸铺满整屏，用于锁屏↔桌面的轻模糊过渡。 */
     fun drawSoftBackdrop(canvas: Canvas, width: Float, height: Float, alpha: Float, zoom: Float) {
         val bitmap = lightSoft ?: return

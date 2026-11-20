@@ -18,6 +18,21 @@
             <View style="@style/ShellGroupRule" />
         </LinearLayout>
 
+        <com.coloros16.liquidglass.ui.SeedlingIslandPreviewView
+            android:id="@+id/seedlingIslandPreview"
+            android:layout_width="match_parent"
+            android:layout_height="220dp"
+            android:layout_marginBottom="8dp"
+            android:background="@drawable/bg_plate" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            android:text="@string/settings_seedling_preview_hint"
+            android:textAppearance="?attr/textAppearanceBodySmall"
+            android:textColor="?android:attr/textColorSecondary" />
+
 <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -34,6 +49,466 @@
                 android:layout_height="wrap_content" />
 
         </LinearLayout>
+
+        <com.coloros16.liquidglass.ui.LgSwitch
+            android:id="@+id/switchSeedlingTakeover"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/settings_seedling_takeover"
+            android:thumb="@drawable/lg_sw_thumb"
+            android:track="@drawable/lg_sw_track"
+            android:textSize="15sp"
+            android:textColor="@color/lg_ink_100"
+            android:minHeight="0dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="@string/settings_seedling_takeover_desc"
+            android:textAppearance="?attr/textAppearanceBodySmall"
+            android:textColor="?android:attr/textColorSecondary" />
+
+        <com.coloros16.liquidglass.ui.LgSwitch
+            android:id="@+id/switchSeedlingTakeoverGlass"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/settings_seedling_takeover_glass"
+            android:thumb="@drawable/lg_sw_thumb"
+            android:track="@drawable/lg_sw_track"
+            android:textSize="15sp"
+            android:textColor="@color/lg_ink_100"
+            android:minHeight="0dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="@string/settings_seedling_takeover_glass_desc"
+            android:textAppearance="?attr/textAppearanceBodySmall"
+            android:textColor="?android:attr/textColorSecondary" />
+
+        <com.coloros16.liquidglass.ui.LgSwitch
+            android:id="@+id/switchSeedlingAnchorFollow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/settings_seedling_anchor_follow"
+            android:thumb="@drawable/lg_sw_thumb"
+            android:track="@drawable/lg_sw_track"
+            android:textSize="15sp"
+            android:textColor="@color/lg_ink_100"
+            android:minHeight="0dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="@string/settings_seedling_anchor_follow_desc"
+            android:textAppearance="?attr/textAppearanceBodySmall"
+            android:textColor="?android:attr/textColorSecondary" />
+
+        <com.coloros16.liquidglass.ui.LgSwitch
+            android:id="@+id/switchSeedlingCardMode"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/settings_seedling_card_mode"
+            android:thumb="@drawable/lg_sw_thumb"
+            android:track="@drawable/lg_sw_track"
+            android:textSize="15sp"
+            android:textColor="@color/lg_ink_100"
+            android:minHeight="0dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="@string/settings_seedling_card_mode_desc"
+            android:textAppearance="?attr/textAppearanceBodySmall"
+            android:textColor="?android:attr/textColorSecondary" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btnSeedlingTestShow"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_seedling_test_show" />
+
+            <Button
+                android:id="@+id/btnSeedlingTestExpand"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:text="@string/settings_seedling_test_expand" />
+
+            <Button
+                android:id="@+id/btnSeedlingTestHide"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:text="@string/settings_seedling_test_hide" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btnSeedlingTestRecording"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_seedling_test_recording" />
+
+            <Button
+                android:id="@+id/btnSeedlingTestRecall"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:text="@string/settings_seedling_test_recall" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btnSeedlingTestCharging"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_seedling_test_charging" />
+
+            <Button
+                android:id="@+id/btnSeedlingTestHeadset"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:text="@string/settings_seedling_test_headset" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btnSeedlingTestMedia"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_seedling_test_media" />
+
+            <Button
+                android:id="@+id/btnSeedlingTestTimer"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:text="@string/settings_seedling_test_timer" />
+
+            <Button
+                android:id="@+id/btnSeedlingTestMsg"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:text="@string/settings_seedling_test_msg" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btnSeedlingTestDelivery"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_seedling_test_delivery" />
+
+            <Button
+                android:id="@+id/btnSeedlingTestRealMedia"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:text="@string/settings_seedling_test_real_media" />
+
+            <Button
+                android:id="@+id/btnSeedlingTestClear"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:text="@string/settings_seedling_test_clear" />
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="@string/settings_seedling_test_desc"
+            android:textAppearance="?attr/textAppearanceBodySmall"
+            android:textColor="?android:attr/textColorSecondary" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_seedling_takeover_bounce"
+                android:textAppearance="?attr/textAppearanceTitleSmall" />
+
+            <TextView
+                android:id="@+id/seedlingTakeoverBounceValue"
+                android:fontFamily="monospace"
+                android:letterSpacing="0.04"
+                android:textColor="@color/lg_blued_ink"
+                android:textSize="13sp"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+        </LinearLayout>
+
+        <SeekBar
+            android:id="@+id/seekSeedlingTakeoverBounce"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:max="80"
+            android:progress="50"
+            android:progressDrawable="@drawable/lg_seek_track"
+            android:splitTrack="false"
+            android:thumb="@drawable/lg_seek_thumb" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="@string/settings_seedling_takeover_bounce_desc"
+            android:textAppearance="?attr/textAppearanceBodySmall"
+            android:textColor="?android:attr/textColorSecondary" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_seedling_takeover_speed"
+                android:textAppearance="?attr/textAppearanceTitleSmall" />
+
+            <TextView
+                android:id="@+id/seedlingTakeoverSpeedValue"
+                android:fontFamily="monospace"
+                android:letterSpacing="0.04"
+                android:textColor="@color/lg_blued_ink"
+                android:textSize="13sp"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+        </LinearLayout>
+
+        <SeekBar
+            android:id="@+id/seekSeedlingTakeoverSpeed"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:max="160"
+            android:progress="60"
+            android:progressDrawable="@drawable/lg_seek_track"
+            android:splitTrack="false"
+            android:thumb="@drawable/lg_seek_thumb" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="@string/settings_seedling_takeover_speed_desc"
+            android:textAppearance="?attr/textAppearanceBodySmall"
+            android:textColor="?android:attr/textColorSecondary" />
+
+        <com.coloros16.liquidglass.ui.LgSwitch
+            android:id="@+id/switchSeedlingTakeoverAmbient"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/settings_seedling_takeover_ambient"
+            android:thumb="@drawable/lg_sw_thumb"
+            android:track="@drawable/lg_sw_track"
+            android:textSize="15sp"
+            android:textColor="@color/lg_ink_100"
+            android:minHeight="0dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="@string/settings_seedling_takeover_ambient_desc"
+            android:textAppearance="?attr/textAppearanceBodySmall"
+            android:textColor="?android:attr/textColorSecondary" />
+
+        <com.coloros16.liquidglass.ui.LgSwitch
+            android:id="@+id/switchSeedlingTakeoverLyrics"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/settings_seedling_takeover_lyrics"
+            android:thumb="@drawable/lg_sw_thumb"
+            android:track="@drawable/lg_sw_track"
+            android:textSize="15sp"
+            android:textColor="@color/lg_ink_100"
+            android:minHeight="0dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="@string/settings_seedling_takeover_lyrics_desc"
+            android:textAppearance="?attr/textAppearanceBodySmall"
+            android:textColor="?android:attr/textColorSecondary" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="@string/settings_seedling_kind_title"
+            android:textAppearance="?attr/textAppearanceTitleSmall"
+            android:textColor="@color/lg_ink_100" />
+
+        <com.coloros16.liquidglass.ui.LgSwitch
+            android:id="@+id/switchSeedlingKindMedia"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/settings_seedling_kind_media"
+            android:thumb="@drawable/lg_sw_thumb"
+            android:track="@drawable/lg_sw_track"
+            android:textSize="15sp"
+            android:textColor="@color/lg_ink_100"
+            android:minHeight="0dp" />
+
+        <com.coloros16.liquidglass.ui.LgSwitch
+            android:id="@+id/switchSeedlingKindCall"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/settings_seedling_kind_call"
+            android:thumb="@drawable/lg_sw_thumb"
+            android:track="@drawable/lg_sw_track"
+            android:textSize="15sp"
+            android:textColor="@color/lg_ink_100"
+            android:minHeight="0dp" />
+
+        <com.coloros16.liquidglass.ui.LgSwitch
+            android:id="@+id/switchSeedlingKindTimer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/settings_seedling_kind_timer"
+            android:thumb="@drawable/lg_sw_thumb"
+            android:track="@drawable/lg_sw_track"
+            android:textSize="15sp"
+            android:textColor="@color/lg_ink_100"
+            android:minHeight="0dp" />
+
+        <com.coloros16.liquidglass.ui.LgSwitch
+            android:id="@+id/switchSeedlingKindStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/settings_seedling_kind_status"
+            android:thumb="@drawable/lg_sw_thumb"
+            android:track="@drawable/lg_sw_track"
+            android:textSize="15sp"
+            android:textColor="@color/lg_ink_100"
+            android:minHeight="0dp" />
+
+        <com.coloros16.liquidglass.ui.LgSwitch
+            android:id="@+id/switchSeedlingKindLive"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/settings_seedling_kind_live"
+            android:thumb="@drawable/lg_sw_thumb"
+            android:track="@drawable/lg_sw_track"
+            android:textSize="15sp"
+            android:textColor="@color/lg_ink_100"
+            android:minHeight="0dp" />
+
+        <com.coloros16.liquidglass.ui.LgSwitch
+            android:id="@+id/switchSeedlingKindMessage"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/settings_seedling_kind_message"
+            android:thumb="@drawable/lg_sw_thumb"
+            android:track="@drawable/lg_sw_track"
+            android:textSize="15sp"
+            android:textColor="@color/lg_ink_100"
+            android:minHeight="0dp" />
+
+        <com.coloros16.liquidglass.ui.LgSwitch
+            android:id="@+id/switchSeedlingKindCode"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/settings_seedling_kind_code"
+            android:thumb="@drawable/lg_sw_thumb"
+            android:track="@drawable/lg_sw_track"
+            android:textSize="15sp"
+            android:textColor="@color/lg_ink_100"
+            android:minHeight="0dp" />
+
+        <com.coloros16.liquidglass.ui.LgSwitch
+            android:id="@+id/switchSeedlingKindFace"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/settings_seedling_kind_face"
+            android:thumb="@drawable/lg_sw_thumb"
+            android:track="@drawable/lg_sw_track"
+            android:textSize="15sp"
+            android:textColor="@color/lg_ink_100"
+            android:minHeight="0dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="@string/settings_seedling_kind_desc"
+            android:textAppearance="?attr/textAppearanceBodySmall"
+            android:textColor="?android:attr/textColorSecondary" />
 
         <TextView
             style="@style/ShellHint"

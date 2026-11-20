@@ -4,6 +4,8 @@ import android.os.Bundle
 import android.os.SystemClock
 import com.coloros16.liquidglass.config.Prefs
 import com.coloros16.liquidglass.engine.EdgeDebounce
+import com.coloros16.liquidglass.engine.SceneState
+import com.coloros16.liquidglass.hook.AodHandoffHook
 import com.coloros16.liquidglass.engine.TransitionEdge
 import com.coloros16.liquidglass.hook.MethodSignaturePicker
 import com.coloros16.liquidglass.log.Lg
@@ -213,6 +215,11 @@ object KeyguardEdgeHook {
     }
 
     private fun fire(edge: TransitionEdge, reason: String) {
+        when (edge) {
+            TransitionEdge.HOME_TO_LOCK -> AodHandoffHook.noteScene(SceneState.LOCK)
+            TransitionEdge.LOCK_TO_HOME -> AodHandoffHook.noteScene(SceneState.HOME)
+            else -> Unit
+        }
         val layer = AodStageHook.anyLayer()
         if (layer == null) {
             logThrottled("kgd-nolayer", "自绘层未挂，边沿丢弃 edge=$edge")

@@ -93,14 +93,36 @@ class AodStateBar @JvmOverloads constructor(
         invalidate()
     }
 
+    private fun trackPad(): Float = dp(3f)
+
+    /** 轨道净宽（去掉两侧内边距）；绘制与命中共用同一处。 */
+    private fun trackSpan(): Float = width - trackPad() * 2f
+
+    /** 手指 x → 整轨进度。 */
+    private fun trackT(x: Float): Float {
+        val span = trackSpan()
+        if (span <= 0f) return 0f
+        return ((x - trackPad()) / span).coerceIn(0f, 1f)
+    }
+
+    /** 整轨进度 → 绘制 x。 */
+    private fun trackX(t: Float): Float = trackPad() + trackSpan() * t.coerceIn(0f, 1f)
+
+    /** 手指 x → 三态索引，与 [trackT] 同一套 pad/span。 */
+    private fun indexAt(x: Float): Int {
+        val span = trackSpan()
+        if (span <= 0f) return 0
+        return ((x - trackPad()) / (span / 3f)).toInt().coerceIn(0, 2)
+    }
+
     override fun onDraw(canvas: Canvas) {
         val w = width.toFloat()
         val h = height.toFloat()
         if (w <= 0f || h <= 0f) return
-        val pad = dp(3f)
+        val pad = trackPad()
         val radius = h / 2f
         val innerRadius = (h - pad * 2f) / 2f
-        val segW = (w - pad * 2f) / 3f
+        val segW = trackSpan() / 3f
 
         fill.style = Paint.Style.FILL
         fill.shader = null
@@ -108,7 +130,7 @@ class AodStateBar @JvmOverloads constructor(
         canvas.drawRoundRect(r(0f, 0f, w, h), radius, radius, fill)
 
         if (scrub) {
-            val right = pad + (w - pad * 2f) * scrubT
+            val right = trackX(scrubT)
             fill.color = 0x2EFFFFFF
             canvas.drawRoundRect(r(pad, pad, right, h - pad), innerRadius, innerRadius, fill)
         }
@@ -125,7 +147,7 @@ class AodStateBar @JvmOverloads constructor(
         }
 
         if (scrub) {
-            val cx = pad + (w - pad * 2f) * scrubT
+            val cx = trackX(scrubT)
             fill.color = 0xF2FFFFFF.toInt()
             canvas.drawRoundRect(
                 r(cx - dp(1.2f), h / 2f - dp(10f), cx + dp(1.2f), h / 2f + dp(10f)),
@@ -153,8 +175,7 @@ class AodStateBar @JvmOverloads constructor(
                     moved = true
                 }
                 if (scrub) {
-                    val pad = dp(3f)
-                    val t = ((x - pad) / (width - pad * 2f)).coerceIn(0f, 1f)
+                    val t = trackT(x)
                     scrubT = t
                     listener?.onScrubMove(t)
                     invalidate()
@@ -172,10 +193,7 @@ class AodStateBar @JvmOverloads constructor(
                     listener?.onScrubEnd(t)
                     invalidate()
                 } else if (!moved) {
-                    val pad = dp(3f)
-                    val segW = (width - pad * 2f) / 3f
-                    val index = ((x - pad) / segW).toInt().coerceIn(0, 2)
-                    listener?.onTap(index)
+                    listener?.onTap(indexAt(x))
                     performClick()
                 }
                 return true

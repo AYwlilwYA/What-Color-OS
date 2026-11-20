@@ -113,6 +113,24 @@ class RevealCacheKeyContractTest {
         assertFalse("快照不许读错峰姿态", capture.contains("homeStaggerPose("))
     }
 
+    /**
+     * ★锁屏目标同样必须静态：`drawLockOverlay` 内部读 live `edge/layers.lockAlpha`
+     * （逐元素错峰），快照按 live 画会把捕获那一刻的姿态烤进位图，而键里没有 edge/t
+     * ⇒ 整条边沿用近空白目标图（AOD-150）。
+     */
+    @Test
+    fun revealSnapshotFreezesLockLayer() {
+        assertTrue("锁屏快照必须冻结姿态", capture.contains("drawLockOverlay(off, w, h, 1f, 0f, frozen = true)"))
+        assertFalse(
+            "锁屏快照不许按 live 姿态画",
+            Regex("""drawLockOverlay\(off, w, h, 1f, 0f\)""").containsMatchIn(capture),
+        )
+        assertTrue("诊断必须回显是否冻结（E2 判据）", capture.contains("lockFrozen=\${target == SceneState.LOCK}"))
+        val overlay = body("drawLockOverlay")
+        assertTrue("冻结时按满可见度零位移", overlay.contains("if (frozen) 1f to 0f"))
+        assertTrue("冻结时不打错峰日志", overlay.contains("if (!frozen) logLockStagger("))
+    }
+
     /** 入场相位与错峰姿态必须显式传参，不许在网格内部自己读全局进度。 */
     @Test
     fun entrancePhaseIsInjectedNotReadInsideGrid() {

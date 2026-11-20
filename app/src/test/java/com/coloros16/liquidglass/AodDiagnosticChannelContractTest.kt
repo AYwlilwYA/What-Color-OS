@@ -103,6 +103,19 @@ class AodDiagnosticChannelContractTest {
         )
         assertTrue("必须报锁屏内容层归零时刻（AOD-146 原料）", src.contains("LOCKALPHA n=%d"))
         assertTrue("必须报分段标记条数（零 SEG 自证）", src.contains("seg=%d(期望2)"))
+        val handoff = File("src/main/kotlin/com/coloros16/liquidglass/hook/AodHandoffHook.kt").readText()
+        assertTrue(
+            "帧日志必须带 saw=（判别「系统真喂内部值」与「守卫未生效」）",
+            hook.contains("saw=\${bridge.clock.pumpSawMovement()}"),
+        )
+        assertTrue(
+            "每次真正改变时钟的泵写入必须留一条（带 t/src/playing/saw）",
+            handoff.contains("stage-pump-write") && handoff.contains("saw=%b"),
+        )
+        assertTrue(
+            "泵写入日志只在时钟状态真变时打（不得逐帧刷屏）",
+            handoff.contains("before.t != after.t") && handoff.contains("before.playing != after.playing"),
+        )
         assertTrue("帧行必须有 lk= 字段", hook.contains("lk=\${"))
         val tail = hook.substringAfter("private fun noteClockTail(").substringBefore("private fun clockTailPending(")
         assertTrue("补尾账本必须用与求值器同一边长", tail.contains("stageEdgeMs(edge)"))
@@ -224,5 +237,14 @@ class AodDiagnosticChannelContractTest {
                 at.any { p -> hook.substring(maxOf(0, p - 400), p).contains("< 1f") },
             )
         }
+    }
+
+    @Test
+    fun playDecisionLogsCarrySourceAndSaw() {
+        val hook = File("src/main/kotlin/com/coloros16/liquidglass/hook/aod/AodStageHook.kt").readText()
+        assertTrue("起播日志必须带 saw= 与 src=（判这次走的是自播还是系统泵）",
+            hook.contains("saw=\${bridge.clock.pumpSawMovement()} src=\${bridge.clock.state().source}"))
+        assertTrue("不起播也必须留一条（否则零 stage-play 分不清是哪条分支）",
+            hook.contains("stage-play-skip") && hook.contains("t=\${bridge.clock.state().t}"))
     }
 }

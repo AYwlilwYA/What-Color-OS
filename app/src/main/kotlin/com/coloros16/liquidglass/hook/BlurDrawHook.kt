@@ -352,6 +352,8 @@ object BlurDrawHook {
 
     // ---- 任务 D：圆角半径反射（问题 10） ----
     private const val CLASS_BLUR_CONFIG = "com.oplusos.systemui.common.blurability.BlurConfig"
+    /** BlurConfig.isFullScreen（public final boolean）：系统用来标记「整层背景」而非元素，据此跳过玻璃化。 */
+    private const val FIELD_BLUR_CONFIG_IS_FULL_SCREEN = "isFullScreen"
     private const val METHOD_GET_BLUR_CONFIG = "getBlurConfig"
     private const val METHOD_GET_CORNER_RADIUS = "getCornerRadius"
     private const val METHOD_GET_LEFT_TOP_CORNER_RADIUS = "getLeftTopCornerRadius"
@@ -621,6 +623,9 @@ object BlurDrawHook {
     private const val VOLUME_SEEKBAR_GLASS_TTL_MS = 500L
     /** 音量条背景圆角 dimen（11dp）；资源读不到时按 dp 兜底折算。 */
     private const val DIMEN_VOLUME_ROW_RADIUS = "volume_vertical_row_radius"
+    /** OS17 音量条圆角真值 key（OplusVolumeDialogView 读它填 cornerRadius）；旧 key 仅作跨版本兜底。 */
+    private const val DIMEN_VOLUME_ROW_RADIUS_OS17 = "volume_vertical_row_radius_os17"
+    private val VOLUME_RADIUS_DIMEN_KEYS = arrayOf(DIMEN_VOLUME_ROW_RADIUS_OS17, DIMEN_VOLUME_ROW_RADIUS)
     private const val VOLUME_CORNER_DP_FALLBACK = 11f
     /** 音量面板背景替换：展开面板宿主类（mDialogView 宿主；expandPanel hook 用）。 */
     internal const val CLASS_VOLUME_DIALOG_VIEW = "com.oplus.systemui.volume.view.OplusVolumeDialogView"
@@ -1203,6 +1208,10 @@ object BlurDrawHook {
     private var mCornerParamsGetType: Method? = null
     private var mCornerParamsGetWeight: Method? = null
     private var mBlurConfigGetRadiusWeight: Method? = null   // [spec/18] BlurConfig.getRadiusWeight()（setSmoothCorner 信号）
+    /** BlurConfig.isFullScreen 字段：true = 整层背景，玻璃化会盖掉系统自身的背景材质。 */
+    private var mBlurConfigIsFullScreenField: Field? = null
+    /** 整层背景门控是否启用（OS17 资源在场；安装期一次判定，运行期只读）。 */
+    @Volatile private var fullScreenBackdropGateEnabled = false
     private var mCornerTypeConic: Any? = null    // CornerType.CONIC 枚举常量（判等用；null=反射失败降级圆弧）
     private var mBaseRoundRectPathProviderClass: Class<*>? = null
     private var mBaseRoundRectPathProviderGetMaxRadius: Method? = null
@@ -4084,6 +4093,23 @@ object BlurDrawHook {
             mBlurConfigGetPathProvider = resolveMethodChain(bc, METHOD_GET_PATH_PROVIDER)
             mBlurConfigGetGradientStrokeCornerParam = resolveMethodChain(bc, METHOD_GET_GRADIENT_STROKE_CORNER_PARAM)
             mBlurConfigGetRadiusWeight = resolveMethodChain(bc, METHOD_GET_RADIUS_WEIGHT)
+            mBlurConfigIsFullScreenField = try {
+                bc.getField(FIELD_BLUR_CONFIG_IS_FULL_SCREEN)
+            } catch (t: Throwable) {
+                Lg.i(TAG, "BlurConfig.isFullScreen 字段缺失，整层背景门控关闭")
+                null
+            }
+            fullScreenBackdropGateEnabled = try {
+                val ctx = systemUiContext()
+                val res = ctx?.resources
+                val id = res?.getIdentifier(DIMEN_VOLUME_ROW_RADIUS_OS17, "dimen", ctx.packageName) ?: 0
+                val on = id > 0 && mBlurConfigIsFullScreenField != null
+                Lg.i(TAG, "fullscreen-backdrop gate enabled=$on (os17 dimen id=$id)")
+                on
+            } catch (t: Throwable) {
+                Lg.i(TAG, "fullscreen-backdrop gate probe failed, stays off")
+                false
+            }
             if (mBlurConfigGetPathProvider == null) {
                 logLegacyAlt("BlurConfig.getPathProvider", "BaseDrawable.pathProvider 字段")
             }
@@ -6315,6 +6341,28 @@ object BlurDrawHook {
             }
             return false
         }
+        // 整层背景不玻璃化：系统 BlurConfig.isFullScreen=true 标识的是铺满整层的背景材质
+        //（音量面板整层背景即此路径，其宿主链不在 volume 包名下，前面的音量宿主判定接不住）。
+        // 误把背景换成玻璃会整片盖掉系统自身材质，元素层（isFullScreen=false）照常走玻璃。
+        if (isFullScreenBackdrop(proxy)) {
+            val wrapper = try {
+                mViewProxyGetBlurDrawable?.invoke(proxy, defaultDrawable)
+            } catch (t: Throwable) {
+                null
+            }
+            val target = wrapper?.let { unwrapPlatformBlur(it) ?: it }
+            if (wrapper != null && target != null) {
+                VolumeMaskGuard.protectNativeContent(wrapper, target)
+                screenRegionMap.remove(System.identityHashCode(target))
+                if (mGetDrawableShaderPaint?.declaringClass?.isInstance(target) == true) {
+                    restoreSystemShaderIfReplaced(target)
+                }
+            }
+            logThrottled("$logTag-fullscreen-backdrop", Log.INFO) {
+                "$logTag: fullScreen backdrop kept native (host=${hostView.javaClass.simpleName})"
+            }
+            return false
+        }
         // [任务 G] 顺手登记宿主 View：运动事件源（QS 翻页/面板展开）触发时 invalidate 它，
         // 强制重录 draw → 映射随新位置更新（WeakReference 防泄漏，去重见 registerHostView）
         registerHostView(hostView)
@@ -7103,6 +7151,34 @@ object BlurDrawHook {
         override fun intercept(chain: XposedInterface.Chain): Any? {
             suppressPlatformBlurMaskColor(chain)
             return null
+        }
+    }
+
+    /** 绘制侧判定：drawable 自身的 ViewBlurProxy 是否标记为整层背景。 */
+    private fun isFullScreenBackdropDrawable(drawable: Any): Boolean {
+        if (!fullScreenBackdropGateEnabled) return false
+        val getProxy = mAutoGetViewBlurProxy ?: return false
+        val proxy = try {
+            getProxy.invoke(drawable)
+        } catch (t: Throwable) {
+            return false
+        }
+        return isFullScreenBackdrop(proxy)
+    }
+
+    /**
+     * 该层是否为系统标记的整层背景（BlurConfig.isFullScreen=true）——此类层不玻璃化。
+     * 仅 OS17 资源在场时启用：该口径的证据链全部取自 17.99.02，旧版保持原行为不动。
+     */
+    private fun isFullScreenBackdrop(proxy: Any?): Boolean {
+        if (!fullScreenBackdropGateEnabled) return false
+        val f = mBlurConfigIsFullScreenField ?: return false
+        val get = mViewProxyGetBlurConfig ?: return false
+        return try {
+            val cfg = get.invoke(proxy) ?: return false
+            f.getBoolean(cfg)
+        } catch (t: Throwable) {
+            false
         }
     }
 
@@ -10014,14 +10090,32 @@ object BlurDrawHook {
         }
     }
 
-    /** 音量条圆角 px：dimen `volume_vertical_row_radius`（11dp）一次解析缓存，失败按 11dp 折算。 */
+    /**
+     * 音量条圆角 px：优先 OS17 真值 key `volume_vertical_row_radius_os17`
+     *（OplusVolumeDialogView 正是用它填 cornerRadius，见 C17 17.99.02 反编译 :394），
+     * 其次旧 key `volume_vertical_row_radius`，两者都取不到才按 11dp 折算。
+     */
     private fun resolveVolumeCornerPx(seekbar: View): Float {
         if (volumeCornerPx > 0f) return volumeCornerPx
         volumeCornerPx = try {
             val res = seekbar.resources
-            val id = res.getIdentifier(DIMEN_VOLUME_ROW_RADIUS, "dimen", seekbar.context.packageName)
-            if (id > 0) res.getDimensionPixelSize(id).toFloat()
-            else VOLUME_CORNER_DP_FALLBACK * res.displayMetrics.density
+            val pkg = seekbar.context.packageName
+            var px = 0f
+            for (key in VOLUME_RADIUS_DIMEN_KEYS) {
+                val id = res.getIdentifier(key, "dimen", pkg)
+                if (id > 0) {
+                    px = res.getDimensionPixelSize(id).toFloat()
+                    if (px > 0f) {
+                        logVolumeDiag("corner-dimen", "volume-seekbar: corner from dimen $key = $px px")
+                        break
+                    }
+                }
+            }
+            if (px <= 0f) {
+                logVolumeDiag("corner-fallback", "volume-seekbar: 两个 dimen 都取不到，按 11dp 折算")
+                px = VOLUME_CORNER_DP_FALLBACK * res.displayMetrics.density
+            }
+            px
         } catch (t: Throwable) {
             VOLUME_CORNER_DP_FALLBACK * seekbar.resources.displayMetrics.density
         }
@@ -15059,6 +15153,14 @@ object BlurDrawHook {
             return false
         }
         val id = System.identityHashCode(drawable)
+        // 整层背景不玻璃化（绘制侧门控）：系统把铺满整层的背景材质标记为 BlurConfig.isFullScreen=true
+        //（下拉面板背景 = ScrimControllerExImp 的 scrimBehind 代理；音量面板整层背景同口径）。
+        // 这类层套玻璃会整片盖掉系统材质，且展开首帧用的是上一帧快照 ⇒ 画面出现旧内容重影。
+        if (isFullScreenBackdropDrawable(drawable)) {
+            restoreSystemShaderIfReplaced(drawable)
+            logRenderMode(id, "BLUR", "fullscreen backdrop kept native", drawable)
+            return false
+        }
         GlassRegistry.bind(id, drawable, renderSideCardClass())
 
         // 渲染模式观察：放在全部 early-return 之前，sf→app 翻转在任何绘制路径都触发撤申报

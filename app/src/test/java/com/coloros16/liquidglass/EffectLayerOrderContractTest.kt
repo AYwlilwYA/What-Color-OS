@@ -184,7 +184,7 @@ class EffectLayerOrderContractTest {
     @Test
     fun positiveControlOldOrderPaintedEffectAfterWholeWorld() {
         val d = body(layer(), "onDraw")
-        val worldAt = d.indexOf("val world = drawWorld(")
+        val worldAt = d.indexOf("drawWorld(canvas, w, h)")
         val effectAt = d.indexOf("drawEffect(canvas, w, h)")
         assertTrue("世界层仍先调", worldAt in 0 until effectAt)
         assertFalse(

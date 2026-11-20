@@ -264,7 +264,8 @@ class ClockHomeAnchorWiringContractTest {
     fun applyWritesRotationAndDedupesIt() {
         val src = body(apply(), "apply")
         assertTrue("写旋转", src.contains("view.rotation = rot"))
-        assertTrue("旋转进判重键", src.contains("prev[5] - rot"))
+        val dedupe = src.substringAfter("if (prev != null", "").substringBefore(") return", "")
+        assertTrue("旋转进判重键", dedupe.contains("prev[5]") && dedupe.contains("rot"))
         assertTrue("旋转进已写值", src.contains("floatArrayOf(dx, dy, sx, anchor.alpha, sy, rot)"))
     }
 

@@ -82,6 +82,7 @@ import com.coloros16.liquidglass.sf.SfGlassChannel
 import com.coloros16.liquidglass.log.LogCapture
 import com.coloros16.liquidglass.ui.aod.AodConfigsController
 import com.coloros16.liquidglass.ui.aod.AodConfigStore
+import com.coloros16.liquidglass.engine.SponsorMilestone
 import com.coloros16.liquidglass.engine.edit.EditSurface
 import com.coloros16.liquidglass.engine.edit.LockLayoutSettings
 import com.coloros16.liquidglass.ui.aod.AodDisplayController
@@ -412,6 +413,7 @@ class SettingsActivity : AppCompatActivity() {
         setupBottomNav()
         trackColdStart()
         maybeShowFirstRunDeclaration()
+        contentFrame?.post { maybeShowSponsorPrompt() }
 
         // [spec/88] 状态栏/挖孔避让 + 返回热区几何诊断（根因与实测数据见 doc/spec/88）
         setupWindowInsets(toolbar)
@@ -3888,6 +3890,7 @@ class SettingsActivity : AppCompatActivity() {
         bindGlassSwitch(view, R.id.switchSeedlingTakeoverGlass, Prefs.KEY_SEEDLING_TAKEOVER_GLASS, Prefs.DEFAULT_SEEDLING_TAKEOVER_GLASS)
         bindGlassSwitch(view, R.id.switchSeedlingTakeoverAmbient, Prefs.KEY_SEEDLING_TAKEOVER_AMBIENT_STROKE, Prefs.DEFAULT_SEEDLING_TAKEOVER_AMBIENT_STROKE)
         bindGlassSwitch(view, R.id.switchSeedlingAnchorFollow, Prefs.KEY_SEEDLING_ANCHOR_FOLLOW, Prefs.DEFAULT_SEEDLING_ANCHOR_FOLLOW)
+        bindGlassSwitch(view, R.id.switchSeedlingCardWrap, Prefs.KEY_SEEDLING_CARD_WRAP_CUTOUT, Prefs.DEFAULT_SEEDLING_CARD_WRAP_CUTOUT)
         bindGlassSwitch(view, R.id.switchSeedlingTakeoverLyrics, Prefs.KEY_SEEDLING_TAKEOVER_LYRICS, Prefs.DEFAULT_SEEDLING_TAKEOVER_LYRICS)
         bindGlassSwitch(view, R.id.switchSeedlingKindMedia, Prefs.KEY_SEEDLING_KIND_MEDIA, Prefs.DEFAULT_SEEDLING_KIND_MEDIA)
         bindGlassSwitch(view, R.id.switchSeedlingKindCall, Prefs.KEY_SEEDLING_KIND_CALL, Prefs.DEFAULT_SEEDLING_KIND_CALL)
@@ -5514,6 +5517,48 @@ class SettingsActivity : AppCompatActivity() {
         Lg.i(TAG_NAV, "cold start count=$count")
     }
 
+    /**
+     * 冷启动次数达档后弹赞助提示：10/20/50/100/200/400，之后每 400 次一档。
+     * 每档只弹一次（本地 XML 记录已弹档位）；拒绝后追弹一次点星提示。
+     */
+    private fun maybeShowSponsorPrompt() {
+        if (isFinishing || isDestroyed) return
+        val count = xmlPrefs.getInt(XML_KEY_OPEN_COUNT, 0)
+        val milestone = SponsorMilestone.forCount(count) ?: return
+        if (xmlPrefs.getInt(XML_KEY_SPONSOR_MILESTONE, 0) >= milestone) return
+        xmlPrefs.edit().putInt(XML_KEY_SPONSOR_MILESTONE, milestone).apply()
+        val dialog = MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.sponsor_prompt_title)
+            .setMessage(getString(R.string.sponsor_prompt_message, count))
+            .setPositiveButton(R.string.sponsor_prompt_ok) { _, _ ->
+                logNavThrottled("sponsor-prompt-open", "open sponsor page at count=$count")
+                openExternal(REPO_URL)
+            }
+            .setNegativeButton(R.string.sponsor_prompt_later) { _, _ ->
+                logNavThrottled("sponsor-prompt-later", "dismissed at count=$count")
+                showStarPrompt()
+            }
+            .create()
+        DialogGlass.arm(dialog)
+        dialog.show()
+        logNavThrottled("sponsor-prompt-show", "milestone=$milestone count=$count")
+    }
+
+    /** 拒绝赞助后追弹一次点星提示。 */
+    private fun showStarPrompt() {
+        if (isFinishing || isDestroyed) return
+        val dialog = MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.sponsor_star_title)
+            .setMessage(R.string.sponsor_star_message)
+            .setPositiveButton(R.string.sponsor_star_ok) { _, _ ->
+                openExternal(REPO_URL)
+            }
+            .setNegativeButton(R.string.sponsor_star_later, null)
+            .create()
+        DialogGlass.arm(dialog)
+        dialog.show()
+    }
+
     /** 首次启动弹应用声明（免费、退款、免责）；确认后不再弹。 */
     private fun maybeShowFirstRunDeclaration() {
         if (xmlPrefs.getBoolean(XML_KEY_DECLARED, false)) return
@@ -5935,9 +5980,13 @@ class SettingsActivity : AppCompatActivity() {
         private const val XML_KEY_OPEN_COUNT = "lg_open_count"
         private const val XML_KEY_DECLARED = "lg_declared_v1"
 
+        /** 已弹过的赞助档位（记录档位值，避免同一档重复弹）。 */
+        private const val XML_KEY_SPONSOR_MILESTONE = "lg_sponsor_milestone"
+
         /** 主页快捷跳转目标（赞助锚点指向 README 的赞助小节）。 */
         private const val AUTHOR_URL = "https://github.com/AYwlilwYA"
         private const val GROUP_URL = "https://t.me/c16lg666"
+        private const val REPO_URL = "https://github.com/AYwlilwYA/What-Color-OS"
         private const val QQ_GROUP_NUMBER = "1102985644"
         private const val QQ_PACKAGE = "com.tencent.mobileqq"
         private const val SPONSORS_URL =

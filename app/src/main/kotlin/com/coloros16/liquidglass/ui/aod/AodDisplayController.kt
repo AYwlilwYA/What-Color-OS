@@ -84,7 +84,6 @@ class AodDisplayController(
     private var scene3dActive = false
     private var scene3dCheckedAt = 0L
     private var current = SceneState.AOD
-    private var lastEdge = TransitionEdge.AOD_TO_LOCK
     private var draftId = Prefs.DEFAULT_ALIVE_AOD_STYLE_ID
     private var appliedId = Prefs.DEFAULT_ALIVE_AOD_STYLE_ID
     private var draftConfigId: String? = null
@@ -250,7 +249,6 @@ class AodDisplayController(
             return
         }
         val fromAod = current == SceneState.AOD
-        lastEdge = edge
         current = target
         bar.setActive(index)
         rebuildDock()

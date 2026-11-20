@@ -55,6 +55,7 @@ object AodHandoffHook {
     private const val TAG = "LgAod"
     private const val THROTTLE_MS = 2000L
     private const val BRIDGE_LOG_MS = 500L
+    private const val PUMP_WRITE_LOG_MS = 0L
     private const val UNKNOWN_EDGE_LOG_MS = 5000L
     private const val GATE_TTL_MS = 500L
 
@@ -331,11 +332,19 @@ object AodHandoffHook {
             if (edge != null) {
                 logThrottled("aod-edge", "edge=$edge from=$lastFrom to=$lastTo src=emit${fallbackTag()}")
             } else {
-                logThrottled(
-                    "aod-edge-unknown",
-                    "边未识别 from=$lastFrom to=$lastTo src=emit",
-                    UNKNOWN_EDGE_LOG_MS,
-                )
+                if (SceneStateMapper.isSameScene(lastFrom, lastTo)) {
+                    logThrottled(
+                        "aod-edge-samestate",
+                        "同态子步骤（非未识别边） from=$lastFrom to=$lastTo src=emit",
+                        UNKNOWN_EDGE_LOG_MS,
+                    )
+                } else {
+                    logThrottled(
+                        "aod-edge-unknown",
+                        "边未识别 from=$lastFrom to=$lastTo src=emit",
+                        UNKNOWN_EDGE_LOG_MS,
+                    )
+                }
             }
             notifyStageEdge(edge)
         }
@@ -497,11 +506,19 @@ object AodHandoffHook {
             if (edge != null) {
                 logThrottled("aod-edge", "edge=$edge from=$lastFrom to=$lastTo${fallbackTag()}")
             } else {
-                logThrottled(
-                    "aod-edge-unknown",
-                    "边未识别 from=$lastFrom to=$lastTo（待真机校准命名）",
-                    UNKNOWN_EDGE_LOG_MS,
-                )
+                if (SceneStateMapper.isSameScene(lastFrom, lastTo)) {
+                    logThrottled(
+                        "aod-edge-samestate",
+                        "同态子步骤（非未识别边） from=$lastFrom to=$lastTo",
+                        UNKNOWN_EDGE_LOG_MS,
+                    )
+                } else {
+                    logThrottled(
+                        "aod-edge-unknown",
+                        "边未识别 from=$lastFrom to=$lastTo（待真机校准命名）",
+                        UNKNOWN_EDGE_LOG_MS,
+                    )
+                }
             }
             notifyStageEdge(edge)
         }
@@ -551,7 +568,20 @@ object AodHandoffHook {
         val progress = lastProgress
         if (progress.isNaN()) return
         noteSupersede(bridge, edge)
+        val before = bridge.clock.state()
         bridge.onSystemProgress(edge, progress)
+        val after = bridge.clock.state()
+        if (before.t != after.t || before.source != after.source || before.playing != after.playing) {
+            logThrottled(
+                "stage-pump-write",
+                String.format(
+                    Locale.US,
+                    "edge=%s t=%.3f src=%s playing=%b saw=%b",
+                    edge.name, after.t, after.source, after.playing, bridge.clock.pumpSawMovement(),
+                ),
+                PUMP_WRITE_LOG_MS,
+            )
+        }
         val p = bridge.evaluateNow()
         logThrottled(
             "aod-bridge",

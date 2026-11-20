@@ -323,6 +323,8 @@
     <string name="settings_seedling_takeover_glass_desc">接管生效后，自绘的小岛与卡片背景使用液态玻璃材质。需先开启「接管流体云」。</string>
     <string name="settings_seedling_anchor_follow">岛位置跟随摄像头</string>
     <string name="settings_seedling_anchor_follow_desc">关闭时小岛始终居中（与系统原生一致）；开启后左右挖孔机型的小岛贴边跟随摄像头。</string>
+    <string name="settings_seedling_card_wrap">展开卡包住摄像头</string>
+    <string name="settings_seedling_card_wrap_desc">关闭=大卡顶边让到摄像头下方（原生做法）；开启=大卡从胶囊高度起展开，摄像头位置在卡上挖空。</string>
     <string name="settings_seedling_card_mode">拉开所有卡（OP 式）</string>
     <string name="settings_seedling_card_mode_desc">关闭=苹果式单卡，大卡左右滑动切换卡片；开启=OP 式展开时直接拉开所有卡片竖排显示。</string>
     <string name="settings_seedling_card_glass">流体云液态玻璃</string>
@@ -829,6 +831,16 @@
 
 模块按现状提供，不承诺适配所有设备与系统版本。使用前请自行确认风险，因使用本模块造成的任何问题由使用者自行承担。</string>
     <string name="first_run_ok">我已知晓</string>
+
+    <!-- 冷启动次数达档后的赞助提示 -->
+    <string name="sponsor_prompt_title">用着还顺手吗</string>
+    <string name="sponsor_prompt_message">你已经打开本模块 %1$d 次了。它完全免费，没有广告也没有内购；如果帮到了你，欢迎请作者喝杯咖啡。</string>
+    <string name="sponsor_prompt_ok">好的！</string>
+    <string name="sponsor_prompt_later">以后再说</string>
+    <string name="sponsor_star_title">再帮一个小忙</string>
+    <string name="sponsor_star_message">给项目点个小星星吧，这是对作者最实在的支持。</string>
+    <string name="sponsor_star_ok">去点星</string>
+    <string name="sponsor_star_later">不了</string>
 
     <!-- 主页预览卡文字 -->
     <string name="settings_home_hero_meta">示例通知 · 现在</string>

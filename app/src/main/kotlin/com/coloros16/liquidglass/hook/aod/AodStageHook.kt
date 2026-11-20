@@ -13,6 +13,8 @@ import com.coloros16.liquidglass.engine.AodDrift
 import com.coloros16.liquidglass.engine.AodDriftSchedule
 import com.coloros16.liquidglass.engine.AodSpinGate
 import com.coloros16.liquidglass.engine.AodStageAnchors
+import com.coloros16.liquidglass.engine.EdgeResumePolicy
+import com.coloros16.liquidglass.engine.LazyMountPolicy
 import com.coloros16.liquidglass.engine.AodSurfaceGate
 import com.coloros16.liquidglass.engine.ClockAnchor
 import com.coloros16.liquidglass.engine.ClockAnchorCompose
@@ -86,6 +88,7 @@ object AodStageHook {
     private const val CLASS_AOD_ROOT = AodStageAnchors.CLASS_AOD_ROOT
     private const val CLASS_AOD_BASE = AodStageAnchors.CLASS_AOD_BASE
     private const val CLASS_SHADE_ROOT = AodStageAnchors.CLASS_SHADE_ROOT
+    private const val ID_KEYGUARD_BOUNCER = "keyguard_bouncer_container"
     private const val GATE_TTL_MS = 500L
     private const val EFFECT_TTL_MS = 500L
     private const val THROTTLE_MS = 2000L
@@ -313,7 +316,9 @@ object AodStageHook {
             logThrottled("stage-notattached", "宿主未上屏 ${host.javaClass.simpleName}")
             return
         }
-        val stage = resolveStage(host)
+        val forced = forceStage
+        forceStage = null
+        val stage = forced ?: resolveStage(host)
         if (stage == null) {
             logThrottled("stage-nostage", "找不到 AOD 根布局 host=${host.javaClass.simpleName}")
             return
@@ -332,6 +337,7 @@ object AodStageHook {
         }
         val existing = findLayer(stage)
         if (existing != null) {
+            existing.surface = stateOfStage(stage)
             mounted[host] = existing
             layerStage[existing] = stage
             logThrottled("stage-reuse", "复用已挂层 attach=$attachHits")
@@ -347,9 +353,10 @@ object AodStageHook {
         }
         val layer = AodTransitionLayer(ctx)
         layer.tag = LAYER_TAG
+        layer.surface = stateOfStage(stage)
         stage.addView(
             layer,
-            0,
+            if (stateOfStage(stage) == SceneState.AOD) 0 else bouncerIndex(stage),
             ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -366,8 +373,11 @@ object AodStageHook {
     private fun resumeSystemEdge(layer: AodTransitionLayer) {
         val edge = AodHandoffHook.currentEdgeOrNull() ?: return
         if (!refreshGate()) return
-        startChoreographer(layer)
-        logThrottled("stage-sysedge-resume", "挂层补武装系统边 edge=$edge")
+        val state = AodHandoffHook.bridgeOrNull()?.clock?.state()
+        if (!EdgeResumePolicy.needsResume(edge, state)) return
+        if (startChoreographer(layer)) {
+            logThrottled("stage-sysedge-resume", "挂层补武装系统边 edge=$edge t=${state?.t}")
+        }
     }
 
     private fun onDetach(host: View) {
@@ -634,10 +644,10 @@ object AodStageHook {
     private val layerStage = WeakHashMap<AodTransitionLayer, ViewGroup>()
 
     /** 内部时间轴需要自己续帧：宿主静止时不会重绘，只靠 OnPreDraw 会停在中途。 */
-    private fun startChoreographer(layer: AodTransitionLayer) {
+    private fun startChoreographer(layer: AodTransitionLayer): Boolean {
         if (choreoCallbacks.containsKey(layer)) {
             logThrottled("stage-choreo-rearm", "帧回调本就在位，不重复武装 att=${layer.isAttachedToWindow}")
-            return
+            return false
         }
         val callback = object : Choreographer.FrameCallback {
             override fun doFrame(frameTimeNanos: Long) {
@@ -658,6 +668,7 @@ object AodStageHook {
         choreoCallbacks[layer] = callback
         Choreographer.getInstance().postFrameCallback(callback)
         logThrottled("stage-choreo-start", "内部时间轴起播，帧回调已武装")
+        return true
     }
 
     private fun stopChoreographer(layer: AodTransitionLayer) {
@@ -685,7 +696,7 @@ object AodStageHook {
         if (layer.parent != null) return
         stage.addView(
             layer,
-            0,
+            if (stateOfStage(stage) == SceneState.AOD) 0 else bouncerIndex(stage),
             ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -749,8 +760,8 @@ object AodStageHook {
         logFast(
             "stage-pump-tick",
             "edge=$edge t=${"%.3f".format(params.t)} ct=${"%.3f".format(cs.t)} " +
-                "src=${cs.source} playing=${cs.playing} active=${params.active} " +
-                "surface=$pumpSurface att=${layer.isAttachedToWindow}",
+                "src=${cs.source} playing=${cs.playing} saw=${bridge.clock.pumpSawMovement()} " +
+                "active=${params.active} surface=$pumpSurface att=${layer.isAttachedToWindow}",
         )
         if (edge != null && !AodSurfaceGate.edge(gateEnabled, edge, screenShow, lockShow)) {
             logThrottled("stage-edge-gate", "该边两端均未开，不起播 edge=$edge")
@@ -1594,11 +1605,16 @@ object AodStageHook {
                 TAG,
                 "stage-play edge=$edge duration=$duration delay=${TransitionStartDelay.forEdge(edge)} " +
                     "style=${styleId()} att=${layer.isAttachedToWindow} " +
-                    "par=${layer.parent?.javaClass?.simpleName ?: "null"}",
+                    "par=${layer.parent?.javaClass?.simpleName ?: "null"} " +
+                    "saw=${bridge.clock.pumpSawMovement()} src=${bridge.clock.state().source}",
             )
             startChoreographer(layer)
         } else {
-            logThrottled("stage-play-skip", "已在播放或系统泵接管 edge=$edge")
+            logThrottled(
+                "stage-play-skip",
+                "未起播 edge=$edge saw=${bridge.clock.pumpSawMovement()} " +
+                    "src=${bridge.clock.state().source} t=${bridge.clock.state().t}",
+            )
         }
     }
 
@@ -1621,8 +1637,12 @@ object AodStageHook {
      * 只在边变化时调一次（事件驱动，非轮询）；边两端门控由帧泵自己判。
      */
     fun noteSystemEdge(edge: TransitionEdge?) {
+        if (edge == null) lazyMountEdge = null else lazyMountLockStage(edge)
         val layer = anyLayer() ?: run {
-            logThrottled("stage-sysedge-nolayer", "自绘层未挂，系统边不武装 edge=$edge")
+            logThrottled(
+                "stage-sysedge-nolayer",
+                "自绘层未挂，系统边不武装 edge=$edge wm=${wmRootClasses()}",
+            )
             return
         }
         if (edge == null) {
@@ -2122,6 +2142,102 @@ object AodStageHook {
         return null
     }
 
+    /** 惰性挂载记录：同一条边只试一次，失败不重试刷屏。 */
+    private var lazyMountEdge: TransitionEdge? = null
+
+    /** 强制舞台：惰性挂载锁屏面时跳过「优先找息屏根」，直接挂窗口根。 */
+    private var forceStage: View? = null
+
+    /**
+     * 锁屏↔桌面两条边在息屏根摘掉后没有舞台，这里按需挂一次。
+     *
+     * 事件驱动单飞：只在边开始且无层时试一次；失败只记一条。
+     */
+    private fun lazyMountLockStage(edge: TransitionEdge) {
+        if (!LazyMountPolicy.needsLockStage(edge)) return
+        if (anyLayer() != null) return
+        if (lazyMountEdge == edge) return
+        lazyMountEdge = edge
+        val root = shadeRootOrNull()
+        if (root == null) {
+            logThrottled("stage-lazy-noroot", "锁屏根不可达 edge=$edge")
+            return
+        }
+        if (!root.isAttachedToWindow) {
+            logThrottled("stage-lazy-detached", "锁屏根已摘 edge=$edge")
+            return
+        }
+        if (!refreshGate()) return
+        if (!lockShow) {
+            logThrottled("stage-lazy-gate", "锁屏面开关关闭，不挂层 edge=$edge")
+            return
+        }
+        val stageRoot = root as? ViewGroup
+        val before = stageRoot?.childCount ?: 0
+        val layerBefore = anyLayer()
+        forceStage = root
+        onAttach(root)
+        forceStage = null
+        if (stageRoot != null) {
+            // add/reuse 由层对象是否新建判定：窗口根重建后重挂是 add，同根复用是 reuse
+            val layer = mounted[root]
+            val action = if (layer != null && layer !== layerBefore) "add" else "reuse"
+            val stageClass = layer?.let { layerStage[it] }?.javaClass?.simpleName
+            Lg.i(
+                TAG,
+                "stage-lazy-mount edge=$edge action=$action host=${root.javaClass.simpleName} " +
+                    "stage=$stageClass idx=${bouncerIndex(stageRoot)} forced=true " +
+                    "childCount=$before→${stageRoot.childCount}",
+            )
+        }
+    }
+
+    /** 窗口根实例：只读反射，取不到返回 null。 */
+    private fun shadeRootOrNull(): View? = try {
+        val cls = Class.forName("android.view.WindowManagerGlobal")
+        val inst = cls.getMethod("getInstance").invoke(null)
+        val f = cls.getDeclaredField("mViews").apply { isAccessible = true }
+        @Suppress("UNCHECKED_CAST")
+        val views = f.get(inst) as? List<Any?>
+        views?.firstOrNull {
+            (it as? View)?.javaClass?.name?.endsWith(CLASS_SHADE_ROOT) == true
+        } as? View
+    } catch (t: Throwable) {
+        logThrottled("stage-lazy-refl", "取窗口根失败 ${t.javaClass.simpleName}")
+        null
+    }
+
+    /** 密码盘容器的 index：锁屏层插在它下面，保证键盘始终最上层。 */
+    private fun bouncerIndex(stage: ViewGroup): Int {
+        val id = id(ID_KEYGUARD_BOUNCER)
+        if (id != 0) {
+            val v = stage.findViewById<View>(id)
+            if (v != null && v.parent === stage) return stage.indexOfChild(v)
+        }
+        return stage.childCount
+    }
+
+    /**
+     * 探针：当前进程窗口根类名（只读，用于判断某个面有没有可挂的宿主）。
+     *
+     * 挂载只靠 onAttachedToWindow，注入晚于宿主 attach 时永远等不到事件；
+     * 这条日志用来确认窗口根此刻是否可达，决定要不要补惰性挂载。
+     */
+    private fun wmRootClasses(): String = try {
+        val cls = Class.forName("android.view.WindowManagerGlobal")
+        val inst = cls.getMethod("getInstance").invoke(null)
+        val f = cls.getDeclaredField("mViews").apply { isAccessible = true }
+        @Suppress("UNCHECKED_CAST")
+        val views = f.get(inst) as? List<Any?>
+        // 只报类名不够：存在≠可见，0 尺寸/已隐藏的根挂上去也画不出来
+        views?.joinToString(",") { v ->
+            val view = v as? View ?: return@joinToString (v?.javaClass?.simpleName ?: "?")
+            "${view.javaClass.simpleName}(vis=${view.visibility},${view.width}x${view.height},shown=${view.isShown})"
+        } ?: "none"
+    } catch (t: Throwable) {
+        "err:${t.javaClass.simpleName}"
+    }
+
     /** 命中来源只在真变时打一条，避免逐帧刷屏。 */
     private fun noteClockSource(source: String, view: View) {
         if (source == clockSource && view.javaClass.name == clockSourceClass) return
@@ -2175,7 +2291,8 @@ object AodStageHook {
             idHits.append('@').append(scan.depthOf(v)).append(' ')
         }
         return "root=${root.javaClass.simpleName} nodes=${scan.nodes} maxDepth=${scan.maxDepth} " +
-            "clockClassHits=${scan.clockHits} deepClockHits=${scan.deepClockHits} " +
+            "clockClassHits=${scan.clockHits} anyClockHits=${scan.anyClockHits} " +
+            "deepClockHits=${scan.deepClockHits} " +
             "idPresent=[${idHits.toString().trim()}] surface=$surface"
     }
 
@@ -2184,6 +2301,7 @@ object AodStageHook {
         var nodes = 0
         var maxDepth = 0
         var clockHits = 0
+        var anyClockHits = 0
         var deepClockHits = 0
         private val depths = HashMap<Int, Int>()
 
@@ -2195,6 +2313,7 @@ object AodStageHook {
                 nodes++
                 depths[System.identityHashCode(child)] = depth + 1
                 val name = child.javaClass.name
+                if (name.contains("Clock") || name.contains("clock")) anyClockHits++
                 if (name.endsWith(CLASS_AOD_CLOCK_SUFFIX) ||
                     name.endsWith(AodStageAnchors.SUFFIX_AOD_CLOCK_INNER)
                 ) {

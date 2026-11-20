@@ -830,6 +830,10 @@ object Prefs {
     const val KEY_SEEDLING_ANCHOR_FOLLOW = "seedling_anchor_follow"
     const val DEFAULT_SEEDLING_ANCHOR_FOLLOW = false
 
+    /** 展开卡包住摄像头（true=卡从胶囊高度起、摄像头位置挖空；false=卡顶让到摄像头下方）。 */
+    const val KEY_SEEDLING_CARD_WRAP_CUTOUT = "seedling_card_wrap_cutout"
+    const val DEFAULT_SEEDLING_CARD_WRAP_CUTOUT = false
+
     /** 接管大卡样式模式（apple=单卡横滑换卡 / op=拉开所有卡竖排）。 */
     const val KEY_SEEDLING_CARD_MODE = "seedling_card_mode"
     const val DEFAULT_SEEDLING_CARD_MODE = "apple"

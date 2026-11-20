@@ -275,6 +275,9 @@ object SeedlingTakeoverHook {
     private var cachedAnchorFollow = Prefs.DEFAULT_SEEDLING_ANCHOR_FOLLOW
 
     @Volatile
+    private var cachedWrapCutout = Prefs.DEFAULT_SEEDLING_CARD_WRAP_CUTOUT
+
+    @Volatile
     private var cachedKindSwitches = com.coloros16.liquidglass.engine.SeedlingKindSwitches()
 
     @Volatile
@@ -295,6 +298,7 @@ object SeedlingTakeoverHook {
                 cachedIdleHide = p.getBoolean(Prefs.KEY_SEEDLING_TAKEOVER_IDLE_HIDE, Prefs.DEFAULT_SEEDLING_TAKEOVER_IDLE_HIDE)
                 cachedCardMode = p.getString(Prefs.KEY_SEEDLING_CARD_MODE, Prefs.DEFAULT_SEEDLING_CARD_MODE) ?: Prefs.DEFAULT_SEEDLING_CARD_MODE
                 cachedAnchorFollow = p.getBoolean(Prefs.KEY_SEEDLING_ANCHOR_FOLLOW, Prefs.DEFAULT_SEEDLING_ANCHOR_FOLLOW)
+                cachedWrapCutout = p.getBoolean(Prefs.KEY_SEEDLING_CARD_WRAP_CUTOUT, Prefs.DEFAULT_SEEDLING_CARD_WRAP_CUTOUT)
                 cachedKindSwitches = com.coloros16.liquidglass.engine.SeedlingKindSwitches(
                     media = p.getBoolean(Prefs.KEY_SEEDLING_KIND_MEDIA, Prefs.DEFAULT_SEEDLING_KIND_MEDIA),
                     message = p.getBoolean(Prefs.KEY_SEEDLING_KIND_MESSAGE, Prefs.DEFAULT_SEEDLING_KIND_MESSAGE),
@@ -336,6 +340,12 @@ object SeedlingTakeoverHook {
         refreshAppearance()
         return if (cachedCardMode == "op") com.coloros16.liquidglass.engine.SeedlingCardModePolicy.Mode.OP
         else com.coloros16.liquidglass.engine.SeedlingCardModePolicy.Mode.APPLE
+    }
+
+    /** 展开卡是否包住摄像头（true=卡从胶囊高度起并挖空摄像头），TTL 惰性重读。 */
+    fun takeoverWrapCutout(): Boolean {
+        refreshAppearance()
+        return cachedWrapCutout
     }
 
     /** 岛位置是否跟随挖孔（false=屏幕居中），TTL 惰性重读。 */

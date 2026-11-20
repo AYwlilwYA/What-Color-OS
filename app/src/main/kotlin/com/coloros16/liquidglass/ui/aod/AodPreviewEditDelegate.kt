@@ -541,7 +541,7 @@ class AodPreviewEditDelegate(private val host: View) {
         stretchX: Float = 1f,
         stretchY: Float = 1f,
     ) {
-        clockTextSize = ClockGlyphPainter.draw(
+        ClockGlyphPainter.draw(
             canvas, cx, cy, ClockLayout.fontPx(w, h, scale),
             time, date, color, EditChromePainter.DATE_COLOR,
             typeface, dateTypeface(), letterSpacing, info,

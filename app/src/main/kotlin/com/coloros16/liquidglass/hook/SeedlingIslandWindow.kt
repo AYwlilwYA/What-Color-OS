@@ -47,7 +47,7 @@ object SeedlingIslandWindow {
 
     /** 大卡内容基准高 440dp（参考几何计算器真值），媒体卡按内容收敛到 180dp。 */
     private const val CARD_HEIGHT_MEDIA_DP = 180f
-    private const val CARD_HEIGHT_COMPACT_DP = 120f
+    private const val CARD_HEIGHT_COMPACT_DP = 88f
     /** 大卡左右边距（原生实测 1080 屏卡宽 984px=328dp）。 */
     private const val CARD_MARGIN_DP = 16f
 
@@ -460,16 +460,13 @@ object SeedlingIslandWindow {
     /** 按 morph 进度算窗口内岛几何：胶囊包挖孔（左缘按挖孔方位），大卡顶缘在挖孔下方。 */
     private fun updateGeometry() {
         val v = islandView ?: return
-        val cardH = if (activity?.kind == com.coloros16.liquidglass.engine.SeedlingKind.MEDIA) {
+        var cardH = if (activity?.kind == com.coloros16.liquidglass.engine.SeedlingKind.MEDIA) {
             CARD_HEIGHT_MEDIA_DP * density
         } else {
             CARD_HEIGHT_COMPACT_DP * density
         }
-        val h = lerp(CAPSULE_HEIGHT_DP * density, cardH, morphU)
-        val w = transitionWidthPx ?: lerp(capsuleWidthForContent(), cardWidthPx, morphU)
-        v.islandW = w
-        v.islandH = h
         val hole = cutoutHole
+        val w = transitionWidthPx ?: lerp(capsuleWidthForContent(), cardWidthPx, morphU)
         val centeredLeft = (screenW - w) / 2f
         val capsuleLeft = if (SeedlingTakeoverHook.takeoverAnchorFollow()) {
             com.coloros16.liquidglass.engine.SeedlingCutoutGeometry.capsuleLeft(
@@ -480,13 +477,25 @@ object SeedlingIslandWindow {
         v.islandLeftPx = lerp(capsuleLeft, centeredLeft, morphU)
         v.hole = hole
         val capTop = statusBarOffsetPx()
-        val cardTop = com.coloros16.liquidglass.engine.SeedlingCutoutGeometry.cardTop(hole, HOLE_GAP_DP * density)
-        v.islandTop = lerp(capTop, cardTop, morphU)
-        v.morphU = morphU
-        // OP 竖排展开态：卡顶定位后按可用高自适应卡高（主卡背景/热区与副卡同高，整体不越屏）
-        if (morphU > 0.5f && SeedlingTakeoverHook.takeoverCardMode() == com.coloros16.liquidglass.engine.SeedlingCardModePolicy.Mode.OP) {
-            v.islandH = v.opFitCardHeight()
+        val plainCardTop = com.coloros16.liquidglass.engine.SeedlingCutoutGeometry.cardTop(hole, HOLE_GAP_DP * density)
+        val wrap = SeedlingTakeoverHook.takeoverWrapCutout() && hole != null
+        if (wrap) cardH += (plainCardTop - capTop).coerceAtLeast(0f)
+        val cardTop = if (wrap) capTop else plainCardTop
+        // OP 竖排：卡高在起点就按可用高拟合，过渡期不跳变（不能在 u>0.5 处切高度）
+        if (SeedlingTakeoverHook.takeoverCardMode() == com.coloros16.liquidglass.engine.SeedlingCardModePolicy.Mode.OP &&
+            stackCandidates.size > 1
+        ) {
+            val avail = (v.resources.displayMetrics.heightPixels - cardTop - 24f * density).coerceAtLeast(0f)
+            cardH = com.coloros16.liquidglass.engine.SeedlingCardModePolicy.opCardHeight(
+                stackCandidates.size.coerceAtMost(2), cardH, 8f * density, avail, 80f * density,
+            )
         }
+        val h = lerp(CAPSULE_HEIGHT_DP * density, cardH, morphU)
+        v.islandW = w
+        v.islandH = h
+        v.islandTop = lerp(capTop, cardTop, morphU)
+        v.cardWrapCutout = wrap
+        v.morphU = morphU
         updateRecallRect(v)
     }
 
@@ -567,10 +576,6 @@ object SeedlingIslandWindow {
     /** 点按岛本体：胶囊↔大卡切换（参考交互：tap 展开/收起）；不可展开活动只收不展。 */
     private fun toggleMorph() {
         val expand = morphU < 0.5f
-        if (expand && activity?.expandable == false) {
-            logThrottled("island-noexpand", "seedling-island: expand skipped (non-expandable ${activity?.id})")
-            return
-        }
         val type = if (expand) SeedlingAnimType.EXPAND_OUT else SeedlingAnimType.SHRINK_IN
         onTransitionEvent(SeedlingTransitionEvent(type, longArrayOf(300L, 500L), lastPlaceholderWidthOr(), false))
     }
@@ -581,6 +586,28 @@ object SeedlingIslandWindow {
             mainHandler.post {
                 onTransitionEvent(SeedlingTransitionEvent(SeedlingAnimType.SHRINK_IN, longArrayOf(300L, 500L), lastPlaceholderWidthOr(), false))
             }
+        }
+    }
+
+    /** OP 括号换卡：按候选顺序把主卡换成上/下一项。 */
+    private fun cycleOpCard(dir: Int) {
+        mainHandler.post {
+            val pool = stackCandidates
+            if (pool.size < 2) return@post
+            val curId = activity?.id
+            val cur = pool.indexOfFirst { it.id == curId }
+            val idx = if (cur < 0) 0 else cur
+            val next = ((idx + dir) % pool.size + pool.size) % pool.size
+            val newId = pool[next].id
+            if (newId == curId) return@post
+            scheduler.expandedId = newId
+            val nl = relayout()
+            activity = nl.main
+            satellites = listOfNotNull(nl.left, nl.right)
+            updateGeometry()
+            islandView?.invalidate()
+            islandView?.requestLayout()
+            logThrottled("island-op-bracket", "seedling-island: op bracket cycle dir=$dir to=$newId")
         }
     }
 
@@ -938,6 +965,10 @@ object SeedlingIslandWindow {
                 val sr = v.toScreenRect(r)
                 region.union(android.graphics.Rect(sr.left.toInt() - pad, sr.top.toInt() - pad, sr.right.toInt() + pad, sr.bottom.toInt() + pad))
             }
+            v.bracketLocalRects().forEach { r ->
+                val sr = v.toScreenRect(r)
+                region.union(android.graphics.Rect(sr.left.toInt() - pad, sr.top.toInt() - pad, sr.right.toInt() + pad, sr.bottom.toInt() + pad))
+            }
         }
         if (recallArmed && !recallRect.isEmpty) {
             region.union(android.graphics.Rect(recallRect.left.toInt(), recallRect.top.toInt(), recallRect.right.toInt(), recallRect.bottom.toInt()))
@@ -1104,17 +1135,52 @@ object SeedlingIslandWindow {
             val notch = com.coloros16.liquidglass.engine.SeedlingCutoutGeometry.notchGeometry(
                 left, top, left + islandW, cornerR, hole, 8f * d,
             )
-            if (glassT < 1f) {
-                val blackAlpha = (0xE6 * (1f - glassT)).toInt().coerceIn(0, 255)
-                val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = (blackAlpha shl 24) }
-                if (notch != null) {
-                    canvas.drawPath(foreheadPath(region, cornerR, notch), bgPaint)
-                } else {
-                    canvas.drawRoundRect(region, cornerR, cornerR, bgPaint)
+            // 卡底：玻璃关闭时保留不透明深底（否则展开卡整片透明，内容直接糊在壁纸上）
+            val glassOn = SeedlingTakeoverHook.takeoverGlassEnabled()
+            // 胶囊态纯黑 → 展开卡态跟随系统明暗；玻璃关闭时保持不透明（原生卡不透明）
+            val floorAlpha = if (glassOn) (0xE6 * (1f - glassT)) else 0xFF
+            val cardRgb = if (isNightTheme()) 0x1B1D24 else 0xFFFFFF
+            fun mixRgb(from: Int, to: Int, t: Float): Int {
+                fun ch(shift: Int): Int {
+                    val a = (from shr shift) and 0xFF
+                    val b = (to shr shift) and 0xFF
+                    return (a + (b - a) * t).toInt().coerceIn(0, 255)
+                }
+                return (ch(16) shl 16) or (ch(8) shl 8) or ch(0)
+            }
+            val floorRgb = mixRgb(0x000000, cardRgb, glassT)
+            val holeNow = hole
+            val cutPath = if (cardWrapCutout && holeNow != null && morphU > 0.05f) {
+                android.graphics.Path().apply {
+                    fillType = android.graphics.Path.FillType.EVEN_ODD
+                    addRoundRect(region, cornerR, cornerR, android.graphics.Path.Direction.CW)
+                    // 摄像头按圆孔挖（cutout 矩形内切圆），不做长条/方块
+                    val punchR = minOf(holeNow.width, holeNow.height) / 2f
+                    addCircle(
+                        (holeNow.left + holeNow.right) / 2f, holeNow.top + punchR,
+                        punchR,
+                        android.graphics.Path.Direction.CW,
+                    )
+                }
+            } else null
+            run {
+                val blackAlpha = floorAlpha.toInt().coerceIn(0, 255)
+                if (blackAlpha > 0) {
+                    val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = (blackAlpha shl 24) or floorRgb }
+                    when {
+                        cutPath != null -> canvas.drawPath(cutPath, bgPaint)
+                        notch != null -> canvas.drawPath(foreheadPath(region, cornerR, notch), bgPaint)
+                        else -> canvas.drawRoundRect(region, cornerR, cornerR, bgPaint)
+                    }
                 }
             }
-            if (SeedlingTakeoverHook.takeoverGlassEnabled() && glassT > 0f) {
+            if (glassOn && glassT > 0f) {
                 try {
+                    val clipSave = if (cutPath != null) {
+                        val cs = canvas.save()
+                        canvas.clipPath(cutPath)
+                        cs
+                    } else -1
                     val layerCount = canvas.saveLayerAlpha(region, (255 * glassT).toInt().coerceIn(0, 255))
                     BlurDrawHook.registerSeedlingCardRegion(
                         id, region, Rect(0, 0, w, h), this,
@@ -1126,6 +1192,7 @@ object SeedlingIslandWindow {
                         offsetX = left, offsetY = top,
                     )
                     canvas.restoreToCount(layerCount)
+                    if (clipSave >= 0) canvas.restoreToCount(clipSave)
                 } catch (t: Throwable) {
                     Lg.e(TAG, "seedling-island: glass draw failed", t)
                 }
@@ -1256,151 +1323,191 @@ object SeedlingIslandWindow {
             }
         }
 
+        /** 卡内排版（对齐原生）：左图标 + 主文案/副文案 + 右侧主操作按钮；媒体卡为封面+信息+进度+操作行。 */
+        /** 系统主题：决定卡底与文字色（原生同样跟随明暗）。 */
+        private fun isNightTheme(): Boolean =
+            (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+                android.content.res.Configuration.UI_MODE_NIGHT_YES
+
+        private fun cardInk(): Int = if (isNightTheme()) 0xFFFFFFFF.toInt() else 0xFF11151C.toInt()
+
         private fun drawCardContent(canvas: Canvas, act: com.coloros16.liquidglass.engine.SeedlingActivity, left: Float, top: Float, w: Float, h: Float, d: Float) {
-            run {
-                val exp = act.expanded
-                val titlePaint = Paint(contentPaint).apply { textSize = 16f * d }
-                val subPaint = Paint(contentPaint).apply { textSize = 12f * d; alpha = 180 }
-                // 大卡内容避让挖孔：左/右挖孔嵌入卡顶时，顶部行让到挖孔侧旁
-                val cardHole = hole
-                val holeKind = cardHole?.let { com.coloros16.liquidglass.engine.SeedlingCutoutGeometry.classify(it) }
-                val holeInCard = cardHole != null && cardHole.bottom > top && cardHole.top < top + 60f * d &&
-                    (holeKind == com.coloros16.liquidglass.engine.SeedlingCutoutGeometry.CutoutKind.LEFT ||
-                        holeKind == com.coloros16.liquidglass.engine.SeedlingCutoutGeometry.CutoutKind.RIGHT)
-                // 媒体大卡：左侧圆角封面（有封面时文字右移让位；左挖孔嵌顶时封面下移避让）
-                val cardCover = if (act.kind == com.coloros16.liquidglass.engine.SeedlingKind.MEDIA) SeedlingMediaSource.currentCover else null
-                var textCx = left + w / 2f
-                val coverTop = if (holeInCard && holeKind == com.coloros16.liquidglass.engine.SeedlingCutoutGeometry.CutoutKind.LEFT) {
-                    cardHole!!.bottom - top + 8f * d
-                } else 16f * d
-                if (cardCover != null && !cardCover.isRecycled) {
-                    val cs = 30f * d
-                    val cr = RectF(left + 20f * d, top + coverTop, left + 20f * d + cs * 2f, top + coverTop + cs * 2f)
-                    val coverSave = canvas.save()
+            val exp = act.expanded
+            val ink = cardInk()
+            val pad = 20f * d
+            val accent = 0xFF2E7DFF.toInt()
+            val now = android.os.SystemClock.elapsedRealtime()
+            var big = exp.title
+            var small = exp.subtitle
+            var ticking = false
+            if (act.kind == com.coloros16.liquidglass.engine.SeedlingKind.TIMER && exp.countdownEndAtElapsedMs > 0L) {
+                com.coloros16.liquidglass.engine.SeedlingTimerText
+                    .countdownLabel(exp.countdownEndAtElapsedMs, now, "")?.let { big = it.trim() }
+                small = exp.title
+                ticking = !com.coloros16.liquidglass.engine.SeedlingTimerText.countdownDone(exp.countdownEndAtElapsedMs, now)
+            } else if (act.kind == com.coloros16.liquidglass.engine.SeedlingKind.TIMER && act.startedAtElapsedMs > 0L) {
+                com.coloros16.liquidglass.engine.SeedlingTimerText
+                    .countUpLabel(act.startedAtElapsedMs, now, "")?.let { big = it.trim() }
+                small = exp.title
+                ticking = true
+            } else if (act.kind == com.coloros16.liquidglass.engine.SeedlingKind.RECORDING && act.startedAtElapsedMs > 0L) {
+                com.coloros16.liquidglass.engine.SeedlingTimerText
+                    .countUpLabel(act.startedAtElapsedMs, now, "")?.let { big = it.trim() }
+                small = exp.title
+                ticking = true
+            }
+            if (ticking && !stackSecondaryDrawing) postInvalidateOnAnimation()
+            val isMedia = act.kind == com.coloros16.liquidglass.engine.SeedlingKind.MEDIA
+            val cover = if (isMedia) SeedlingMediaSource.currentCover else null
+            val iconR = 20f * d
+            var textX = left + pad + iconR * 2f + 16f * d
+            val centerY = top + h / 2f
+            if (isMedia) {
+                val art = 36f * d
+                if (cover != null && !cover.isRecycled) {
+                    val artTop = top + (h - art * 2f) / 2f - 8f * d
+                    val cr = RectF(left + pad, artTop, left + pad + art * 2f, artTop + art * 2f)
+                    val save = canvas.save()
                     val clip = android.graphics.Path().apply { addRoundRect(cr, 8f * d, 8f * d, android.graphics.Path.Direction.CW) }
                     canvas.clipPath(clip)
-                    canvas.drawBitmap(cardCover, null, cr, null)
-                    canvas.restoreToCount(coverSave)
-                    textCx = left + 20f * d + cs * 2f + (w - 40f * d - cs * 2f) / 2f
-                }
-                // 右挖孔嵌顶：标题/副题左移让位
-                if (holeInCard && holeKind == com.coloros16.liquidglass.engine.SeedlingCutoutGeometry.CutoutKind.RIGHT && cardCover == null) {
-                    textCx = left + (cardHole!!.left - 8f * d - left) / 2f
-                }
-                canvas.drawText(exp.title, textCx, top + 30f * d, titlePaint)
-                if (exp.subtitle.isNotEmpty()) {
-                    canvas.drawText(exp.subtitle, textCx, top + 50f * d, subPaint)
-                }
-                // 歌词行（有词显词，无词回退歌名已在上）；播放期按播放位逐帧重选行（事件驱动帧回调）
-                if (SeedlingTakeoverHook.takeoverLyricsEnabled() && SeedlingLyricsBridge.hasLyrics()) {
-                    val line = SeedlingLyricsBridge.currentLine()
-                    val lyricText = line?.text ?: ""
-                    val lyricTr = line?.translation ?: ""
-                    if (lyricText.isNotEmpty()) {
-                        val lyricPaint = Paint(contentPaint).apply { textSize = 14f * d; alpha = 230 }
-                        canvas.drawText(lyricText, textCx, top + 74f * d, lyricPaint)
-                        if (lyricTr.isNotEmpty()) {
-                            val trPaint = Paint(contentPaint).apply { textSize = 11f * d; alpha = 150 }
-                            canvas.drawText(lyricTr, textCx, top + 92f * d, trPaint)
-                        }
-                    }
-                    if (exp.playing && !stackSecondaryDrawing) postInvalidateOnAnimation()
-                }
-                if (exp.durationMs > 0) {
-                    val now = android.os.SystemClock.elapsedRealtime()
-                    val pos = exp.positionMs + ((now - exp.positionAtElapsedMs) * exp.playbackSpeed).toLong()
-                    val frac = if (seekDragActive) seekDragFraction else (pos.toFloat() / exp.durationMs).coerceIn(0f, 1f)
-                    val barLeft = left + 24f * d
-                    val barRight = left + w - 24f * d
-                    val barY = top + h - 56f * d
-                    seekBarRect.set(barLeft, barY - 12f * d, barRight, barY + 12f * d)
-                    val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x40FFFFFF; strokeWidth = 3f * d; strokeCap = Paint.Cap.ROUND }
-                    val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xE0FFFFFF.toInt(); strokeWidth = 3f * d; strokeCap = Paint.Cap.ROUND }
-                    canvas.drawLine(barLeft, barY, barRight, barY, trackPaint)
-                    canvas.drawLine(barLeft, barY, barLeft + (barRight - barLeft) * frac, barY, fillPaint)
-                    val knobPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFFFFFF.toInt() }
-                    canvas.drawCircle(barLeft + (barRight - barLeft) * frac, barY, if (seekDragActive) 6f * d else 4f * d, knobPaint)
-                    if (exp.playing && !seekDragActive && !stackSecondaryDrawing) postInvalidateOnAnimation()
+                    canvas.drawBitmap(cover, null, cr, null)
+                    canvas.restoreToCount(save)
                 } else {
-                    seekBarRect.setEmpty()
+                    drawSymbol(canvas, act.compact.leading, left + pad + iconR, top + h * 0.34f, iconR, ink)
                 }
-                // S3 分段进度（LiveUpdate：segments 多色 + points 里程碑点 + tracker）
-                exp.progress?.let { pr ->
-                    val barLeft = left + 24f * d
-                    val barRight = left + w - 24f * d
-                    val barY = top + h - 56f * d
-                    val barW = barRight - barLeft
-                    val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x30FFFFFF; strokeWidth = 4f * d; strokeCap = Paint.Cap.ROUND }
-                    canvas.drawLine(barLeft, barY, barRight, barY, trackPaint)
-                    var acc = 0f
-                    pr.segments.forEach { seg ->
-                        val segStart = barLeft + barW * acc
-                        val segEnd = barLeft + barW * (acc + seg.fraction).coerceAtMost(1f)
-                        val done = (pr.fraction - acc).coerceIn(0f, seg.fraction) / seg.fraction.coerceAtLeast(0.001f)
-                        val sp = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = seg.colorArgb; strokeWidth = 4f * d; strokeCap = Paint.Cap.ROUND }
-                        canvas.drawLine(segStart, barY, segStart + (segEnd - segStart) * done, barY, sp)
-                        acc += seg.fraction
-                    }
-                    val pointPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFFFFFF.toInt() }
-                    pr.points.forEach { pt ->
-                        val px = barLeft + barW * pt.coerceIn(0f, 1f)
-                        val reached = pr.fraction >= pt
-                        pointPaint.alpha = if (reached) 255 else 100
-                        canvas.drawCircle(px, barY, 3f * d, pointPaint)
-                    }
-                    pr.trackerSymbol?.let {
-                        val tx = barLeft + barW * pr.trackerPosition()
-                        drawSymbol(canvas, com.coloros16.liquidglass.engine.SeedlingElement.Symbol(it), tx, barY - 10f * d, 6f * d)
-                    }
+                textX = left + pad + art * 2f + 16f * d
+            } else {
+                val iconColor = when (act.kind) {
+                    com.coloros16.liquidglass.engine.SeedlingKind.TIMER,
+                    com.coloros16.liquidglass.engine.SeedlingKind.RECORDING -> accent
+                    else -> ink
                 }
-                // 通知简单进度（无分段时，progressFraction 单色条）
-                if (exp.progress == null) {
-                    exp.progressFraction?.let { frac ->
-                        val barLeft = left + 24f * d
-                        val barRight = left + w - 24f * d
-                        val barY = top + h - 56f * d
-                        val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x30FFFFFF; strokeWidth = 4f * d; strokeCap = Paint.Cap.ROUND }
-                        val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xE0FFFFFF.toInt(); strokeWidth = 4f * d; strokeCap = Paint.Cap.ROUND }
-                        canvas.drawLine(barLeft, barY, barRight, barY, trackPaint)
-                        canvas.drawLine(barLeft, barY, barLeft + (barRight - barLeft) * frac.coerceIn(0f, 1f), barY, fillPaint)
-                    }
-                }
-                // S7 里程碑：玻璃高光扫过（一次性 1.2s 动画，事件驱动）
-                if (exp.milestone) {
-                    val elapsed = android.os.SystemClock.uptimeMillis() - milestoneShownAtMs
-                    if (elapsed in 0..1200) {
-                        val t = elapsed / 1200f
-                        val sweepX = left + w * t
-                        val sweepPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                            shader = android.graphics.LinearGradient(
-                                sweepX - 30f * d, top, sweepX + 30f * d, top,
-                                intArrayOf(0x00FFFFFF, 0x60FFFFFF, 0x00FFFFFF), null, android.graphics.Shader.TileMode.CLAMP,
-                            )
-                        }
-                        val sweepR = Math.min(w, h) / 2f + (24f * d - Math.min(w, h) / 2f) * morphU
-                        canvas.drawRoundRect(RectF(left, top, left + w, top + h), sweepR, sweepR, sweepPaint)
-                        if (!stackSecondaryDrawing) postInvalidateDelayed(16L)
-                    }
-                }
-                // 动作按钮行（点击热区在 onTouchEvent 判定）
-                actionRects.clear()
-                val n = exp.actions.size
-                if (n > 0) {
-                    val btnR = 16f * d
-                    val gap = w / (n + 1)
-                    val cy = top + h - 26f * d
-                    exp.actions.forEachIndexed { i, a ->
-                        val cx = left + gap * (i + 1)
-                        actionRects += ActionHit(android.graphics.RectF(cx - btnR, cy - btnR, cx + btnR, cy + btnR), a.id)
-                        val bp = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = if (a.enabled) 0x55FFFFFF else 0x22FFFFFF }
-                        canvas.drawCircle(cx, cy, btnR, bp)
-                        drawSymbol(canvas, com.coloros16.liquidglass.engine.SeedlingElement.Symbol(a.symbol), cx, cy, 8f * d)
-                    }
-                    logThrottled("op-card-actions-${act.id}-$stackSecondaryDrawing", "seedling-island: card actions id=${act.id} n=$n cy=$cy cx0=${left + gap} h=$h top=$top secondary=$stackSecondaryDrawing")
+                drawSymbol(canvas, act.compact.leading, left + pad + iconR, centerY, iconR, iconColor)
+            }
+            val bigPaint = Paint(contentPaint).apply {
+                color = ink
+                textSize = if (isMedia) 16f * d else 30f * d
+                isFakeBoldText = !isMedia
+                textAlign = Paint.Align.LEFT
+                if (act.kind == com.coloros16.liquidglass.engine.SeedlingKind.TIMER) {
+                    typeface = android.graphics.Typeface.MONOSPACE
+                    fontFeatureSettings = "tnum"
                 }
             }
+            val smallPaint = Paint(contentPaint).apply { color = ink; alpha = 150; textSize = 12f * d; textAlign = Paint.Align.LEFT }
+            val bigBase = if (isMedia) top + 34f * d else centerY + 4f * d
+            val smallBase = if (isMedia) top + 52f * d else centerY + 26f * d
+            val textRight = left + w - pad - (if (isMedia) 0f else 70f * d)
+            fun ellipsize(s: String, paint: Paint, maxW: Float): String {
+                if (paint.measureText(s) <= maxW) return s
+                var t = s
+                while (t.length > 2 && paint.measureText(t + "…") > maxW) t = t.dropLast(1)
+                return t + "…"
+            }
+            val maxTextW = (textRight - textX).coerceAtLeast(24f * d)
+            canvas.drawText(ellipsize(big, bigPaint, maxTextW), textX, bigBase, bigPaint)
+            if (small.isNotEmpty()) {
+                canvas.drawText(ellipsize(small, smallPaint, maxTextW), textX, smallBase, smallPaint)
+            }
+            if (SeedlingTakeoverHook.takeoverLyricsEnabled() && SeedlingLyricsBridge.hasLyrics()) {
+                val line = SeedlingLyricsBridge.currentLine()
+                val lyric = line?.text ?: ""
+                if (lyric.isNotEmpty() && !isMedia) {
+                    val lp = Paint(contentPaint).apply { color = ink; alpha = 120; textSize = 11f * d; textAlign = Paint.Align.LEFT }
+                    canvas.drawText(ellipsize(lyric, lp, maxTextW), textX, smallBase + 18f * d, lp)
+                }
+                if (exp.playing && !stackSecondaryDrawing) postInvalidateOnAnimation()
+            }
+            val barLeft = left + pad
+            val barRight = left + w - pad
+            val barY = top + h - 34f * d
+            if (exp.durationMs > 0) {
+                val pos = exp.positionMs + ((now - exp.positionAtElapsedMs) * exp.playbackSpeed).toLong()
+                val frac = if (seekDragActive) seekDragFraction else (pos.toFloat() / exp.durationMs).coerceIn(0f, 1f)
+                seekBarRect.set(barLeft, barY - 12f * d, barRight, barY + 12f * d)
+                val track = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ink; alpha = 38; strokeWidth = 4f * d; strokeCap = Paint.Cap.ROUND }
+                val fillP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ink; alpha = 230; strokeWidth = 4f * d; strokeCap = Paint.Cap.ROUND }
+                canvas.drawLine(barLeft, barY, barRight, barY, track)
+                canvas.drawLine(barLeft, barY, barLeft + (barRight - barLeft) * frac, barY, fillP)
+                val knob = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ink }
+                canvas.drawCircle(barLeft + (barRight - barLeft) * frac, barY, if (seekDragActive) 7f * d else 5f * d, knob)
+                if (exp.playing && !seekDragActive && !stackSecondaryDrawing) postInvalidateOnAnimation()
+            } else {
+                seekBarRect.setEmpty()
+            }
+            exp.progress?.let { pr ->
+                val barW = barRight - barLeft
+                canvas.drawLine(barLeft, barY, barRight, barY,
+                    Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ink; alpha = 30; strokeWidth = 5f * d; strokeCap = Paint.Cap.ROUND })
+                var acc = 0f
+                pr.segments.forEach { seg ->
+                    val segStart = barLeft + barW * acc
+                    val segEnd = barLeft + barW * (acc + seg.fraction).coerceAtMost(1f)
+                    val done = (pr.fraction - acc).coerceIn(0f, seg.fraction) / seg.fraction.coerceAtLeast(0.001f)
+                    if (done > 0f) {
+                        canvas.drawLine(segStart, barY, segStart + (segEnd - segStart) * done, barY,
+                            Paint(Paint.ANTI_ALIAS_FLAG).apply { color = seg.colorArgb; strokeWidth = 5f * d; strokeCap = Paint.Cap.ROUND })
+                    }
+                    acc += seg.fraction
+                }
+            }
+            if (exp.progress == null) {
+                exp.progressFraction?.let { frac ->
+                    canvas.drawLine(barLeft, barY, barRight, barY,
+                        Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ink; alpha = 30; strokeWidth = 5f * d; strokeCap = Paint.Cap.ROUND })
+                    canvas.drawLine(barLeft, barY, barLeft + (barRight - barLeft) * frac.coerceIn(0f, 1f), barY,
+                        Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ink; alpha = 230; strokeWidth = 5f * d; strokeCap = Paint.Cap.ROUND })
+                }
+            }
+            if (exp.milestone) {
+                val elapsed = android.os.SystemClock.uptimeMillis() - milestoneShownAtMs
+                if (elapsed in 0..1200) {
+                    val t = elapsed / 1200f
+                    val sweepX = left + w * t
+                    val sweepPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        shader = android.graphics.LinearGradient(
+                            sweepX - 30f * d, top, sweepX + 30f * d, top,
+                            intArrayOf(0x00FFFFFF, 0x60FFFFFF, 0x00FFFFFF), null, android.graphics.Shader.TileMode.CLAMP,
+                        )
+                    }
+                    canvas.drawRoundRect(android.graphics.RectF(left, top, left + w, top + h), 24f * d, 24f * d, sweepPaint)
+                    if (!stackSecondaryDrawing) postInvalidateDelayed(16L)
+                }
+            }
+            actionRects.clear()
+            val actions = exp.actions
+            if (actions.isEmpty()) return
+            if (!isMedia) {
+                val primary = actions.firstOrNull { it.enabled } ?: actions.first()
+                val r = 24f * d
+                val cx = left + w - pad - r
+                val cy = centerY
+                actionRects += ActionHit(android.graphics.RectF(cx - r, cy - r, cx + r, cy + r), primary.id)
+                val fill = if (primary.enabled) accent else (ink and 0x00FFFFFF) or (0x33 shl 24)
+                canvas.drawCircle(cx, cy, r, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = fill })
+                drawSymbol(canvas, com.coloros16.liquidglass.engine.SeedlingElement.Symbol(primary.symbol), cx, cy, 10f * d, 0xFFFFFFFF.toInt())
+            } else {
+                val r = 20f * d
+                val gap = w / (actions.size + 1)
+                val cy = top + h - 22f * d
+                actions.forEachIndexed { i, a ->
+                    val cx = left + gap * (i + 1)
+                    actionRects += ActionHit(android.graphics.RectF(cx - r, cy - r, cx + r, cy + r), a.id)
+                    val primary = a.symbol == "PLAY" || a.symbol == "PAUSE"
+                    val fill = when {
+                        !a.enabled -> (ink and 0x00FFFFFF) or (0x1A shl 24)
+                        primary -> accent
+                        else -> (ink and 0x00FFFFFF) or (0x24 shl 24)
+                    }
+                    canvas.drawCircle(cx, cy, r, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = fill })
+                    drawSymbol(
+                        canvas, com.coloros16.liquidglass.engine.SeedlingElement.Symbol(a.symbol), cx, cy, 9f * d,
+                        if (primary) 0xFFFFFFFF.toInt() else ink,
+                    )
+                }
+            }
+            logThrottled("op-card-actions-${act.id}-$stackSecondaryDrawing", "seedling-island: card actions id=${act.id} n=${actions.size} cy=${top + h - 22f * d} cx0=${left + w / (actions.size + 1)} h=$h top=$top secondary=$stackSecondaryDrawing")
         }
-
         private val actionRects = mutableListOf<ActionHit>()
         private val cardStackHits = mutableListOf<ActionHit>()
         private val seekBarRect = android.graphics.RectF()
@@ -1416,7 +1523,7 @@ object SeedlingIslandWindow {
 
         /** OP 竖排自适应卡高（engine opCardHeight 同源，绘制/热区/主卡背景共用）。 */
         fun opFitCardHeight(): Float = com.coloros16.liquidglass.engine.SeedlingCardModePolicy.opCardHeight(
-            stackCandidates.size.coerceAtLeast(1), islandH, 12f * resources.displayMetrics.density,
+            stackCandidates.size.coerceIn(1, 2), islandH, 8f * resources.displayMetrics.density,
             opAvailHeight(), 80f * resources.displayMetrics.density,
         )
 
@@ -1450,9 +1557,11 @@ object SeedlingIslandWindow {
             val candidates = stackCandidates
             cardStackHits.clear()
             if (candidates.size <= 1) return
-            val gap = 12f * d
-            val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xE0202024.toInt() }
-            candidates.drop(1).forEachIndexed { idx, a ->
+            val gap = 8f * d
+            val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = (0xFF shl 24) or (if (isNightTheme()) 0x1B1D24 else 0xFFFFFF)
+            }
+            candidates.drop(1).take(1).forEachIndexed { idx, a ->
                 val ct = com.coloros16.liquidglass.engine.SeedlingCardModePolicy.stackTop(top, idx + 1, h, gap)
                 val r = RectF(left, ct, left + w, ct + h)
                 // 热区用 body 局部坐标（与 toBodyLocal 触摸判定同源；绘制 r 用屏幕绝对）
@@ -1471,6 +1580,28 @@ object SeedlingIslandWindow {
                 actionRects.addAll(savedActions)
                 seekBarRect.set(savedSeek)
             }
+            if (candidates.size > 2) drawOpBrackets(canvas, left, top, w, h)
+        }
+
+        /** OP 更多活动：卡两侧各一条「括号」，点左=上一项、点右=下一项。 */
+        private fun drawOpBrackets(canvas: Canvas, left: Float, top: Float, w: Float, h: Float) {
+            val d = resources.displayMetrics.density
+            bracketRects.clear()
+            val inset = 2f * d
+            val rx = 6f * d
+            val topPad = 10f * d
+            val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.STROKE
+                strokeWidth = 4f * d
+                strokeCap = Paint.Cap.ROUND
+                color = if (isNightTheme()) 0xE6FFFFFF.toInt() else 0x99000000.toInt()
+            }
+            val lr = RectF(left - inset - rx * 2f, top + topPad, left - inset, top + h - topPad)
+            canvas.drawArc(lr, 90f, 180f, false, stroke)
+            bracketRects += ActionHit(RectF(lr.left - rx, lr.top, lr.right + rx, lr.bottom), "op_prev")
+            val rr = RectF(left + w + inset, top + topPad, left + w + inset + rx * 2f, top + h - topPad)
+            canvas.drawArc(rr, 270f, 180f, false, stroke)
+            bracketRects += ActionHit(RectF(rr.left - rx, rr.top, rr.right + rx, rr.bottom), "op_next")
         }
 
         /** S4：岛周描边——背景亮（brightness>33）显细亮边，暗背景隐；月牙装饰呼吸（mini 态）。 */
@@ -1511,8 +1642,14 @@ object SeedlingIslandWindow {
             }
         }
 
+        /** 展开卡包摄像头：绘制时把摄像头区域挖空。 */
+        var cardWrapCutout = false
+
         /** 副岛热区（点按提升为主岛）。 */
         private val satelliteRects = mutableListOf<ActionHit>()
+        private val bracketRects = mutableListOf<ActionHit>()
+
+        fun bracketLocalRects(): List<RectF> = bracketRects.map { it.rect }
 
         fun satelliteBounds(): List<android.graphics.RectF> = satelliteRects.map { it.rect }
 
@@ -1575,9 +1712,16 @@ object SeedlingIslandWindow {
             }
         }
 
-        private fun drawSymbol(canvas: Canvas, el: com.coloros16.liquidglass.engine.SeedlingElement?, cx: Float, cy: Float, r: Float) {
+        private fun drawSymbol(
+            canvas: Canvas,
+            el: com.coloros16.liquidglass.engine.SeedlingElement?,
+            cx: Float,
+            cy: Float,
+            r: Float,
+            color: Int = 0xFFFFFFFF.toInt(),
+        ) {
             if (el !is com.coloros16.liquidglass.engine.SeedlingElement.Symbol) return
-            val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFFFFFF.toInt(); style = Paint.Style.FILL }
+            val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color; style = Paint.Style.FILL }
             when (el.name) {
                 "PLAY" -> {
                     val path = android.graphics.Path()
@@ -1736,8 +1880,10 @@ object SeedlingIslandWindow {
         private val longPressRunnable = Runnable {
             longPressFired = true
             performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
-            logThrottled("island-longpress", "seedling-island: long-press temp expand")
-            if (morphU < 0.5f) {
+            val act = activity
+            val opened = act != null && openSourceForActivity(act)
+            logThrottled("island-longpress", "seedling-island: long-press open source id=${act?.id} opened=$opened")
+            if (!opened && morphU < 0.5f) {
                 autoCollapseHoldTemp = true
                 toggleMorph()
             }
@@ -1896,6 +2042,11 @@ object SeedlingIslandWindow {
                         islandView?.requestLayout()
                         return true
                     }
+                    val bracketHit = bracketRects.firstOrNull { it.rect.contains(upLx, upLy) }
+                    if (bracketHit != null && morphU > 0.5f) {
+                        cycleOpCard(if (bracketHit.id == "op_next") 1 else -1)
+                        return true
+                    }
                     val satHit = satelliteRects.firstOrNull { it.rect.contains(upLx, upLy) }
                     if (satHit != null && morphU < 0.3f) {
                         logThrottled("island-satellite", "seedling-island: satellite promoted id=${satHit.id}")
@@ -1913,22 +2064,8 @@ object SeedlingIslandWindow {
                     if (kotlin.math.abs(dx) <= slop && kotlin.math.abs(dy) <= slop) {
                         logThrottled("island-touch", "seedling-island: island tapped at (${event.x.toInt()},${event.y.toInt()})")
                         performClick()
-                        val act = activity
-                        val tap = if (act != null && morphU < 0.5f) {
-                            com.coloros16.liquidglass.engine.SeedlingOpenSourcePolicy.tapAction(
-                                act.kind, act.expandable, BlurDrawHook.isKeyguardLockedForIsland(),
-                            )
-                        } else {
-                            com.coloros16.liquidglass.engine.SeedlingOpenSourcePolicy.TapAction.EXPAND
-                        }
-                        if (tap == com.coloros16.liquidglass.engine.SeedlingOpenSourcePolicy.TapAction.OPEN_SOURCE) {
-                            // 直开失败：可展开活动回落展开；不可展开活动（充电/耳机岛）不展开，仅日志
-                            if (!openSourceForActivity(act) && act != null &&
-                                com.coloros16.liquidglass.engine.SeedlingOpenSourcePolicy.fallbackExpandOnOpenFail(act.expandable)
-                            ) toggleMorph()
-                        } else {
-                            toggleMorph()
-                        }
+                        // 单击=展开/收起；打开应用由长按负责
+                        toggleMorph()
                     }
                     return true
                 }

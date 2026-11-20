@@ -70,6 +70,12 @@ class TransitionBridge(
         ) {
             return false
         }
+        // 系统已逐帧喂过（见过推进）就别从 0 重播：起点复位会造成画面回跳，
+        // 且下一次系统写入立刻覆盖，等于白起一次长时长时间轴。
+        // 用「见过推进」而不是「t 在开区间」：单次写入不算喂，仍要自播（无进度边靠它）。
+        if (sameEdge && state.source == ClockSource.SYSTEM_PUMP && clock.pumpSawMovement()) {
+            return false
+        }
         if (sameEdge && !state.playing && state.t >= 1f &&
             state.source != ClockSource.SYSTEM_PUMP
         ) {

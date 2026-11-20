@@ -4,7 +4,9 @@ import com.coloros16.liquidglass.engine.SceneState
 import com.coloros16.liquidglass.engine.SceneStateMapper
 import com.coloros16.liquidglass.engine.TransitionEdge
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** 宿主转场状态名映射契约：GONE 作为**终点**归 HOME；作为**起点**歧义，需真实态兜底。 */
@@ -103,5 +105,19 @@ class SceneStateMapperContractTest {
     fun sameStateHasNoEdge() {
         assertNull(SceneStateMapper.resolveEdge("GONE", "GONE"))
         assertNull(SceneStateMapper.resolveEdge("DOZING", "DOZING"))
+    }
+
+    @Test
+    fun lockToBouncerIsSameSceneNotUnknownEdge() {
+        assertTrue("锁屏→密码盘是同态子步骤", SceneStateMapper.isSameScene("LOCKSCREEN", "PRIMARY_BOUNCER"))
+        assertNull("同态没有可播的边", SceneStateMapper.resolveEdge("LOCKSCREEN", "PRIMARY_BOUNCER"))
+        assertTrue("密码盘→桌面仍是真正的边", SceneStateMapper.isSameScene("PRIMARY_BOUNCER", "GONE").not())
+    }
+
+    @Test
+    fun unrecognizedNamesAreNotSameScene() {
+        assertFalse("名字认不出必须仍算未知边", SceneStateMapper.isSameScene("OFF", "LOCKSCREEN"))
+        assertFalse("起点为空不算同态", SceneStateMapper.isSameScene(null, "LOCKSCREEN"))
+        assertFalse("终点为空不算同态", SceneStateMapper.isSameScene("LOCKSCREEN", null))
     }
 }

@@ -19,6 +19,7 @@ import com.coloros16.liquidglass.engine.SkyBranchPolicy
 import com.coloros16.liquidglass.engine.SystemSceneMotion
 import com.coloros16.liquidglass.engine.TransitionEdge
 import com.coloros16.liquidglass.engine.TransitionParams
+import com.coloros16.liquidglass.engine.WorldDrawPolicy
 import com.coloros16.liquidglass.engine.WorldMaskPolicy
 import com.coloros16.liquidglass.log.Lg
 import com.coloros16.liquidglass.ui.aod.AodSceneSpec
@@ -84,6 +85,9 @@ class AodTransitionLayer(context: Context) : View(context) {
     }
 
     /** 由挂载方逐帧写入；数值全部来自引擎，本层不自算。 */
+    /** 本层挂在哪一面（息屏根=AOD，窗口根=LOCK）；静止期是否画世界层由它决定。 */
+    var surface: SceneState = SceneState.AOD
+
     fun bind(source: TransitionParams?, sceneLayers: SystemSceneMotion.Layers?, playing: Boolean) {
         params = source
         if (sceneLayers != null) {
@@ -181,7 +185,17 @@ class AodTransitionLayer(context: Context) : View(context) {
         val w = width.toFloat()
         val h = height.toFloat()
         if (w <= 0f || h <= 0f) return
-        val world = drawWorld(canvas, w, h)
+        val allowWorld = WorldDrawPolicy.allowWorld(active, surface)
+        val world = if (allowWorld) {
+            drawWorld(canvas, w, h)
+        } else {
+            // 门关也要把状态写回去，否则 worldDrawn 停在 true，日志会说谎（关掉后零条、再开也不打）
+            if (worldDrawn) {
+                worldDrawn = false
+                Lg.i(TAG, "world gated off active=$active surface=$surface")
+            }
+            false
+        }
         if (!effectDrawnInWorld) drawEffect(canvas, w, h)
         effectDrawnInWorld = false
         val p = params

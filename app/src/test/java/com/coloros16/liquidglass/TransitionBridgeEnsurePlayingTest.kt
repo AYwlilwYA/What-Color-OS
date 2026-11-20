@@ -108,4 +108,32 @@ class TransitionBridgeEnsurePlayingTest {
         assertEquals(TransitionEdge.LOCK_TO_HOME, p.edge)
         assertEquals(0.5f, p.t, 0.001f)
     }
+
+    @Test
+    fun systemPumpMidwayBlocksRestartOnNonSystemDrivenEdge() {
+        fakeNow = 1000L
+        val b = bridge()
+        b.onSystemProgress(TransitionEdge.LOCK_TO_HOME, 0.0f)
+        b.onSystemProgress(TransitionEdge.LOCK_TO_HOME, 0.54f)
+        assertFalse("系统已喂到 0.54，不得从 0 重播", b.ensurePlaying(TransitionEdge.LOCK_TO_HOME, 3840L))
+        assertEquals(0.54f, b.clock.state().t, 0.0001f)
+        assertEquals(ClockSource.SYSTEM_PUMP, b.clock.state().source)
+    }
+
+    @Test
+    fun systemPumpEndpointStillAllowsSelfTimed() {
+        fakeNow = 1000L
+        val b = bridge()
+        b.onSystemProgress(TransitionEdge.LOCK_TO_HOME, 1.0f)
+        assertTrue("端点直跳（0→1）仍要自播，保住无进度边的动画", b.ensurePlaying(TransitionEdge.LOCK_TO_HOME, 800L))
+        assertEquals(0f, b.clock.state().t, 0.0001f)
+    }
+
+    @Test
+    fun systemPumpAtZeroStillAllowsSelfTimed() {
+        fakeNow = 1000L
+        val b = bridge()
+        b.onSystemProgress(TransitionEdge.LOCK_TO_HOME, 0.0f)
+        assertTrue("只宣告 t=0 还没推进，自播必须照起", b.ensurePlaying(TransitionEdge.LOCK_TO_HOME, 800L))
+    }
 }

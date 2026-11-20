@@ -153,7 +153,7 @@ class WorldMaskPolicyContractTest {
         val b = body(layer(), "onDraw")
         assertTrue(
             "必须传本帧世界层返回值，不是「该样式有世界层」",
-            b.contains("val world = drawWorld(canvas, w, h)"),
+            b.contains("val world =") && b.contains("drawWorld(canvas, w, h)"),
         )
         assertTrue(b.contains("world, p.maskEnabled, MaskGeometry.drawable(p.maskRadius), p.maskByFrame"))
     }

@@ -90,13 +90,14 @@ object ClockAnchorApply {
         val rot = anchor.rotationDeg
         val key = keyOf(view, state)
         val prev = applied[key]
+        // 去重必须连「视图当前实际属性」一起比：系统转场会改写 translation/scale，
+        // 只比我们上次写入的目标值会永久跳过重写，锚点就此丢失。
         if (prev != null &&
-            kotlin.math.abs(prev[0] - dx) < EPS &&
-            kotlin.math.abs(prev[1] - dy) < EPS &&
-            kotlin.math.abs(prev[2] - sx) < EPS &&
-            kotlin.math.abs(prev[3] - anchor.alpha) < EPS &&
-            kotlin.math.abs(prev[4] - sy) < EPS &&
-            kotlin.math.abs(prev[5] - rot) < EPS
+            near(prev[0], dx) && near(prev[1], dy) && near(prev[2], sx) &&
+            near(prev[3], anchor.alpha) && near(prev[4], sy) && near(prev[5], rot) &&
+            near(view.translationX, dx) && near(view.translationY, dy) &&
+            near(view.scaleX, sx) && near(view.scaleY, sy) &&
+            near(view.alpha, anchor.alpha) && near(view.rotation, rot)
         ) return
 
         origins.record(
@@ -163,6 +164,8 @@ object ClockAnchorApply {
             ),
         )
     }
+
+    private fun near(a: Float, b: Float): Boolean = kotlin.math.abs(a - b) < EPS
 
     /** 还原：按记账回写原值（含 pivot），只撤本件写过的视图与态。 */
     fun restore(view: View?, state: SceneState) {

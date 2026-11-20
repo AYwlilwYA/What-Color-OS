@@ -39,6 +39,18 @@ object SceneStateMapper {
     }
 
     /**
+     * 两端映射到同一态 ⇒ 这是状态内的子步骤（如锁屏→密码盘），不是未识别边。
+     *
+     * 与 [resolveEdge] 返回 null 的另一种情形（名字认不出）必须分开：前者是正常流程，
+     * 后者才是需要校准的未知边；混在一起会让人以为宿主换了枚举。
+     */
+    fun isSameScene(fromName: String?, toName: String?): Boolean {
+        val from = startingStateOf(fromName) ?: return false
+        val to = fromTransitionStateName(toName) ?: return false
+        return from == to
+    }
+
+    /**
      * 起点名不具判定力时用上一次确定的真实态兜底。
      *
      * 作为**终点**时 `GONE` 仍是桌面（锁屏界面已消失）；只有作为起点才歧义。

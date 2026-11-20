@@ -162,7 +162,6 @@ class AodEditView @JvmOverloads constructor(
     }
 
     private val clockBounds = RectF()
-    private var clockTextSize = 0f
     private val dateColor = EditChromePainter.DATE_COLOR
 
     private val holdClock = Runnable {
@@ -240,7 +239,7 @@ class AodEditView @JvmOverloads constructor(
 
     private fun drawClock(canvas: Canvas, s: LockLayoutSettings, w: Float, h: Float) {
         val center = clockCenterPx(s, w, h)
-        clockTextSize = ClockGlyphPainter.draw(
+        ClockGlyphPainter.draw(
             canvas, center.first, center.second,
             ClockLayout.fontPx(w, h, s.clockScale),
             timeText(), dateText(), s.clock.colorArgb, dateColor,

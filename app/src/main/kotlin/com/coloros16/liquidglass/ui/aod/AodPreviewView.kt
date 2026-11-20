@@ -1099,6 +1099,7 @@ class AodPreviewView @JvmOverloads constructor(
             SceneTimeline.uOf(edge, t, scene, SCENE_PLAY_CURVE)
         }
         sampleLayers()
+        logPreviewFrame()
         aodLayerAlpha = layers.aodAlpha
         contentGate = 1f
         windowClipped = false
@@ -1634,7 +1635,7 @@ class AodPreviewView @JvmOverloads constructor(
         revealCacheKey = key
         logReveal(
             "build target=$target alpha=${"%.3f".format(revealAlpha)} size=${rw}x$rh " +
-                "backdrop=${backdrop != null} icons=${homeIcons.size}",
+                "lockFrozen=${target == SceneState.LOCK} backdrop=${backdrop != null} icons=${homeIcons.size}",
             key,
         )
         return bitmap
@@ -2327,6 +2328,30 @@ class AodPreviewView @JvmOverloads constructor(
 
     private var lockStaggerLogKey: String? = null
     private var lockStaggerLogAt = 0L
+    private var previewFrameLogAt = 0L
+
+    /**
+     * 预览侧逐帧通道：与 hook 的 `stage-frame-fast` 对应，供不需要 SystemUI 的 E2 取证。
+     *
+     * 边内 120ms、静止 800ms；静止态不打（只在播放/拖动时输出）。
+     * `p` 是当前边的局部进度（拖动时取 `localT`），层量全部取自本帧 `layers`。
+     */
+    private fun logPreviewFrame() {
+        val effEdge = if (scrubP >= 0f) SceneTimeline.edgeAt(scrubP) else edge
+        if (effEdge == null) return
+        val now = SystemClock.uptimeMillis()
+        val inEdge = scrubP < 0f && t < 1f
+        if (now - previewFrameLogAt < (if (inEdge) PREVIEW_FRAME_IN_EDGE_MS else PREVIEW_FRAME_IDLE_MS)) return
+        previewFrameLogAt = now
+        val p = if (scrubP >= 0f) SceneTimeline.localT(scrubP) else t
+        Lg.i(
+            TAG,
+            "preview-frame: edge=${effEdge.name} mode=${if (scrubP >= 0f) "scrub" else "play"}" +
+                " p=${"%.3f".format(p)} lk=${"%.3f".format(layers.lockAlpha)}" +
+                " aod=${"%.3f".format(layers.aodAlpha)} home=${"%.3f".format(layers.homeAlpha)}" +
+                " dim=${"%.3f".format(layers.dim)} wp=${"%.3f".format(wallpaperZoom())}",
+        )
+    }
 
     /** 逐元素错峰诊断：两元素可见度与像素位移，节流按量化档位。 */
     private fun logLockStagger(weather: Pair<Float, Float>, card: Pair<Float, Float>) {
@@ -3026,6 +3051,10 @@ class AodPreviewView @JvmOverloads constructor(
     private companion object {
         const val TAG = "AodPreview"
         const val PREVIEW_ASPECT = com.coloros16.liquidglass.engine.SCREEN_ASPECT
+
+        /** 预览逐帧通道的节流：边内要抓中间帧，静止只要端点。 */
+        const val PREVIEW_FRAME_IN_EDGE_MS = 120L
+        const val PREVIEW_FRAME_IDLE_MS = 800L
 
         /** 锁屏浮层错峰槽位：天气行 0、通知卡 1。 */
         const val LOCK_WEATHER_INDEX = 0
